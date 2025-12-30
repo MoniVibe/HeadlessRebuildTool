@@ -17,6 +17,7 @@ Scope: logic-only changes (no `Assets/` or `.meta` edits). Update status as goal
 - Task-first budget: max 6 runs per cycle; at least 2 runs must be tied to the chosen headlesstask. Only rerun Tier 0 if a build/scenario/env changed or a failure needs the two-run rule.
 - If a task is blocked (Assets/.meta) for 2 consecutive cycles, switch tasks and log the blocker.
 - If a task needs `Assets/` or `.meta` changes, log the requirement here and switch to another task.
+- If an asset fix is required, create an ASSET_HANDOFF entry with paths, desired change, repro command, and why it blocks the bank.
 
 ## Cycle Log (append-only)
 Append one entry per cycle below. Capture baseline/threshold even if the task is still pending.

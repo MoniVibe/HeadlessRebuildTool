@@ -10,6 +10,10 @@ Cross-OS caveats:
 - Headless rebuilds in WSL should use Windows Unity interop (set `FORCE_WINDOWS_UNITY=1`); do not rely on Linux Unity licensing.
 - If the rebuild tool can’t find Windows Unity, fail fast and fix `UNITY_WIN`/`TRI_WIN` instead of falling back to Linux Unity.
 - Align Unity versions before rebuilds: read `ProjectSettings/ProjectVersion.txt` in the target repo and set `UNITY_WIN` to that exact version; mismatches mean stale builds.
+Assets blocker protocol:
+- If a bank failure requires `Assets/` or `.meta` edits and a Windows/presentation context is available, switch to the Windows clone and apply the minimal asset fix there.
+- If running in WSL without a Windows/presentation context, do not edit `Assets/` or `.meta`. Create an ASSET_HANDOFF entry in `headlesstasks.md` or the cycle log with: paths, desired change, repro command, and why it blocks the bank.
+- After any asset fix, rebuild scratch, rerun the impacted bank tier(s), and update the runbook/prompt if expectations or toggles changed.
 Runbook hygiene:
 - If a bank failure is fixed or proof/env toggles change, update `headless_bank_runbook.md` and `headlessprompt.md` in the same cycle.
 - Remove or annotate known-issue notes once resolved, and record the resolution in `headlesstasks.md` or the cycle log.

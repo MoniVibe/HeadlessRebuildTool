@@ -15,6 +15,10 @@ Compile-error remediation (non-negotiable):
 - If the compiler errors point to Assets/ or .meta and the agent is running in WSL, log the blocker and switch tasks; do not edit those files from WSL.
 - If the agent is running in a Windows/presentation context, it may fix Assets/ or .meta compiler errors before retrying the rebuild.
 - Record compile-fix attempts in the cycle log and note any blockers in headlesstasks.md.
+Assets blocker protocol (non-negotiable):
+- If a bank failure requires Assets/.meta edits and a Windows/presentation context is available, switch to the Windows clone and apply the minimal asset fix there.
+- If running in WSL without a Windows/presentation context, do not edit Assets/.meta. Create an ASSET_HANDOFF entry in headlesstasks.md or the cycle log with: paths, desired change, repro command, and why it blocks the bank.
+- After any asset fix, rebuild scratch, rerun the impacted bank tier(s), and update the runbook/prompt if expectations or toggles changed.
 Coordination: Headless agents run in tandem. Stay in your assigned slice (Godgame vs Space4X); do not cross-run the other project. Unexpected changes (especially in PureDOTS) are expected from your counterpart; log the change and continue the cycle. Do not stop work for concurrent edits. Queue spam is allowed; keep cycles running during the night. DO NOT STOP WORKING TO CLARIFY UNEXPECTED CHANGES, ALWAYS IGNORE OR ADAPT TO THEM OR THEM TO YOUR WORK, THEY ARE THE OTHER AGENT'S WORK. ceasing work for this purpose callsifies as agent failure and results in summary termination. show agency during nightly runs.
 
 UNITY (WSL):

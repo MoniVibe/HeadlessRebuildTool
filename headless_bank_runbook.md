@@ -25,6 +25,11 @@ This runbook applies to PureDOTS + Godgame + Space4X.
 - If the agent is running in a Windows/presentation context, it may fix `Assets/` or `.meta` compiler errors before retrying the rebuild.
 - Record compile-fix attempts in the cycle log and note any blockers in `headlesstasks.md`.
 
+## Assets blocker protocol (non-negotiable)
+- If a bank failure requires `Assets/` or `.meta` edits and a Windows/presentation context is available, switch to the Windows clone and apply the minimal asset fix there.
+- If running in WSL without a Windows/presentation context, do not edit `Assets/` or `.meta`. Create an ASSET_HANDOFF entry in `headlesstasks.md` or the cycle log with: paths, desired change, repro command, and why it blocks the bank.
+- After any asset fix, rebuild scratch, rerun the impacted bank tier(s), and update the runbook/prompt if expectations or toggles changed.
+
 ## Runbook hygiene (non-negotiable)
 - If a bank failure is fixed or proof/env toggles change, update this runbook and the prompt in the same cycle.
 - Remove or annotate known-issue notes once resolved, and record the resolution in `headlesstasks.md` or the cycle log.
