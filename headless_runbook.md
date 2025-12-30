@@ -9,6 +9,10 @@ Cross-OS caveats:
 - Keep `Packages/manifest.json` and `Packages/packages-lock.json` synced across clones when logic changes.
 - Headless rebuilds in WSL should use Windows Unity interop (set `FORCE_WINDOWS_UNITY=1`); do not rely on Linux Unity licensing.
 - If the rebuild tool can’t find Windows Unity, fail fast and fix `UNITY_WIN`/`TRI_WIN` instead of falling back to Linux Unity.
+- Align Unity versions before rebuilds: read `ProjectSettings/ProjectVersion.txt` in the target repo and set `UNITY_WIN` to that exact version; mismatches mean stale builds.
+Runbook hygiene:
+- If a bank failure is fixed or proof/env toggles change, update `headless_bank_runbook.md` and `headlessprompt.md` in the same cycle.
+- Remove or annotate known-issue notes once resolved, and record the resolution in `headlesstasks.md` or the cycle log.
 
 
 ## Important (avoid mixed runs)
@@ -48,6 +52,10 @@ Headless presentation capture (rare, explicit):
 ## Nightly rebuild policy
 - Nightly headless agents may rebuild during their window to keep the implement -> test -> fix loop moving.
 - Still honor the rebuild gate + test bank in `puredots/Docs/Headless/headless_runbook.md`; avoid rebuilds during active presentation/editor sessions.
+
+## Cycle close-out (staleness check)
+- If you changed proof/env toggles, bank expectations, or fixed a bank failure, update `headless_bank_runbook.md`
+  and `headlessprompt.md` before ending the cycle.
 
 ## Godgame
 
@@ -104,6 +112,10 @@ Notes:
 - If the proof FAILs at `tick=900`, you’re almost certainly running a stale headless build (source now uses a longer timeout); rebuild and rerun.
 - If you see `scenario.default` / “never reached initialized state”, you’re running the old ScenarioRunner path (rebuild required).
 - If you see `LoadSceneAsync - Invalid sceneGUID` / `SubScene.AddSceneEntities()`, the headless bootstrap scene has a null SubScene entry (rebuild required).
+Proof toggles (Space4X):
+- S0 collision micro: unset `SPACE4X_HEADLESS_MINING_PROOF` to avoid false FAILs.
+- S0 smoke + S1/S2 mining scenarios: set `SPACE4X_HEADLESS_MINING_PROOF=1`.
+- S5 behavior loops: set `SPACE4X_HEADLESS_BEHAVIOR_PROOF=1` (known issue: may FAIL with reason=missing_loops if behaviors are absent).
 
 ## Time + Rewind (ScenarioRunner sample)
 

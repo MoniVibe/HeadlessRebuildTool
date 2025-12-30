@@ -15,14 +15,24 @@ Compile-error remediation (non-negotiable):
 - If the compiler errors point to Assets/ or .meta and the agent is running in WSL, log the blocker and switch tasks; do not edit those files from WSL.
 - If the agent is running in a Windows/presentation context, it may fix Assets/ or .meta compiler errors before retrying the rebuild.
 - Record compile-fix attempts in the cycle log and note any blockers in headlesstasks.md.
+Runbook hygiene (non-negotiable):
+- If a bank failure is fixed or proof/env toggles change, update the runbook and prompt in the same cycle (headless_bank_runbook.md and headlessprompt.md).
+- Remove or annotate known-issue notes once resolved, and record the resolution in headlesstasks.md or the cycle log.
 Coordination: Headless agents run in tandem. Unexpected changes (especially in PureDOTS) are expected; log the change and continue the cycle. Do not stop work for concurrent edits. Queue spam is allowed; keep cycles running during the night.
 
 UNITY (WSL):
 - Use Windows Unity interop for rebuilds; do not depend on Linux Unity licensing.
 - Set FORCE_WINDOWS_UNITY=1 and UNITY_WIN if the editor is not in the default install location.
+- Align Unity versions before rebuilds: read ProjectSettings/ProjectVersion.txt in the target repo and set UNITY_WIN to that exact version; treat mismatches as stale builds.
 - Run rebuilds from /mnt/c/dev/Tri (or set TRI_WIN to match the Windows repo path).
 - After rebuilds, publish to /home using Tools/publish_*_headless_to_home.sh.
 - Run tests from /home using /home/oni/Tri/Tools/builds/<game>/Linux_latest.
+Space4X proof toggles (required):
+- S0 collision: SPACE4X_HEADLESS_MINING_PROOF=0 (unset).
+- S0 smoke, S1, S2: SPACE4X_HEADLESS_MINING_PROOF=1.
+- S5 behavior loops: SPACE4X_HEADLESS_BEHAVIOR_PROOF=1.
+- Log proof envs used in stdout for each run.
+- Known issue: S5 may FAIL with reason=missing_loops if the scenario does not spawn full behavior loops; log as Tier 2 advisory and proceed.
 PATH DEFAULTS (must implement exactly):
 1) TRI_ROOT:
    - If $GITHUB_WORKSPACE is set: TRI_ROOT=$GITHUB_WORKSPACE
@@ -92,6 +102,8 @@ Cycle N:
 7) Emit end-of-cycle checkpoint (stdout):
    CYCLE_SUMMARY:cycle=N promoted=<0/1> current_green=<0/1>
    List failing BANK lines + TELEMETRY_OUT paths + top offenders.
+7.5) Staleness check: if you changed proof/env toggles, bank expectations, or fixed a bank failure, update
+     headless_bank_runbook.md and headlessprompt.md before closing the cycle.
 8) Update state.json and proceed to next cycle.
 
 STOP CONDITIONS:

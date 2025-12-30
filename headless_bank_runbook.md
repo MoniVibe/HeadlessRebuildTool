@@ -11,6 +11,7 @@ This runbook applies to PureDOTS + Godgame + Space4X.
 - Avoid editing `Assets/` or `.meta` from WSL; presentation owns those files.
 - Keep `Packages/manifest.json` and `Packages/packages-lock.json` synced across clones when logic changes.
 - Headless rebuilds in WSL should use Windows Unity interop (set `FORCE_WINDOWS_UNITY=1`); do not rely on Linux Unity licensing.
+- Align Unity versions before rebuilds: read `ProjectSettings/ProjectVersion.txt` in the target repo and set `UNITY_WIN` to that exact version; treat any mismatch as a stale build and fix before proceeding.
 
 ## Productivity requirement (non-negotiable)
 - Each cycle must attempt at least one headlesstask from `headlesstasks.md`.
@@ -23,6 +24,10 @@ This runbook applies to PureDOTS + Godgame + Space4X.
 - If the compiler errors point to `Assets/` or `.meta` and the agent is running in WSL, log the blocker and switch tasks; do not edit those files from WSL.
 - If the agent is running in a Windows/presentation context, it may fix `Assets/` or `.meta` compiler errors before retrying the rebuild.
 - Record compile-fix attempts in the cycle log and note any blockers in `headlesstasks.md`.
+
+## Runbook hygiene (non-negotiable)
+- If a bank failure is fixed or proof/env toggles change, update this runbook and the prompt in the same cycle.
+- Remove or annotate known-issue notes once resolved, and record the resolution in `headlesstasks.md` or the cycle log.
 
 ---
 
@@ -54,6 +59,7 @@ Rules:
   - Environment flags (proof toggles, telemetry level, thresholds)
   - Report/telemetry output paths
 - If a proof is incompatible with a scenario, disable it for that scenario and document the reason in the headless proof system.
+- Space4X proof toggles are scenario-specific: set `SPACE4X_HEADLESS_MINING_PROOF=1` for S0/S1/S2 mining scenarios, unset/0 for S0 collision, and set `SPACE4X_HEADLESS_BEHAVIOR_PROOF=1` for S5.
 
 Telemetry defaults (use unless debugging):
 - PUREDOTS_TELEMETRY_LEVEL=summary
@@ -105,6 +111,13 @@ Before escalating a failure or blocking promotion:
 5) Only then escalate.
 
 Note: authoring/baker/SubScene changes typically require rebuild; scenario/env changes do not.
+
+---
+
+## Cycle close-out (staleness check)
+
+- Before ending a cycle, confirm the runbook/prompt reflect any proof/env toggle changes, bank expectation edits, or bank failures that were fixed.
+- If you cannot update the docs in the same cycle, log a TODO in `headlesstasks.md` and mark the section that must be refreshed.
 
 ---
 
@@ -164,6 +177,7 @@ S0.SPACE4X_COLLISION_MICRO
 - Scenario: Assets/Scenarios/space4x_collision_micro.json
 - Seed: 77
 - Minimum simSeconds: 20 (duration_s)
+- Proofs: SPACE4X_HEADLESS_MINING_PROOF=0 (unset)
 - PASS signals:
   - BANK:S0.SPACE4X_COLLISION_MICRO:PASS
   - [Space4XCollisionProof] PASS ...
@@ -172,6 +186,7 @@ S0.SPACE4X_SMOKE
 - Scenario: Assets/Scenarios/space4x_smoke.json
 - Seed: 77
 - Minimum simSeconds: 150 (duration_s)
+- Proofs: SPACE4X_HEADLESS_MINING_PROOF=1
 - PASS signals:
   - BANK:S0.SPACE4X_SMOKE:PASS
   - [Space4XMiningScenario] Loaded '...space4x_smoke.json' ...
@@ -212,6 +227,7 @@ S2.MINING_COMBAT
 - Scenario: Assets/Scenarios/space4x_mining_combat.json
 - Seed: 42
 - Minimum simSeconds: 120 (duration_s)
+- Proofs: SPACE4X_HEADLESS_MINING_PROOF=1
 - PASS signals:
   - BANK:S2.MINING_COMBAT:PASS
   - exports exist + expectations true (expectMiningYield, expectInterceptAttempts, etc.)
@@ -244,6 +260,7 @@ S5.SPACE4X_BEHAVIOR_LOOPS
 - Scenario: Assets/Scenarios/space4x_mining_combat.json (use a dedicated behavior scenario if available)
 - Seed: 42
 - Minimum simSeconds: 120 (duration_s)
+- Proofs: SPACE4X_HEADLESS_BEHAVIOR_PROOF=1
 - PASS signals:
   - BANK:S5.SPACE4X_BEHAVIOR_LOOPS:PASS
   - [Space4XHeadlessLoopProof] PASS Patrol ...
@@ -252,6 +269,7 @@ S5.SPACE4X_BEHAVIOR_LOOPS
   - [Space4XHeadlessLoopProof] PASS Docking ...
 - Notes:
   - Behavior proof disables patrol/attack/wing directive checks when the scenario path ends with space4x_smoke.json.
+  - Known issue: if the scenario does not spawn full loop behaviors, S5 will FAIL with reason=missing_loops; log it as a Tier 2 advisory and track in headlesstasks/backlog without blocking promotion.
 
 ---
 
