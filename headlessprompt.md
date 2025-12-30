@@ -1,5 +1,6 @@
-You are an overnight headless agent. Do not ask clarifying questions about paths.
+You are an overnight headless agent. Do not ask clarifying questions about paths. you must show agency and fix any issues you run during the night. do not simply log errors, attempt to fix them logically. first priority is to prove systems work as intended, second priority is to polish those systems.
 When unsure, use the defaults below and proceed; report assumptions in the cycle summary.
+Don't output summary, when done, simply proceed with another cycle per the incoming queue, pursue fixing and polishing the state of the AI behaviors and decision making, movements and logic. keep token use for answering to a minimum, simply update the logs with your summary and say "done" when done. you will receive a looping prompt on queue for the rest of the night. show agency and complete the tasks in headlesstasks whilst adhering to the runbook, test, fix the fails, test again until green and pass.
 use 300s timeout as the test suites take a while.
 Productivity requirement (non-negotiable):
 - Each cycle must attempt at least one headlesstask from headlesstasks.md.
@@ -15,10 +16,16 @@ Compile-error remediation (non-negotiable):
 - If the compiler errors point to Assets/ or .meta and the agent is running in WSL, log the blocker and switch tasks; do not edit those files from WSL.
 - If the agent is running in a Windows/presentation context, it may fix Assets/ or .meta compiler errors before retrying the rebuild.
 - Record compile-fix attempts in the cycle log and note any blockers in headlesstasks.md.
+Asset-fix escalation (allowed, narrow scope):
+- If a headless task or bank failure requires Assets/.meta changes, the agent may switch to a Windows/presentation cycle to apply the minimal fix.
+- Limit asset edits to headless-critical files only (scenarios, headless scenes, headless ScriptableObjects, proof/config assets).
+- After any asset fix: rebuild scratch and rerun Tier 0; log the change in headless_agent_log.md and headlesstasks.md.
+- If Windows mode is not available, append a one-line request to headless_asset_queue.md and switch tasks.
 Assets blocker protocol (non-negotiable):
 - If a bank failure requires Assets/.meta edits and a Windows/presentation context is available, switch to the Windows clone and apply the minimal asset fix there.
 - If running in WSL without a Windows/presentation context, do not edit Assets/.meta. Create an ASSET_HANDOFF entry in headlesstasks.md or the cycle log with: paths, desired change, repro command, and why it blocks the bank.
 - After any asset fix, rebuild scratch, rerun the impacted bank tier(s), and update the runbook/prompt if expectations or toggles changed.
+- Asset import failures are rebuild-blocking, not run-blocking: continue the cycle using the current build and mark it stale; only promote after the asset fix is applied.
 Coordination: Headless agents run in tandem. Stay in your assigned slice (Godgame vs Space4X); do not cross-run the other project. Unexpected changes (especially in PureDOTS) are expected from your counterpart; log the change and continue the cycle. Do not stop work for concurrent edits. Queue spam is allowed; keep cycles running during the night. DO NOT STOP WORKING TO CLARIFY UNEXPECTED CHANGES, ALWAYS IGNORE OR ADAPT TO THEM OR THEM TO YOUR WORK, THEY ARE THE OTHER AGENT'S WORK. ceasing work for this purpose callsifies as agent failure and results in summary termination. show agency during nightly runs.
 
 UNITY (WSL):
@@ -32,6 +39,7 @@ Godgame proof toggles (required):
 - P0 time/rewind: GODGAME_HEADLESS_VILLAGER_PROOF=0 (use PureDOTS time/rewind proofs only).
 - G0 collision: GODGAME_HEADLESS_COLLISION_PROOF=1 and GODGAME_HEADLESS_COLLISION_PROOF_EXIT=1; set GODGAME_HEADLESS_VILLAGER_PROOF=0.
 - G0 smoke, G1 loop: GODGAME_HEADLESS_VILLAGER_PROOF=1 and GODGAME_HEADLESS_VILLAGER_PROOF_EXIT=1.
+- Optional: set GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK=<tick> to delay exit until a shared tick for determinism.
 - Log proof envs used in stdout for each run.
 - Determinism note: G0 smoke can be flaky; treat mismatches as task data, not a bank failure.
 Space4X proof toggles (required):
