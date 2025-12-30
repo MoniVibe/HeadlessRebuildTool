@@ -5,10 +5,14 @@ Append one entry per request. Keep it short and action-oriented.
 Format:
 - UTC:
 - Project:
+- Priority: (Tier0 | Tier1 | Task)
 - Requester:
+- Owner:
 - Paths:
 - Change:
 - Repro:
-- Status:
+- BuildStamp:
+- Validation:
+- Status: (NEW | CLAIMED | IN_PROGRESS | DONE | FAILED)
 
 ---

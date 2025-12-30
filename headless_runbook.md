@@ -17,6 +17,11 @@ Asset-fix escalation (Windows-only):
 - After any asset fix, rebuild scratch, rerun the impacted bank tier(s), and update the runbook/prompt if expectations or toggles changed.
 - Asset import failures are rebuild-blocking, not run-blocking: continue the cycle using the current build and mark it stale; only promote after the asset fix is applied.
 
+## WSL + Windows cooperation (async)
+- WSL headless agents log asset blockers to `headless_asset_queue.md` and keep cycling other tasks.
+- Windows/PowerShell agents check the queue at the start of each cycle, claim one NEW item, apply the minimal fix, rebuild, rerun Tier 0, and then continue with their own bank/tasks.
+- Do not idle waiting on the queue; always do productive work each cycle.
+
 
 ## Important (avoid mixed runs)
 Telemetry export appends to existing NDJSON files. Before each run, delete the target file so you don’t mix multiple runs:

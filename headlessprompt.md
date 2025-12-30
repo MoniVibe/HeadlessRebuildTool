@@ -21,6 +21,10 @@ Asset-fix escalation (allowed, narrow scope):
 - Limit asset edits to headless-critical files only (scenarios, headless scenes, headless ScriptableObjects, proof/config assets).
 - After any asset fix: rebuild scratch and rerun Tier 0; log the change in headless_agent_log.md and headlesstasks.md.
 - If Windows mode is not available, append a one-line request to headless_asset_queue.md and switch tasks.
+Windows/PowerShell agent loop (required):
+- At the start of each cycle, scan headless_asset_queue.md for NEW entries in your project and claim one (set Status=CLAIMED, add Owner + UTC).
+- If claimed: apply the minimal asset fix in the Windows clone, rebuild scratch, rerun Tier 0, then update the entry with Status=DONE/FAILED + build stamp.
+- If no queue item is claimed (or after handling one), run bank/tasks for your slice; do not idle waiting on the queue.
 Assets blocker protocol (non-negotiable):
 - If a bank failure requires Assets/.meta edits and a Windows/presentation context is available, switch to the Windows clone and apply the minimal asset fix there.
 - If running in WSL without a Windows/presentation context, do not edit Assets/.meta. Create an ASSET_HANDOFF entry in headlesstasks.md or the cycle log with: paths, desired change, repro command, and why it blocks the bank.
@@ -40,6 +44,7 @@ Godgame proof toggles (required):
 - G0 collision: GODGAME_HEADLESS_COLLISION_PROOF=1 and GODGAME_HEADLESS_COLLISION_PROOF_EXIT=1; set GODGAME_HEADLESS_VILLAGER_PROOF=0.
 - G0 smoke, G1 loop: GODGAME_HEADLESS_VILLAGER_PROOF=1 and GODGAME_HEADLESS_VILLAGER_PROOF_EXIT=1.
 - Optional: set GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK=<tick> to delay exit until a shared tick for determinism.
+- Optional: set GODGAME_HEADLESS_EXIT_MIN_TICK=<tick> to delay any headless exit request until that tick.
 - Log proof envs used in stdout for each run.
 - Determinism note: G0 smoke can be flaky; treat mismatches as task data, not a bank failure.
 Space4X proof toggles (required):
