@@ -26,6 +26,13 @@ Productive Windows-cycle work includes:
 - Asset-side fixes that unblock headless (scenarios, headless scenes, ScriptableObjects, proof/config assets).
 - Presentation/physics fixes when they unblock headless proofs (colliders, import settings, scene/prefab wiring).
 - Documentation updates when toggles/expectations change.
+PowerShell agent priorities (order matters):
+1) Asset unblockers from headless_asset_queue.md (Tier 0 blockers first).
+2) Rebuild + publish Linux_latest after asset fixes so WSL can resume cycles.
+3) Presentation parity fixes that unblock proofs (colliders, layer masks, prefab wiring, RenderCatalog references).
+4) Asset health sweeps: missing scripts, broken references, invalid scene GUIDs, bad import settings.
+5) Scenario asset tuning for missing behaviors (e.g., Space4X S5 missing_loops).
+6) Doc/queue hygiene (update prompts/runbooks when toggles/expectations change).
 
 
 ## Important (avoid mixed runs)
