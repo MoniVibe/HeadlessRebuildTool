@@ -25,6 +25,11 @@ Windows/PowerShell agent loop (required):
 - At the start of each cycle, scan headless_asset_queue.md for NEW entries in your project and claim one (set Status=CLAIMED, add Owner + UTC).
 - If claimed: apply the minimal asset fix in the Windows clone, rebuild scratch, rerun Tier 0, then update the entry with Status=DONE/FAILED + build stamp.
 - If no queue item is claimed (or after handling one), run bank/tasks for your slice; do not idle waiting on the queue.
+Productive work during Windows cycles (required):
+- Run bank tiers and at least one headlesstask for your slice (same rules as WSL).
+- Apply asset-side fixes that unblock headless (scenarios, headless scenes, ScriptableObjects, proof/config assets).
+- Apply presentation/physics fixes when they unblock headless proofs (colliders, import settings, scene/prefab wiring).
+- Update headless documentation or queue entries when expectations/toggles change.
 Assets blocker protocol (non-negotiable):
 - If a bank failure requires Assets/.meta edits and a Windows/presentation context is available, switch to the Windows clone and apply the minimal asset fix there.
 - If running in WSL without a Windows/presentation context, do not edit Assets/.meta. Create an ASSET_HANDOFF entry in headlesstasks.md or the cycle log with: paths, desired change, repro command, and why it blocks the bank.

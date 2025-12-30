@@ -21,6 +21,11 @@ Asset-fix escalation (Windows-only):
 - WSL headless agents log asset blockers to `headless_asset_queue.md` and keep cycling other tasks.
 - Windows/PowerShell agents check the queue at the start of each cycle, claim one NEW item, apply the minimal fix, rebuild, rerun Tier 0, and then continue with their own bank/tasks.
 - Do not idle waiting on the queue; always do productive work each cycle.
+Productive Windows-cycle work includes:
+- Running bank tiers + at least one headlesstask for the assigned slice.
+- Asset-side fixes that unblock headless (scenarios, headless scenes, ScriptableObjects, proof/config assets).
+- Presentation/physics fixes when they unblock headless proofs (colliders, import settings, scene/prefab wiring).
+- Documentation updates when toggles/expectations change.
 
 
 ## Important (avoid mixed runs)
