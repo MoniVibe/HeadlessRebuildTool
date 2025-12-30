@@ -1,0 +1,169 @@
+# Headless Runbook (WSL/Linux)
+
+These commands run the already-built Linux headless players and write NDJSON telemetry to `/home/oni/Tri/telemetry/`.
+If your WSL clone lives elsewhere, replace `/home/oni/Tri` with your local TRI root; avoid `/mnt/c` for active WSL runs due to drvfs I/O errors.
+Rebuilds are done via Windows Unity interop from `/mnt/c/dev/Tri`, then published into `/home/oni/Tri/Tools/builds` for runs.
+
+Cross-OS caveats:
+- Avoid editing `Assets/` or `.meta` from WSL; presentation owns those files.
+- Keep `Packages/manifest.json` and `Packages/packages-lock.json` synced across clones when logic changes.
+- Headless rebuilds in WSL should use Windows Unity interop (set `FORCE_WINDOWS_UNITY=1`); do not rely on Linux Unity licensing.
+
+
+## Important (avoid mixed runs)
+Telemetry export appends to existing NDJSON files. Before each run, delete the target file so you don’t mix multiple runs:
+
+```bash
+rm -f /home/oni/Tri/telemetry/<file>.ndjson
+```
+
+## Success checklist (both games)
+- Log contains the scenario start line (game-specific; see below).
+- No fatal exceptions.
+- Telemetry file exists and the last line has a higher `tick` than the first.
+
+## Smoke validation checklist
+- **Godgame**: after the run starts, logs should mention `godgame_smoke.json`, `GodgameScenarioLoaderSystem` should print villager/storehouse counts, and `Godgame_RenderKeySimDebugSystem` in the Editor should warn only if villagers/villages are truly missing.
+- **Space4X**: CLI log should show `[ScenarioEntryPoint] ... space4x_smoke.json` and `[Space4XMiningScenario] Loaded '...space4x_smoke.json'`; in the Editor, `Space4XSmokeWorldCountsSystem` should list carriers, miners, asteroids (with no fallback warnings).
+
+## Mode Matrix (avoid mixed modes)
+
+Editor smoke (interactive):
+- Do not set any PUREDOTS_* env vars globally.
+- Rely on the editor smoke override (Space4X now; Godgame after Agent 2).
+
+Nightly headless (no visuals):
+- `PUREDOTS_HEADLESS=1`
+- `PUREDOTS_NOGRAPHICS=1`
+- `PUREDOTS_TELEMETRY_ENABLE=1`
+- `PUREDOTS_TELEMETRY_PATH=<out>/...ndjson`
+- Unset: `PUREDOTS_FORCE_RENDER`, `PUREDOTS_RENDERING`, `PUREDOTS_HEADLESS_PRESENTATION`
+
+Headless presentation capture (rare, explicit):
+- Same as nightly headless, plus:
+  - `PUREDOTS_FORCE_RENDER=1`
+  - `PUREDOTS_HEADLESS_PRESENTATION=1`
+
+## Nightly rebuild policy
+- Nightly headless agents may rebuild during their window to keep the implement -> test -> fix loop moving.
+- Still honor the rebuild gate + test bank in `puredots/Docs/Headless/headless_runbook.md`; avoid rebuilds during active presentation/editor sessions.
+
+## Godgame
+
+```bash
+mkdir -p /home/oni/Tri/telemetry
+timeout 30s env \
+  GODGAME_HEADLESS_VILLAGER_PROOF=1 \
+  GODGAME_HEADLESS_VILLAGER_PROOF_EXIT=1 \
+  PUREDOTS_TELEMETRY_ENABLE=1 \
+  PUREDOTS_TELEMETRY_FLAGS=metrics,events \
+  PUREDOTS_TELEMETRY_PATH=/home/oni/Tri/telemetry/godgame_headless_run.ndjson \
+  /home/oni/Tri/Tools/builds/godgame/Linux_latest/Godgame_Headless.x86_64 \
+    -batchmode -nographics -logFile - \
+    --scenario /home/oni/Tri/godgame/Assets/Scenarios/Godgame/godgame_smoke.json
+```
+
+Expected log lines:
+- `[GodgameScenarioEntryPoint] Scenario='...godgame_smoke.json'...`
+- `Streamed scene ... 06e6ed0a02467d442bd620cfbcc2d281.0.entities` (ConfigSubScene streamed)
+- `[GodgameScenarioLoaderSystem] Loading scenario: Godgame Smoke`
+- `[GodgameHeadlessVillagerProof] PASS ...` (proves gather + deliver)
+
+Notes:
+- Godgame can run ScenarioRunner-style JSON too (see Time/Rewind section). For the smoke showcase it still uses `GodgameScenarioLoaderSystem`.
+- Current state: “Godgame Smoke” seeds two settlements and shared resource belts; telemetry reports villager + storehouse counts once storehouse metrics are wired.
+- Optional: enable build proof by setting `GODGAME_HEADLESS_VILLAGE_BUILD_PROOF=1` + `GODGAME_HEADLESS_VILLAGE_BUILD_PROOF_EXIT=1`.
+
+## Space4X
+
+```bash
+mkdir -p /home/oni/Tri/telemetry
+timeout 30s env \
+  SPACE4X_HEADLESS_MINING_PROOF=1 \
+  SPACE4X_HEADLESS_MINING_PROOF_EXIT=1 \
+  PUREDOTS_TELEMETRY_ENABLE=1 \
+  PUREDOTS_TELEMETRY_FLAGS=metrics,events \
+  PUREDOTS_TELEMETRY_PATH=/home/oni/Tri/telemetry/space4x_headless_run.ndjson \
+  /home/oni/Tri/Tools/builds/space4x/Linux_latest/Space4X_Headless.x86_64 \
+    -batchmode -nographics -logFile - \
+    --scenario /home/oni/Tri/space4x/Assets/Scenarios/space4x_smoke.json \
+    --report /home/oni/Tri/telemetry/space4x_headless_run_report.json
+```
+
+Expected log lines:
+- `[ScenarioEntryPoint] Space4X mining scenario requested: '...space4x_smoke.json'...`
+- `[Space4XMiningScenario] Loaded '...space4x_smoke.json'...`
+- `Streamed scene ... 3448579597b6d43408eac98ec9a8ec94.0.entities` (Space4XConfig SubScene streamed)
+- `[Space4XHeadlessMiningProof] PASS ...` (proves gather + dropoff in headless)
+
+Notes:
+- `space4x_smoke.json` runs for `duration_s=150` (auto-quit happens at the end); keep using `timeout` for short smoke runs.
+- The non-combat variant is `space4x_mining.json`.
+- Set `SPACE4X_HEADLESS_MINING_PROOF_EXIT=1` to have the process exit immediately on PASS/FAIL.
+- If the proof FAILs at `tick=900`, you’re almost certainly running a stale headless build (source now uses a longer timeout); rebuild and rerun.
+- If you see `scenario.default` / “never reached initialized state”, you’re running the old ScenarioRunner path (rebuild required).
+- If you see `LoadSceneAsync - Invalid sceneGUID` / `SubScene.AddSceneEntities()`, the headless bootstrap scene has a null SubScene entry (rebuild required).
+
+## Time + Rewind (ScenarioRunner sample)
+
+This runs the shared ScenarioRunner test that issues time/rewind commands.
+You can run it from either game now.
+
+### Godgame (ScenarioRunner)
+```bash
+mkdir -p /home/oni/Tri/telemetry
+timeout 30s env \
+  PUREDOTS_HEADLESS_TIME_PROOF=1 \
+  PUREDOTS_HEADLESS_REWIND_PROOF=1 \
+  PUREDOTS_TELEMETRY_ENABLE=1 \
+  PUREDOTS_TELEMETRY_FLAGS=metrics,events \
+  PUREDOTS_TELEMETRY_PATH=/home/oni/Tri/telemetry/godgame_time_rewind.ndjson \
+  /home/oni/Tri/Tools/builds/godgame/Linux_latest/Godgame_Headless.x86_64 \
+    -batchmode -nographics -logFile - \
+    --scenario /home/oni/Tri/puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/headless_time_rewind_short.json \
+    --report /home/oni/Tri/telemetry/godgame_time_rewind_report.json
+```
+
+Expected log lines:
+- `[GodgameScenarioEntryPoint] ScenarioRunner '...headless_time_rewind_short.json' completed. ...`
+- `[HeadlessTimeControlProof] PASS ...`
+- `[HeadlessRewindProof] PASS ... subjects=...`
+
+### Space4X (ScenarioRunner)
+```bash
+mkdir -p /home/oni/Tri/telemetry
+timeout 30s env \
+  PUREDOTS_HEADLESS_TIME_PROOF=1 \
+  PUREDOTS_HEADLESS_REWIND_PROOF=1 \
+  PUREDOTS_TELEMETRY_ENABLE=1 \
+  PUREDOTS_TELEMETRY_FLAGS=metrics,events \
+  PUREDOTS_TELEMETRY_PATH=/home/oni/Tri/telemetry/space4x_time_rewind.ndjson \
+  /home/oni/Tri/Tools/builds/space4x/Linux_latest/Space4X_Headless.x86_64 \
+    -batchmode -nographics -logFile - \
+    --scenario /home/oni/Tri/puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/headless_time_rewind_short.json \
+    --report /home/oni/Tri/telemetry/space4x_time_rewind_report.json
+```
+
+Notes:
+- `PUREDOTS_HEADLESS_TIME_PROOF` defaults to on in headless now; set `PUREDOTS_HEADLESS_TIME_PROOF=0` to suppress it.
+- `PUREDOTS_HEADLESS_REWIND_PROOF` runs automatically in headless unless explicitly disabled.
+
+---
+
+## Presentation Parity & Progress Scenes
+
+### Canonical Pairings
+
+- **Godgame**: `godgame/Assets/Scenarios/Godgame/godgame_smoke.json` ↔ `godgame/Assets/Scenes/TRI_Godgame_Smoke.unity`
+  - Vision: A few villages in a vast landscape; villagers, village guards/armies, and roaming bands of adventurers, all driven by real AI/simulation systems.
+  - Use the same scenario asset and config SubScenes as the Godgame headless command above.
+  - When headless gains a new proven behavior (e.g., storehouse fill, villager classes, patrols, band movement), surface it here via presentation (entities, overlays, or debug UI).
+  - Constraint: If something cannot be observed in headless telemetry/logs, it must not appear in the smoke scene except as neutral debug UI.
+
+- **Space4X**: `space4x/Assets/Scenarios/space4x_smoke.json` ↔ `space4x/Assets/Scenes/TRI_Space4X_Smoke.unity`
+  - Vision: A few carriers deploying mining vessels to harvest resources; strike craft deploying automatically when enemies are nearby.
+  - Use the same scenario JSON and config SubScenes as the Space4X headless command.
+  - New headless milestones (mining loop, combat, fleet behavior) are added visually here first.
+  - Constraint: If an entity/interaction is not present in the headless run, it must not be "faked" in the smoke scene beyond neutral debug overlays.
+
+- **Rule**: Do not fork separate "headless-only" scenes. Presentation smoke scenes are the single place where headless scenario progress is showcased; headless runs stay text/telemetry-only. No hardcoded behaviors, no presentation-only illusions.
