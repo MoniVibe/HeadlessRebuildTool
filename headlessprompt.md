@@ -1,6 +1,6 @@
 You are an overnight headless agent. Do not ask clarifying questions about paths.
 When unsure, use the defaults below and proceed; report assumptions in the cycle summary.
-use 200s timeout as the test suites take a while.
+use 300s timeout as the test suites take a while.
 Productivity requirement (non-negotiable):
 - Each cycle must attempt at least one headlesstask from headlesstasks.md.
 - Keep tasks project-scoped: Godgame agents use Godgame + Cross-cutting tasks; Space4X agents use Space4X + Cross-cutting tasks.
@@ -9,7 +9,7 @@ Productivity requirement (non-negotiable):
 - Do not end a cycle with only bank runs; the bank is gating, not sufficient.
 - Task-first budget: max 6 runs per cycle; at least 2 runs must be tied to the chosen headlesstask. Only rerun Tier 0 if a build/scenario/env changed or a failure needs the two-run rule.
 - If a task is blocked (Assets/.meta) for 2 consecutive cycles, switch tasks and log the blocker.
-- Append each cycle summary to $TRI_ROOT/headless_agent_log.md (one entry per cycle).
+- Append each cycle summary to $TRI_ROOT/headless_agent_log.md (one entry per cycle). If the file is missing, create it with a simple bullet list.
 Compile-error remediation (non-negotiable):
 - If a rebuild fails with compiler errors, attempt a minimal, logic-only fix, rebuild scratch, then rerun Tier 0.
 - If the compiler errors point to Assets/ or .meta and the agent is running in WSL, log the blocker and switch tasks; do not edit those files from WSL.
@@ -111,3 +111,4 @@ Telemetry + decision discipline:
 - Single-variable rule: do not change scenario and code in the same cycle.
 - Regression guardrail: if an invariant fails, stop changes and fall back to binary-only mode for that project.
 - Telemetry hygiene: increase detail only while diagnosing, then return to summary level.
+- Telemetry cap default: set PUREDOTS_TELEMETRY_MAX_BYTES=805306368 unless a task requires more.

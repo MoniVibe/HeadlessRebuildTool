@@ -8,6 +8,7 @@ Cross-OS caveats:
 - Avoid editing `Assets/` or `.meta` from WSL; presentation owns those files.
 - Keep `Packages/manifest.json` and `Packages/packages-lock.json` synced across clones when logic changes.
 - Headless rebuilds in WSL should use Windows Unity interop (set `FORCE_WINDOWS_UNITY=1`); do not rely on Linux Unity licensing.
+- If the rebuild tool can’t find Windows Unity, fail fast and fix `UNITY_WIN`/`TRI_WIN` instead of falling back to Linux Unity.
 
 
 ## Important (avoid mixed runs)

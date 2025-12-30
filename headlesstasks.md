@@ -63,7 +63,7 @@ Format:
 ## Cross-cutting
 - H-C01 Frame-rate independence (Godgame). Scenario: `godgame/Assets/Scenarios/Godgame/villager_loop_small.json`. Metric: end-of-run total resource delta (pile + storehouse). Target: 30 vs 120 tick rate drift <= 1 unit. Status: pending.
 - H-C02 Resource conservation (Godgame). Scenario: `godgame/Assets/Scenarios/Godgame/villager_loop_small.json`. Metric: AggregatePile.Take/Add and Storehouse.Add totals. Target: siphon 200 and dump 200 with no loss; events match totals. Status: pending.
-- H-C03 Determinism smoke (Godgame). Scenario: `godgame/Assets/Scenarios/Godgame/godgame_smoke.json`. Metric: end-tick counts (villagers, storehouse totals). Target: same seed produces identical summary within epsilon. Baseline: tick=39 villagers=59 storehouses=5 stored=7.00 (seed default). Threshold: exact match (epsilon=0) across 2 runs. Status: pass (cycle49).
+- H-C03 Determinism smoke (Godgame). Scenario: `godgame/Assets/Scenarios/Godgame/godgame_smoke.json`. Metric: end-tick counts (villagers, storehouse totals). Target: same seed produces identical summary within epsilon. Baseline: tick=39 villagers=59 storehouses=5 stored=7.00 (seed default). Threshold: exact match (epsilon=0) across 2 consecutive runs. Status: flaky (requires two identical runs; last run drifted).
 - H-C04 Telemetry health (all). Scenario: any headless run. Metric: telemetry payload length and file size. Target: no payload truncation and no sudden spikes above expected bounds. Baseline: godgame_smoke sizes 5,769,701 and 4,190,005 bytes (summary telemetry). Threshold: <= 7,000,000 bytes; no truncation markers. Status: pass (cycle50).
 
 ## Godgame
