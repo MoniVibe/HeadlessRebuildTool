@@ -9,16 +9,13 @@ Productivity requirement (non-negotiable):
 - Do not end a cycle with only bank runs; the bank is gating, not sufficient.
 - Task-first budget: max 6 runs per cycle; at least 2 runs must be tied to the chosen headlesstask. Only rerun Tier 0 if a build/scenario/env changed or a failure needs the two-run rule.
 - If a task is blocked (Assets/.meta) for 2 consecutive cycles, switch tasks and log the blocker.
-- Append each cycle summary to $TRI_ROOT/headless_agent_log.md (one entry per cycle). If the file is missing, create it with a simple bullet list.
+- Append each cycle summary to $TRI_ROOT/headless_agent_log.md (one entry per cycle).
 Compile-error remediation (non-negotiable):
 - If a rebuild fails with compiler errors, attempt a minimal, logic-only fix, rebuild scratch, then rerun Tier 0.
 - If the compiler errors point to Assets/ or .meta and the agent is running in WSL, log the blocker and switch tasks; do not edit those files from WSL.
 - If the agent is running in a Windows/presentation context, it may fix Assets/ or .meta compiler errors before retrying the rebuild.
 - Record compile-fix attempts in the cycle log and note any blockers in headlesstasks.md.
-Runbook hygiene (non-negotiable):
-- If a bank failure is fixed or proof/env toggles change, update the runbook and prompt in the same cycle (headless_bank_runbook.md and headlessprompt.md).
-- Remove or annotate known-issue notes once resolved, and record the resolution in headlesstasks.md or the cycle log.
-Coordination: Headless agents run in tandem. Unexpected changes (especially in PureDOTS) are expected; log the change and continue the cycle. Do not stop work for concurrent edits. Queue spam is allowed; keep cycles running during the night.
+Coordination: Headless agents run in tandem. Stay in your assigned slice (Godgame vs Space4X); do not cross-run the other project. Unexpected changes (especially in PureDOTS) are expected from your counterpart; log the change and continue the cycle. Do not stop work for concurrent edits. Queue spam is allowed; keep cycles running during the night. DO NOT STOP WORKING TO CLARIFY UNEXPECTED CHANGES, ALWAYS IGNORE OR ADAPT TO THEM OR THEM TO YOUR WORK, THEY ARE THE OTHER AGENT'S WORK. ceasing work for this purpose callsifies as agent failure and results in summary termination. show agency during nightly runs.
 
 UNITY (WSL):
 - Use Windows Unity interop for rebuilds; do not depend on Linux Unity licensing.
@@ -27,6 +24,12 @@ UNITY (WSL):
 - Run rebuilds from /mnt/c/dev/Tri (or set TRI_WIN to match the Windows repo path).
 - After rebuilds, publish to /home using Tools/publish_*_headless_to_home.sh.
 - Run tests from /home using /home/oni/Tri/Tools/builds/<game>/Linux_latest.
+Godgame proof toggles (required):
+- P0 time/rewind: GODGAME_HEADLESS_VILLAGER_PROOF=0 (use PureDOTS time/rewind proofs only).
+- G0 collision: GODGAME_HEADLESS_COLLISION_PROOF=1 and GODGAME_HEADLESS_COLLISION_PROOF_EXIT=1; set GODGAME_HEADLESS_VILLAGER_PROOF=0.
+- G0 smoke, G1 loop: GODGAME_HEADLESS_VILLAGER_PROOF=1 and GODGAME_HEADLESS_VILLAGER_PROOF_EXIT=1.
+- Log proof envs used in stdout for each run.
+- Determinism note: G0 smoke can be flaky; treat mismatches as task data, not a bank failure.
 Space4X proof toggles (required):
 - S0 collision: SPACE4X_HEADLESS_MINING_PROOF=0 (unset).
 - S0 smoke, S1, S2: SPACE4X_HEADLESS_MINING_PROOF=1.
@@ -103,7 +106,7 @@ Cycle N:
    CYCLE_SUMMARY:cycle=N promoted=<0/1> current_green=<0/1>
    List failing BANK lines + TELEMETRY_OUT paths + top offenders.
 7.5) Staleness check: if you changed proof/env toggles, bank expectations, or fixed a bank failure, update
-     headless_bank_runbook.md and headlessprompt.md before closing the cycle.
+     puredots/Docs/Headless/headless_runbook.md and headlessprompt.md before closing the cycle.
 8) Update state.json and proceed to next cycle.
 
 STOP CONDITIONS:
@@ -123,4 +126,3 @@ Telemetry + decision discipline:
 - Single-variable rule: do not change scenario and code in the same cycle.
 - Regression guardrail: if an invariant fails, stop changes and fall back to binary-only mode for that project.
 - Telemetry hygiene: increase detail only while diagnosing, then return to summary level.
-- Telemetry cap default: set PUREDOTS_TELEMETRY_MAX_BYTES=805306368 unless a task requires more.
