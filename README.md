@@ -1,12 +1,12 @@
-# Headless Rebuild Tool (Godgame)
+# Headless Rebuild Tool (Godgame + Space4X)
 
-This repo contains a minimal WSL-friendly rebuild script for the Godgame headless Linux player.
+This repo contains minimal WSL-friendly rebuild scripts for the Godgame and Space4X headless Linux players.
 It targets the Windows Unity editor by default to avoid Linux license failures.
 
 ## Requirements
 - WSL2 with access to your Tri workspace.
 - Windows Unity editor installed (default: `6000.3.1f1`).
-- A Tri clone with `godgame/` and `puredots/` present.
+- A Tri clone with `godgame/`, `space4x/`, and `puredots/` present.
 
 ## Quick start
 
@@ -15,10 +15,12 @@ export TRI_ROOT=/home/oni/Tri
 export TRI_WIN='C:\\dev\\Tri'
 export UNITY_WIN='C:\\Program Files\\Unity\\Hub\\Editor\\6000.3.1f1\\Editor\\Unity.exe'
 ./build_godgame_linux_from_wsl.sh
+./build_space4x_linux_from_wsl.sh
 ```
 
 Build output is published to:
 - `${TRI_ROOT}/Tools/builds/godgame/Linux_latest`
+- `${TRI_ROOT}/Tools/builds/space4x/Linux_latest`
 
 ## Environment variables
 - `TRI_ROOT`: WSL path to Tri root (required if not in default locations).
@@ -27,8 +29,9 @@ Build output is published to:
 - `UNITY_LINUX`: Optional Linux Unity path if you choose to use Linux Unity.
 - `FORCE_WINDOWS_UNITY`: `1` (default) forces Windows Unity; set to `0` to allow Linux fallback.
 - `FORCE_LINUX_UNITY`: `1` forces Linux Unity.
-- `PUBLISH_ROOT`: Override publish root (default `${TRI_ROOT}/Tools/builds/godgame`).
+- `PUBLISH_ROOT`: Override publish root for the selected script (default `${TRI_ROOT}/Tools/builds/godgame` or `${TRI_ROOT}/Tools/builds/space4x`).
 
 ## Notes
 - This repo includes snapshots of `headlessprompt.md`, `headless_runbook.md`, and `headlesstasks.md` for reference.
 - These docs are copied from Tri and may need manual sync if the main repo changes.
+- Space4X Tier 2 behavior loops are currently failing in nightly (missing loops); rebuild tooling is stable but the pipeline is not fully green.
