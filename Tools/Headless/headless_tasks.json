@@ -6,6 +6,7 @@
       "runner": "godgame_loader",
       "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
       "tick_budget": 300,
+      "timeout_s": 600,
       "default_seeds": [
         42
       ],
@@ -122,6 +123,7 @@
       "runner": "space4x_loader",
       "scenario_path": "space4x/Assets/Scenarios/space4x_collision_micro.json",
       "tick_budget": 300,
+      "timeout_s": 600,
       "default_seeds": [
         77
       ],
@@ -230,6 +232,7 @@
       "runner": "space4x_loader",
       "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
       "tick_budget": 300,
+      "timeout_s": 600,
       "default_seeds": [
         77
       ],
@@ -338,6 +341,7 @@
       "runner": "scenario_runner",
       "scenario_path": "puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/headless_time_rewind_short.json",
       "tick_budget": 600,
+      "timeout_s": 600,
       "default_seeds": [
         13
       ],

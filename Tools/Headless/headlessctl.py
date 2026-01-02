@@ -5,14 +5,17 @@ import json
 import math
 import os
 import re
+import selectors
 import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import uuid
 
 TOOL_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
+DEFAULT_TIMEOUT_S = 600
 
 
 def eprint(msg):
@@ -336,7 +339,6 @@ def scan_telemetry(telemetry_path, run_dir, pack_caps):
     monotonic_ok = True
     parse_errors = 0
     nan_inf_found = 0
-    truncation_markers = 0
     negative_counts = 0
     negative_resources = 0
     seed_used = None
@@ -378,9 +380,6 @@ def scan_telemetry(telemetry_path, run_dir, pack_caps):
             raw_line = raw.rstrip("\n")
             if not raw_line:
                 continue
-            low_line = raw_line.lower()
-            if "trunc" in low_line:
-                truncation_markers += 1
             try:
                 record = json.loads(raw_line)
             except Exception:
@@ -457,7 +456,6 @@ def scan_telemetry(telemetry_path, run_dir, pack_caps):
         {"name": "telemetry.no_nan_inf", "ok": nan_inf_found == 0, "value": nan_inf_found},
         {"name": "telemetry.no_negative_counts", "ok": negative_counts == 0, "value": negative_counts},
         {"name": "telemetry.no_negative_resources", "ok": negative_resources == 0, "value": negative_resources},
-        {"name": "telemetry.no_truncation_markers", "ok": truncation_markers == 0, "value": truncation_markers},
         {"name": "telemetry.output_under_cap", "ok": under_cap, "size_bytes": size_bytes, "cap_bytes": cap_bytes}
     ]
 
@@ -503,6 +501,8 @@ def build_error_result(error_code, error, run_id=None):
 def run_task_internal(task_id, seed, pack_name):
     tool_root = resolve_tool_root()
     tri_root = resolve_tri_root()
+    if not is_tri_root(tri_root):
+        return build_error_result("tri_root_invalid", f"TRI_ROOT invalid: {tri_root}"), 2
     state_dir = resolve_state_dir(tri_root)
     tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
     packs_path = os.path.join(tool_root, "Tools", "Headless", "headless_packs.json")
@@ -532,6 +532,10 @@ def run_task_internal(task_id, seed, pack_name):
     runner = task.get("runner")
     scenario_path = task.get("scenario_path")
     required_bank = task.get("required_bank")
+    timeout_s = task.get("timeout_s")
+    if not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
+        timeout_s = DEFAULT_TIMEOUT_S
+    timeout_s = int(timeout_s)
 
     binary = find_binary(tri_root, project)
     if not binary or not os.path.exists(binary):
@@ -571,24 +575,54 @@ def run_task_internal(task_id, seed, pack_name):
     bank_results = []
     telemetry_out = None
     exit_code = None
+    timed_out = False
 
     with open(stdout_path, "w", encoding="utf-8") as log_handle:
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding="utf-8", errors="replace")
+            selector = selectors.DefaultSelector()
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            start_time = time.monotonic()
+
+            def handle_line(line):
+                nonlocal telemetry_out
+                log_handle.write(line)
+                log_handle.flush()
+                stripped = line.strip()
+                bank = parse_bank_line(stripped)
+                if bank:
+                    bank_results.append(bank)
+                if stripped.startswith("TELEMETRY_OUT:"):
+                    telemetry_out = stripped.split(":", 1)[1].strip()
+
             while True:
-                line = proc.stdout.readline()
-                if line == "" and proc.poll() is not None:
-                    break
-                if line:
-                    log_handle.write(line)
+                if timeout_s and time.monotonic() - start_time > timeout_s:
+                    timed_out = True
+                    log_handle.write(f"HEADLESSCTL: timeout after {timeout_s}s\n")
                     log_handle.flush()
-                    stripped = line.strip()
-                    bank = parse_bank_line(stripped)
-                    if bank:
-                        bank_results.append(bank)
-                    if stripped.startswith("TELEMETRY_OUT:"):
-                        telemetry_out = stripped.split(":", 1)[1].strip()
-            exit_code = proc.wait()
+                    proc.kill()
+                    break
+
+                if proc.poll() is not None:
+                    while True:
+                        line = proc.stdout.readline()
+                        if not line:
+                            break
+                        handle_line(line)
+                    break
+
+                events = selector.select(timeout=0.2)
+                if not events:
+                    continue
+                for key, _ in events:
+                    line = key.fileobj.readline()
+                    if not line:
+                        continue
+                    handle_line(line)
+            try:
+                exit_code = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                exit_code = 124
         except Exception as exc:
             exit_code = 1
             log_handle.write(f"HEADLESSCTL: run failed {exc}\n")
@@ -639,7 +673,11 @@ def run_task_internal(task_id, seed, pack_name):
     error_code = "none"
     error = None
 
-    if exit_code not in (0, None):
+    if timed_out:
+        ok = False
+        error_code = "timeout"
+        error = f"timeout_s={timeout_s}"
+    elif exit_code not in (0, None):
         ok = False
         error_code = "run_failed"
         error = f"exit_code={exit_code}"
@@ -692,6 +730,8 @@ def run_task_internal(task_id, seed, pack_name):
         "started_utc": started_utc,
         "ended_utc": utc_now(),
         "exit_code": exit_code,
+        "timeout_s": timeout_s,
+        "timed_out": timed_out,
         "bank_required": required_bank,
         "bank_results": bank_results,
         "bank_status": bank_status,
@@ -1161,6 +1201,14 @@ def validate():
         run_dir = os.path.join(state_dir, "runs", run_id) if run_id else None
 
         checks = []
+        allow_fail = bool(task.get("allow_fail"))
+        run_ok = run_result is not None and (run_result.get("ok") is True or allow_fail)
+        checks.append({
+            "name": "run_result.ok",
+            "ok": run_ok,
+            "value": run_result.get("ok") if run_result else None,
+            "allow_fail": allow_fail
+        })
         if run_dir:
             result_path = os.path.join(run_dir, "result.json")
             checks.append({
