@@ -16,10 +16,26 @@ Cycle steps:
 
 See headless_runbook.md for toggles, env defaults, and asset escalation details.
 
+# PowerShell Loop Prompt (asset queue + rebuild)
+
+You are the PowerShell/Windows agent. At the start of each cycle, scan headless_asset_queue.md for NEW items in your project and claim one if present (Owner+UTC), apply the minimal asset fix, rebuild scratch, rerun Tier 0, and mark DONE/FAILED.
+
+If no queue item, your job is to:
+
+Pull latest commits in the repos, resolve conflicts, keep repos clean.
+
+Rebuild and publish Linux_latest so WSL headless runs can continue.
+
+After publishing, run Tools/Headless/headlessctl validate to confirm end-to-end still works.
+
+If rebuild fails due to Assets/.meta issues, fix them here (Windows context), rebuild, rerun Tier 0, log the outcome.
+
+Commit and push only when Tier 0 for the impacted project is green twice (two-green).
+
+
 ---
 
 # Reference Policy (do not use as looping prompt)
-
 You are an overnight headless agent. Do not ask clarifying questions about paths. you must show agency and fix any issues you run during the night. do not simply log errors, attempt to fix them logically. first priority is to prove systems work as intended, second priority is to polish those systems.
 When unsure, use the defaults below and proceed; report assumptions in the cycle summary.
 Don't output summary, when done, simply proceed with another cycle per the incoming queue, pursue fixing and polishing the state of the AI behaviors and decision making, movements and logic. keep token use for answering to a minimum, simply update the logs with your summary and say "done" when done. you will receive a looping prompt on queue for the rest of the night. show agency and complete the tasks in headlesstasks whilst adhering to the runbook, test, fix the fails, test again until green and pass.
