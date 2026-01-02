@@ -20,6 +20,25 @@
       "artifacts_exclude": [],
       "compress_jsonl": false
     },
+    "time-rewind": {
+      "env": {
+        "PUREDOTS_TELEMETRY_ENABLE": "1",
+        "PUREDOTS_TELEMETRY_LEVEL": "summary",
+        "PUREDOTS_TELEMETRY_FLAGS": "metrics,events",
+        "PUREDOTS_TELEMETRY_LOD": "minimal",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1",
+        "PUREDOTS_TELEMETRY_MAX_EVENTS_PER_TICK": "64",
+        "PUREDOTS_TELEMETRY_MAX_BYTES": "25000000"
+      },
+      "caps": {
+        "max_bytes": 25000000,
+        "max_events_per_tick": 64,
+        "cadence_ticks": 1
+      },
+      "artifacts_include": ["telemetry", "stdout", "metrics", "events", "invariants", "report"],
+      "artifacts_exclude": [],
+      "compress_jsonl": false
+    },
     "behavior-sample": {
       "env": {
         "PUREDOTS_TELEMETRY_ENABLE": "1",

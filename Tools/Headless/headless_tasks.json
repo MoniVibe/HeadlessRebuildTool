@@ -120,7 +120,9 @@
       },
       "env": {
         "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
-        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1"
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1",
+        "GODGAME_HEADLESS_EXIT_MIN_TICK": "60",
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60"
       }
     },
     "S0.SPACE4X_COLLISION": {
@@ -236,7 +238,8 @@
       },
       "env": {
         "SPACE4X_HEADLESS_MINING_PROOF": "0",
-        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     },
     "S0.SPACE4X_SMOKE": {
@@ -249,7 +252,7 @@
       "default_seeds": [
         77
       ],
-      "default_pack": "nightly-default",
+      "default_pack": "time-rewind",
       "tags": [
         "nightly"
       ],

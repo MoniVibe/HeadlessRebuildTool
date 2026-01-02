@@ -1208,22 +1208,26 @@ def validate():
         emit_result(build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2)
 
     tasks = load_json(tasks_path).get("tasks", {})
-    runner_kinds = ["scenario_runner", "godgame_loader", "space4x_loader"]
+    validate_tasks = [
+        ("scenario_runner", "P0.TIME_REWIND_MICRO"),
+        ("godgame_loader", "G0.GODGAME_SMOKE"),
+        ("space4x_loader", "S0.SPACE4X_SMOKE")
+    ]
     results = {}
     errors = []
     ok = True
 
     script_path = os.path.abspath(__file__)
 
-    for runner in runner_kinds:
-        task_id = None
-        for candidate_id, task in tasks.items():
-            if task.get("runner") == runner:
-                task_id = candidate_id
-                break
-        if not task_id:
+    for runner, task_id in validate_tasks:
+        task = tasks.get(task_id)
+        if not task:
             ok = False
-            errors.append({"runner": runner, "error": "task_not_found"})
+            errors.append({"runner": runner, "task_id": task_id, "error": "task_not_found"})
+            continue
+        if task.get("runner") != runner:
+            ok = False
+            errors.append({"runner": runner, "task_id": task_id, "error": "task_runner_mismatch"})
             continue
 
         cmd = [sys.executable, script_path, "run_task", task_id]

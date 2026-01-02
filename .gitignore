@@ -1,4 +1,6 @@
 builds/
+nightly_artifacts/
+nightly_summary.json
 *.log
 *.tmp
 .DS_Store
