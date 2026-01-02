@@ -1,0 +1,27 @@
+name: headlessctl-validate
+
+on:
+  pull_request:
+    paths:
+      - 'Tools/Headless/**'
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  contract-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: headlessctl contract_check
+        run: python3 Tools/Headless/headlessctl.py contract_check
+
+  validate-e2e:
+    runs-on: [self-hosted, headless-e2e]
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: headlessctl validate
+        run: python3 Tools/Headless/headlessctl.py validate
+        env:
+          TRI_ROOT: ${{ vars.TRI_ROOT }}

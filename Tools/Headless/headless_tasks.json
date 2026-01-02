@@ -1,0 +1,433 @@
+{
+  "schema_version": 1,
+  "tasks": {
+    "G0.GODGAME_SMOKE": {
+      "project": "godgame",
+      "runner": "godgame_loader",
+      "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
+      "tick_budget": 300,
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "required_bank": "G0.GODGAME_SMOKE",
+      "metric_keys": [
+        "godgame.registry.villagers.total",
+        "godgame.registry.storehouses.stored",
+        "ai.idle_with_work_ratio",
+        "ai.task_latency_ticks.mean",
+        "ai.task_latency_ticks.p95",
+        "ai.decision_churn_per_min",
+        "ai.intent_flip_count",
+        "move.stuck_ticks",
+        "move.mode_flip_count",
+        "move.collision_near_miss_count",
+        "move.collision_damage_events",
+        "power.deficit_time_s",
+        "power.battery_min_soc",
+        "module.spool_transitions",
+        "module.not_ready_time_s",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "god.storehouse_loop_period_ticks.p50",
+        "god.storehouse_loop_period_ticks.p95",
+        "god.ponder_freeze_time_s",
+        "god.pile_drop_rate",
+        "god.pile_haul_rate"
+      ],
+      "thresholds": {
+        "godgame.registry.villagers.total": {
+          "min": 1
+        },
+        "godgame.registry.storehouses.stored": {
+          "min": 0
+        },
+        "ai.idle_with_work_ratio": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.mean": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.p95": {
+          "min": 0
+        },
+        "ai.decision_churn_per_min": {
+          "min": 0
+        },
+        "ai.intent_flip_count": {
+          "min": 0
+        },
+        "move.stuck_ticks": {
+          "min": 0
+        },
+        "move.mode_flip_count": {
+          "min": 0
+        },
+        "move.collision_near_miss_count": {
+          "min": 0
+        },
+        "move.collision_damage_events": {
+          "min": 0
+        },
+        "power.deficit_time_s": {
+          "min": 0
+        },
+        "power.battery_min_soc": {
+          "min": 0
+        },
+        "module.spool_transitions": {
+          "min": 0
+        },
+        "module.not_ready_time_s": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        },
+        "god.storehouse_loop_period_ticks.p50": {
+          "min": 0
+        },
+        "god.storehouse_loop_period_ticks.p95": {
+          "min": 0
+        },
+        "god.ponder_freeze_time_s": {
+          "min": 0
+        },
+        "god.pile_drop_rate": {
+          "min": 0
+        },
+        "god.pile_haul_rate": {
+          "min": 0
+        }
+      },
+      "variance_band": {
+        "godgame.registry.villagers.total": 1000,
+        "godgame.registry.storehouses.stored": 100000
+      },
+      "env": {
+        "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1"
+      }
+    },
+    "S0.SPACE4X_COLLISION": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_collision_micro.json",
+      "tick_budget": 300,
+      "default_seeds": [
+        77
+      ],
+      "default_pack": "nightly-default",
+      "required_bank": "",
+      "metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "ai.idle_with_work_ratio",
+        "ai.task_latency_ticks.mean",
+        "ai.task_latency_ticks.p95",
+        "ai.decision_churn_per_min",
+        "ai.intent_flip_count",
+        "move.stuck_ticks",
+        "move.mode_flip_count",
+        "move.collision_near_miss_count",
+        "move.collision_damage_events",
+        "power.deficit_time_s",
+        "power.battery_min_soc",
+        "module.spool_transitions",
+        "module.not_ready_time_s",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "s4x.heading_oscillation_score",
+        "s4x.turn_saturation_time_s",
+        "s4x.approach_mode_flip_rate"
+      ],
+      "thresholds": {
+        "space4x.hull.vessels": {
+          "min": 1
+        },
+        "space4x.departments.carriers": {
+          "min": 0
+        },
+        "ai.idle_with_work_ratio": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.mean": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.p95": {
+          "min": 0
+        },
+        "ai.decision_churn_per_min": {
+          "min": 0
+        },
+        "ai.intent_flip_count": {
+          "min": 0
+        },
+        "move.stuck_ticks": {
+          "min": 0
+        },
+        "move.mode_flip_count": {
+          "min": 0
+        },
+        "move.collision_near_miss_count": {
+          "min": 0
+        },
+        "move.collision_damage_events": {
+          "min": 0
+        },
+        "power.deficit_time_s": {
+          "min": 0
+        },
+        "power.battery_min_soc": {
+          "min": 0
+        },
+        "module.spool_transitions": {
+          "min": 0
+        },
+        "module.not_ready_time_s": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        },
+        "s4x.heading_oscillation_score": {
+          "min": 0
+        },
+        "s4x.turn_saturation_time_s": {
+          "min": 0
+        },
+        "s4x.approach_mode_flip_rate": {
+          "min": 0
+        }
+      },
+      "variance_band": {
+        "space4x.hull.vessels": 1000,
+        "space4x.departments.carriers": 1000
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+      }
+    },
+    "S0.SPACE4X_SMOKE": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
+      "tick_budget": 300,
+      "default_seeds": [
+        77
+      ],
+      "default_pack": "nightly-default",
+      "required_bank": "S0.SPACE4X_SMOKE",
+      "metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "ai.idle_with_work_ratio",
+        "ai.task_latency_ticks.mean",
+        "ai.task_latency_ticks.p95",
+        "ai.decision_churn_per_min",
+        "ai.intent_flip_count",
+        "move.stuck_ticks",
+        "move.mode_flip_count",
+        "move.collision_near_miss_count",
+        "move.collision_damage_events",
+        "power.deficit_time_s",
+        "power.battery_min_soc",
+        "module.spool_transitions",
+        "module.not_ready_time_s",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "s4x.heading_oscillation_score",
+        "s4x.turn_saturation_time_s",
+        "s4x.approach_mode_flip_rate"
+      ],
+      "thresholds": {
+        "space4x.hull.vessels": {
+          "min": 1
+        },
+        "space4x.departments.carriers": {
+          "min": 0
+        },
+        "ai.idle_with_work_ratio": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.mean": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.p95": {
+          "min": 0
+        },
+        "ai.decision_churn_per_min": {
+          "min": 0
+        },
+        "ai.intent_flip_count": {
+          "min": 0
+        },
+        "move.stuck_ticks": {
+          "min": 0
+        },
+        "move.mode_flip_count": {
+          "min": 0
+        },
+        "move.collision_near_miss_count": {
+          "min": 0
+        },
+        "move.collision_damage_events": {
+          "min": 0
+        },
+        "power.deficit_time_s": {
+          "min": 0
+        },
+        "power.battery_min_soc": {
+          "min": 0
+        },
+        "module.spool_transitions": {
+          "min": 0
+        },
+        "module.not_ready_time_s": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        },
+        "s4x.heading_oscillation_score": {
+          "min": 0
+        },
+        "s4x.turn_saturation_time_s": {
+          "min": 0
+        },
+        "s4x.approach_mode_flip_rate": {
+          "min": 0
+        }
+      },
+      "variance_band": {
+        "space4x.hull.vessels": 1000,
+        "space4x.departments.carriers": 1000
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "1",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1"
+      }
+    },
+    "P0.TIME_REWIND_MICRO": {
+      "project": "godgame",
+      "runner": "scenario_runner",
+      "scenario_path": "puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/headless_time_rewind_short.json",
+      "tick_budget": 600,
+      "default_seeds": [
+        13
+      ],
+      "default_pack": "nightly-default",
+      "required_bank": "",
+      "metric_keys": [
+        "storehouse.count",
+        "storehouse.stored.total",
+        "ai.idle_with_work_ratio",
+        "ai.task_latency_ticks.mean",
+        "ai.task_latency_ticks.p95",
+        "ai.decision_churn_per_min",
+        "ai.intent_flip_count",
+        "move.stuck_ticks",
+        "move.mode_flip_count",
+        "move.collision_near_miss_count",
+        "move.collision_damage_events",
+        "power.deficit_time_s",
+        "power.battery_min_soc",
+        "module.spool_transitions",
+        "module.not_ready_time_s",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "thresholds": {
+        "storehouse.count": {
+          "min": 0
+        },
+        "storehouse.stored.total": {
+          "min": 0
+        },
+        "ai.idle_with_work_ratio": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.mean": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.p95": {
+          "min": 0
+        },
+        "ai.decision_churn_per_min": {
+          "min": 0
+        },
+        "ai.intent_flip_count": {
+          "min": 0
+        },
+        "move.stuck_ticks": {
+          "min": 0
+        },
+        "move.mode_flip_count": {
+          "min": 0
+        },
+        "move.collision_near_miss_count": {
+          "min": 0
+        },
+        "move.collision_damage_events": {
+          "min": 0
+        },
+        "power.deficit_time_s": {
+          "min": 0
+        },
+        "power.battery_min_soc": {
+          "min": 0
+        },
+        "module.spool_transitions": {
+          "min": 0
+        },
+        "module.not_ready_time_s": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "variance_band": {
+        "storehouse.count": 1000,
+        "storehouse.stored.total": 100000
+      },
+      "env": {
+        "PUREDOTS_HEADLESS_TIME_PROOF": "1",
+        "PUREDOTS_HEADLESS_REWIND_PROOF": "1"
+      }
+    }
+  }
+}
