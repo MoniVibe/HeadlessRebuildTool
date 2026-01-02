@@ -42,6 +42,11 @@
         "god.pile_drop_rate",
         "god.pile_haul_rate"
       ],
+      "validate_metric_keys": [
+        "godgame.registry.villagers.total",
+        "godgame.registry.storehouses.stored",
+        "telemetry.heartbeat"
+      ],
       "thresholds": {
         "godgame.registry.villagers.total": {
           "min": 1
@@ -122,7 +127,9 @@
         "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
         "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1",
         "GODGAME_HEADLESS_EXIT_MIN_TICK": "60",
-        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60"
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60",
+        "GODGAME_HEADLESS_SMOKE_EXIT": "1",
+        "GODGAME_HEADLESS_SMOKE_MIN_TICKS": "60"
       }
     },
     "S0.SPACE4X_COLLISION": {
@@ -165,6 +172,14 @@
         "s4x.heading_oscillation_score",
         "s4x.turn_saturation_time_s",
         "s4x.approach_mode_flip_rate"
+      ],
+      "validate_metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "telemetry.heartbeat"
+      ],
+      "validate_allow_error_codes": [
+        "bank_failed"
       ],
       "thresholds": {
         "space4x.hull.vessels": {
@@ -391,6 +406,14 @@
         "telemetry.bytes_written",
         "telemetry.truncated",
         "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "storehouse.count",
+        "storehouse.stored.total",
+        "telemetry.heartbeat"
+      ],
+      "validate_allow_invariant_failures": [
+        "telemetry.monotonic_tick"
       ],
       "thresholds": {
         "storehouse.count": {

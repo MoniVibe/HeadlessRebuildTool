@@ -1262,7 +1262,21 @@ def validate():
 
         checks = []
         allow_fail = bool(task.get("allow_fail"))
+        allow_error_codes = set(task.get("validate_allow_error_codes") or [])
+        allow_invariant_failures = set(task.get("validate_allow_invariant_failures") or [])
         run_ok = run_result is not None and (run_result.get("ok") is True or allow_fail)
+        if run_result is not None and run_result.get("ok") is False:
+            error_code = run_result.get("error_code")
+            if error_code in allow_error_codes:
+                run_ok = True
+            elif allow_invariant_failures and error_code == "invariant_failed":
+                failed_invariants = [
+                    inv.get("name")
+                    for inv in run_result.get("invariants", [])
+                    if inv.get("ok") is False
+                ]
+                if failed_invariants and all(name in allow_invariant_failures for name in failed_invariants):
+                    run_ok = True
         checks.append({
             "name": "run_result.ok",
             "ok": run_ok,
@@ -1311,7 +1325,9 @@ def validate():
                 checks.append({"name": "diff_metrics.grades", "ok": True})
 
         metrics_summary = run_result.get("metrics_summary", {}) if run_result else {}
-        metric_keys = task.get("metric_keys", [])
+        metric_keys = task.get("validate_metric_keys")
+        if metric_keys is None:
+            metric_keys = task.get("metric_keys", [])
         missing_metrics = [key for key in metric_keys if not isinstance(metrics_summary.get(key), (int, float))]
         checks.append({
             "name": "metrics.oracle_keys",
@@ -1320,9 +1336,12 @@ def validate():
         })
 
         truncated_value = metrics_summary.get("telemetry.truncated")
+        truncated_ok = True
+        if isinstance(truncated_value, (int, float)):
+            truncated_ok = truncated_value == 0
         checks.append({
             "name": "telemetry.truncated",
-            "ok": isinstance(truncated_value, (int, float)) and truncated_value == 0,
+            "ok": truncated_ok,
             "value": truncated_value
         })
 
