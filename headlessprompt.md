@@ -80,6 +80,70 @@ Do not request rebuild repeatedly; write one request and wait for results.
 
 
 
+# Telemetry Watchlist (metrics-first)
+
+Always start with metrics_summary. Only use events/replay when a metric trips.
+
+Guardrails (invalid run -> do not tune behavior):
+- telemetry.truncated != 0
+- any invariant failure (NaN/Inf, non-monotonic ticks, negative resources)
+- missing required oracle keys (headlessctl validate already checks this)
+
+Space4X ships:
+A) Turning too sharply initially
+Watch: s4x.turn_saturation_time_s (high), move.mode_flip_count (high), move.collision_near_miss_count / move.collision_damage_events
+Typical causes: no angular accel cap; heading setpoint changes too often; no slow-down while turning
+Default fixes (in order): heading deadband; angular accel clamp; speed scales by heading error; minimum dwell time before mode/setpoint change
+Confirm: turn_saturation_time_s down; mode_flip_count down; near-miss/damage not worse
+
+B) Reorients back and forth every few moments
+Watch: s4x.heading_oscillation_score (primary), s4x.approach_mode_flip_rate, ai.intent_flip_count / ai.decision_churn_per_min
+Typical causes: no hysteresis or damping; deviation recomputed too often; target switches without commitment
+Default fixes: make deviation episode-stable; add hysteresis bands for approach/hold/arrive; add damping or reduce gain near target; increase lookahead
+Confirm: heading_oscillation_score down; approach_mode_flip_rate down; move.stuck_ticks not worse
+
+C) Disregards friendly units (collides/destroys)
+Add metrics if missing: move.near_miss_friendly_count, move.min_friendly_separation_m
+Actions: increase avoidance radius/priority around friendlies; apply yield policy when friendly in envelope
+Confirm: friendly near-miss down; damage down; oscillation does not spike
+
+Godgame villagers:
+A) Storehouse yo-yo / drone loop
+Watch: god.storehouse_loop_period_ticks.p95 (primary), ai.idle_with_work_ratio, ai.task_latency_ticks.p95, ai.decision_churn_per_min, ai.intent_flip_count
+Default fixes: stop hard idle snap; add micro-reposition/wander episode; chunk work; add intermediate depots; add job selection hysteresis; target cooldown
+Confirm: storehouse_loop_period_ticks.p95 down; idle_with_work_ratio stable/low; churn not spiking
+
+B) Returns to the exact same position
+Watch: god.ponder_freeze_time_s (during work goal)
+Add metrics if missing: god.idle_cluster_count or god.idle_mean_pair_distance_m
+Default fixes: idle anchors around hub instead of current position; lawful = smaller roam radius, chaotic = larger roam radius (safety constrained)
+
+Cross-game behavior profiles (chaotic <-> lawful):
+Make these data-driven in PureDOTS and tune via parameters, not hardcoded logic:
+- CommitmentSeconds, ReplanCadenceSeconds, WanderRadius, IdleJitterRadius
+- NoiseStrength (episode-stable), RiskAversion, FormationDiscipline
+Mapping: lawful = longer commitment, lower noise, smaller wander, larger safety margins; chaotic = shorter commitment, higher noise, larger wander (still safe).
+
+Telemetry proof for profiles:
+- Safety: friendly near-miss and collision damage not worse
+- Intent: churn slightly higher for chaotic, but mode flips/oscillation should not explode
+- Spatial variety: idle position entropy increases for chaotic villagers
+
+Never chase one metric (minimum no-regression gate):
+- telemetry.truncated == 0
+- move.collision_damage_events not worse
+- move.stuck_ticks not worse
+- Space4X: s4x.heading_oscillation_score down if that was the goal
+- Godgame: god.storehouse_loop_period_ticks.p95 down if that was the goal
+
+Copy/paste instruction for agents:
+When parsing telemetry, use metrics_summary first. If any telemetry health invariant fails (truncated, NaN/Inf, missing keys), abort tuning and fix telemetry/run stability.
+Space4X: treat s4x.heading_oscillation_score, s4x.approach_mode_flip_rate, and collision near-miss/damage as primary safety + smoothness oracles.
+Godgame: treat god.storehouse_loop_period_ticks.p95, ai.idle_with_work_ratio, and god.ponder_freeze_time_s as primary drone-loop oracles.
+Any behavior change must reduce the target metric without worsening collision damage or stuck ticks.
+
+
+
 # PowerShell Loop Prompt (asset queue + rebuild)
 
 You are the PowerShell/Windows agent. Each cycle:
