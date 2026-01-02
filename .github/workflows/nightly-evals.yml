@@ -1,0 +1,45 @@
+name: nightly-evals
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: [self-hosted, headless-e2e]
+    env:
+      TRI_ROOT: ${{ vars.TRI_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: headlessctl contract_check
+        run: python3 Tools/Headless/headlessctl.py contract_check
+      - name: headlessctl validate
+        run: python3 Tools/Headless/headlessctl.py validate
+      - name: run nightly tasks
+        run: python3 Tools/Headless/nightly_runner.py
+      - name: upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-artifacts-${{ github.run_id }}
+          path: |
+            nightly_artifacts/*.tar.gz
+            nightly_summary.json
+          if-no-files-found: ignore
+
+  unity-tests:
+    if: ${{ vars.UNITY_TESTS_ENABLED == '1' }}
+    runs-on: [self-hosted, headless-e2e]
+    steps:
+      - uses: actions/checkout@v4
+      - name: run unity tests
+        env:
+          UNITY_TESTS_CMD: ${{ vars.UNITY_TESTS_CMD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${UNITY_TESTS_CMD:-}" ]; then
+            echo "UNITY_TESTS_CMD is not set; configure it to run Unity tests." >&2
+            exit 1
+          fi
+          eval "$UNITY_TESTS_CMD"
