@@ -11,7 +11,7 @@
       "default_seeds": [
         42
       ],
-      "default_pack": "nightly-default",
+      "default_pack": "time-rewind",
       "tags": [
         "nightly"
       ],
