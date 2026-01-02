@@ -263,6 +263,7 @@ def collect_seed_metrics(seed_results, metric_keys, variance_band):
     aggregate_stats = {}
     variance_grades = {}
     variance_pass = True
+    variance_failed_count = 0
 
     for key, values in values_by_key.items():
         stats = compute_seed_stats(values)
@@ -281,8 +282,9 @@ def collect_seed_metrics(seed_results, metric_keys, variance_band):
             }
             if not within:
                 variance_pass = False
+                variance_failed_count += 1
 
-    return seed_runs, aggregate_summary, aggregate_stats, variance_grades, variance_pass
+    return seed_runs, aggregate_summary, aggregate_stats, variance_grades, variance_pass, variance_failed_count
 
 
 def resolve_scenario_path(tri_root, scenario_path):
@@ -296,7 +298,7 @@ def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
         return src_path, None
     if not src_path:
         return src_path, None
-    if runner_kind != "scenario_runner":
+    if runner_kind not in ("scenario_runner", "space4x_loader"):
         return src_path, None
     try:
         with open(src_path, "r", encoding="utf-8") as handle:
@@ -770,11 +772,13 @@ def run_task_multi(task_id, seeds, pack_name, task):
         if exit_code == 2:
             return result, 2
 
-    seed_runs, aggregate_summary, aggregate_stats, variance_grades, variance_pass = collect_seed_metrics(
+    seed_runs, aggregate_summary, aggregate_stats, variance_grades, variance_pass, variance_failed_count = collect_seed_metrics(
         seed_results,
         metric_keys,
         variance_band
     )
+
+    aggregate_summary["eval.variance_failed_count"] = variance_failed_count
 
     seed_ok = all(run.get("ok") for run in seed_results)
     ok = seed_ok and variance_pass
@@ -811,6 +815,9 @@ def run_task_multi(task_id, seeds, pack_name, task):
         "metrics_stats": aggregate_stats,
         "variance_grades": variance_grades,
         "variance_pass": variance_pass,
+        "eval_metrics": {
+            "variance_failed_count": variance_failed_count
+        },
         "seed_runs": seed_runs,
         "seed_run_ids": [run.get("run_id") for run in seed_runs],
         "artifacts": {}
@@ -835,13 +842,20 @@ def run_task(task_id, seed, seeds, pack_name):
     if task_id not in tasks:
         emit_result(build_error_result("task_not_found", f"task not found: {task_id}"), 2)
     task = tasks[task_id]
-    seed_list = resolve_seed_list(task, seed, seeds)
+    seed_policy = task.get("seed_policy")
+    default_seeds = task.get("default_seeds") or []
+    auto_multi = False
+    if seeds is None and seed is None and seed_policy == "ai_polish" and len(default_seeds) >= 3:
+        seed_list = [int(value) for value in default_seeds]
+        auto_multi = True
+    else:
+        seed_list = resolve_seed_list(task, seed, seeds)
 
     policy_ok, policy_code, policy_error = check_seed_policy(task, seed_list)
     if not policy_ok:
         emit_result(build_error_result(policy_code, policy_error), 2)
 
-    if seeds is not None and len(seed_list) > 1:
+    if (seeds is not None or auto_multi) and len(seed_list) > 1:
         result, exit_code = run_task_multi(task_id, seed_list, pack_name, task)
         emit_result(result, exit_code)
 
@@ -1099,8 +1113,25 @@ def contract_check():
                     errors.append({"id": "task_default_seeds_invalid", "task_id": task_id})
 
         seed_policy = task.get("seed_policy")
-        if seed_policy is not None and seed_policy not in ("ai_polish",):
+        if seed_policy is not None and seed_policy not in ("ai_polish", "none"):
             errors.append({"id": "task_seed_policy_invalid", "task_id": task_id, "value": seed_policy})
+        if seed_policy == "ai_polish":
+            if runner not in ("scenario_runner", "space4x_loader"):
+                errors.append({"id": "task_seed_policy_runner_invalid", "task_id": task_id, "runner": runner})
+            if not isinstance(default_seeds, list) or len(default_seeds) < 3:
+                errors.append({"id": "task_seed_policy_seeds_missing", "task_id": task_id})
+            else:
+                counts = {}
+                for seed_value in default_seeds:
+                    if not isinstance(seed_value, int):
+                        counts = None
+                        break
+                    counts[seed_value] = counts.get(seed_value, 0) + 1
+                if counts is None:
+                    errors.append({"id": "task_seed_policy_seeds_invalid", "task_id": task_id})
+                else:
+                    if len(counts) < 2 or max(counts.values()) < 2:
+                        errors.append({"id": "task_seed_policy_seeds_pattern_invalid", "task_id": task_id})
 
     ok = len(errors) == 0
     out = {
@@ -1217,19 +1248,27 @@ def validate():
                 "path": result_path
             })
 
-        artifacts = run_result.get("artifacts", {}) if run_result else {}
-        metrics_path = artifacts.get("metrics")
-        invariants_path = artifacts.get("invariants")
-        checks.append({
-            "name": "metrics.jsonl",
-            "ok": bool(metrics_path) and metrics_path.endswith(".jsonl") and os.path.exists(metrics_path) and os.path.getsize(metrics_path) > 0,
-            "path": metrics_path
-        })
-        checks.append({
-            "name": "invariants.jsonl",
-            "ok": bool(invariants_path) and invariants_path.endswith(".jsonl") and os.path.exists(invariants_path) and os.path.getsize(invariants_path) > 0,
-            "path": invariants_path
-        })
+        artifact_runs = []
+        if run_result and run_result.get("seed_runs"):
+            artifact_runs = run_result.get("seed_runs", [])
+        elif run_result:
+            artifact_runs = [run_result]
+
+        for artifact_run in artifact_runs:
+            artifacts = artifact_run.get("artifacts", {}) if artifact_run else {}
+            metrics_path = artifacts.get("metrics")
+            invariants_path = artifacts.get("invariants")
+            label = artifact_run.get("run_id") or "single"
+            checks.append({
+                "name": f"metrics.jsonl:{label}",
+                "ok": bool(metrics_path) and metrics_path.endswith(".jsonl") and os.path.exists(metrics_path) and os.path.getsize(metrics_path) > 0,
+                "path": metrics_path
+            })
+            checks.append({
+                "name": f"invariants.jsonl:{label}",
+                "ok": bool(invariants_path) and invariants_path.endswith(".jsonl") and os.path.exists(invariants_path) and os.path.getsize(invariants_path) > 0,
+                "path": invariants_path
+            })
 
         diff_result = None
         diff_ok = False

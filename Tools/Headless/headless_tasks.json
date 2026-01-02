@@ -7,6 +7,7 @@
       "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
       "tick_budget": 300,
       "timeout_s": 600,
+      "seed_policy": "none",
       "default_seeds": [
         42
       ],
@@ -124,8 +125,11 @@
       "scenario_path": "space4x/Assets/Scenarios/space4x_collision_micro.json",
       "tick_budget": 300,
       "timeout_s": 600,
+      "seed_policy": "ai_polish",
       "default_seeds": [
-        77
+        77,
+        77,
+        78
       ],
       "default_pack": "nightly-default",
       "required_bank": "",
@@ -233,6 +237,7 @@
       "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
       "tick_budget": 300,
       "timeout_s": 600,
+      "seed_policy": "none",
       "default_seeds": [
         77
       ],
@@ -342,6 +347,7 @@
       "scenario_path": "puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/headless_time_rewind_short.json",
       "tick_budget": 600,
       "timeout_s": 600,
+      "seed_policy": "none",
       "default_seeds": [
         13
       ],
