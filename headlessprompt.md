@@ -63,6 +63,23 @@ Heartbeats: each agent writes ops/heartbeats/wsl.json or ops/heartbeats/ps.json 
 Non-negotiables still apply: each cycle must attempt at least one headlesstask and not end with only bank; WSL must not edit Assets/.meta.
 
 
+# Blocked Mode (build.lock)
+
+If $TRI_STATE_DIR/ops/locks/build.lock exists, do not run headless binaries.
+
+Blocked-mode steps:
+- Update heartbeat (phase=waiting_on_rebuild).
+- Do one offline step per cycle:
+  A) Read the last nightly_summary.json or last runs/<run_id>/result.json and pick the next target metric.
+  B) Prepare a minimal code patch (logic only) without running binaries.
+  C) Update task definitions/thresholds (config-only).
+  D) Run headlessctl contract_check only.
+- Sleep loop to avoid prompt spam: check for results/<id>.json or lock removal once per minute, then exit only when the lock is gone or results are present.
+
+Do not request rebuild repeatedly; write one request and wait for results.
+
+
+
 # PowerShell Loop Prompt (asset queue + rebuild)
 
 You are the PowerShell/Windows agent. Each cycle:
