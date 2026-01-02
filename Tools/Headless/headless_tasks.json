@@ -11,7 +11,7 @@
       "default_seeds": [
         42
       ],
-      "default_pack": "time-rewind",
+      "default_pack": "nightly-default",
       "tags": [
         "nightly"
       ],
@@ -252,7 +252,7 @@
       "default_seeds": [
         77
       ],
-      "default_pack": "time-rewind",
+      "default_pack": "nightly-default",
       "tags": [
         "nightly"
       ],
@@ -366,7 +366,7 @@
       "default_seeds": [
         13
       ],
-      "default_pack": "nightly-default",
+      "default_pack": "time-rewind",
       "tags": [
         "nightly"
       ],
