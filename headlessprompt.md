@@ -6,11 +6,12 @@ Each cycle must attempt at least one headlesstask (bank is gating only).
 Single-variable rule: do not change scenario and code in the same cycle.
 
 Cycle steps:
+0) If $TRI_STATE_DIR/ops/locks/build.lock exists: do not run headless binaries (including nightly_runner/headlessctl). Switch to analysis-only work and wait; if a rebuild is needed, write a rebuild request JSON (ops/requests/<uuid>.json) instead of prose.
 1) Tools/Headless/headlessctl contract_check (fast).
 2) Run Tier 0 for your slice using headlessctl run_task <taskId> (repeat once if FAIL to apply the two-fail rule).
 3) Pick one pending item from headlesstasks.md for your slice.
 4) Run it with headlessctl run_task <taskId>. Use the JSON metrics_summary to decide the smallest change that improves the primary metric(s) without breaking invariants.
-5) If the fix is logic-only: implement it in the correct repo (PureDOTS for shared, game repo for game-specific), then tell the PowerShell agent a rebuild is needed.
+5) If the fix is logic-only: implement it in the correct repo (PureDOTS for shared, game repo for game-specific), then request a rebuild via ops/requests/<uuid>.json.
 6) Append a cycle entry to headless_agent_log.md with: taskId, run_id(s), key metrics, what you changed, next step.
 7) Continue to next cycle.
 
@@ -21,8 +22,8 @@ See headless_runbook.md for toggles, env defaults, and asset escalation details.
 Requirement: Both agents must share the same physical TRI_STATE_DIR (do not rely on defaults). Override TRI_STATE_DIR explicitly for coordination.
 
 Recommended setup:
-- PowerShell: TRI_STATE_DIR=C:\dev\tri-headless-state
-- WSL: TRI_STATE_DIR=/mnt/c/dev/tri-headless-state
+- PowerShell: TRI_STATE_DIR=C:\tri-headless-state
+- WSL: TRI_STATE_DIR=/mnt/c/tri-headless-state
 Keep the ops directory small to reduce drvfs churn.
 
 Ops bus layout (under $TRI_STATE_DIR/ops/):
@@ -31,6 +32,7 @@ Ops bus layout (under $TRI_STATE_DIR/ops/):
 - requests/*.json, claims/*.json, results/*.json
 
 Hard rule: while build.lock exists, WSL must not run headless binaries; switch to analysis-only work (read last summary, pick next task, prep patch).
+PowerShell owns rebuilds and build.lock; hold the lock until publish completes, validate passes, and results/<id>.json is written.
 
 Request schema (minimal rebuild request JSON):
 {
@@ -48,32 +50,28 @@ PowerShell loop update:
 - claim rebuild requests
 - create build.lock
 - rebuild + publish Linux_latest
-- delete build.lock
-- run headlessctl validate
+- run headlessctl validate (set HEADLESSCTL_IGNORE_LOCK=1 while lock is held)
 - write results/<id>.json
+- delete build.lock
 
 WSL loop update:
 - write rebuild requests instead of prose handoffs
 - wait for results/<id>.json before resuming runs
+
+Heartbeats: each agent writes ops/heartbeats/wsl.json or ops/heartbeats/ps.json every cycle with {cycle, phase, task, utc}.
 
 Non-negotiables still apply: each cycle must attempt at least one headlesstask and not end with only bank; WSL must not edit Assets/.meta.
 
 
 # PowerShell Loop Prompt (asset queue + rebuild)
 
-You are the PowerShell/Windows agent. At the start of each cycle, scan headless_asset_queue.md for NEW items in your project and claim one if present (Owner+UTC), apply the minimal asset fix, rebuild scratch, rerun Tier 0, and mark DONE/FAILED.
-
-If no queue item, your job is to:
-
-Pull latest commits in the repos, resolve conflicts, keep repos clean.
-
-Rebuild and publish Linux_latest so WSL headless runs can continue.
-
-After publishing, run Tools/Headless/headlessctl validate to confirm end-to-end still works.
-
-If rebuild fails due to Assets/.meta issues, fix them here (Windows context), rebuild, rerun Tier 0, log the outcome.
-
-Commit and push only when Tier 0 for the impacted project is green twice (two-green).
+You are the PowerShell/Windows agent. Each cycle:
+- Update ops/heartbeats/ps.json.
+- Check ops/requests/ for unclaimed rebuild requests. If found: claim it, create build.lock, rebuild + publish Linux_latest, run Tools/Headless/headlessctl validate (HEADLESSCTL_IGNORE_LOCK=1), write results/<id>.json, then delete build.lock.
+- If no rebuild request: consume exactly one asset queue item (headless_asset_queue.md) or do one maintenance action (prune old runs / disk space log). Do not run headless tasks unless it is the post-publish validate.
+- Keep repos clean and pull latest commits as needed.
+- If rebuild fails due to Assets/.meta issues, fix them here (Windows context), rebuild, rerun Tier 0, log the outcome.
+- Commit and push only when Tier 0 for the impacted project is green twice (two-green).
 
 
 ---

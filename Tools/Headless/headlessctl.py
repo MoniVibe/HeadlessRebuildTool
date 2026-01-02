@@ -99,6 +99,19 @@ def resolve_state_dir(tri_root):
     return os.path.join(tri_root, ".tri", "state")
 
 
+def get_build_lock_path(state_dir):
+    return os.path.join(state_dir, "ops", "locks", "build.lock")
+
+
+def check_build_lock(state_dir):
+    if os.environ.get("HEADLESSCTL_IGNORE_LOCK") == "1":
+        return None
+    lock_path = get_build_lock_path(state_dir)
+    if os.path.exists(lock_path):
+        return lock_path
+    return None
+
+
 def load_json(path):
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -834,6 +847,13 @@ def run_task_multi(task_id, seeds, pack_name, task):
 
 def run_task(task_id, seed, seeds, pack_name):
     tool_root = resolve_tool_root()
+    tri_root = resolve_tri_root()
+    state_dir = resolve_state_dir(tri_root)
+    lock_path = check_build_lock(state_dir)
+    if lock_path:
+        result = build_error_result("build_locked", f"build.lock present: {lock_path}")
+        result["lock_path"] = lock_path
+        emit_result(result, 2)
     tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
     if not os.path.exists(tasks_path):
         emit_result(build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2)
@@ -1178,6 +1198,11 @@ def validate():
     tool_root = resolve_tool_root()
     tri_root = resolve_tri_root()
     state_dir = resolve_state_dir(tri_root)
+    lock_path = check_build_lock(state_dir)
+    if lock_path:
+        result = build_error_result("build_locked", f"build.lock present: {lock_path}")
+        result["lock_path"] = lock_path
+        emit_result(result, 2)
     tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
     if not os.path.exists(tasks_path):
         emit_result(build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2)
