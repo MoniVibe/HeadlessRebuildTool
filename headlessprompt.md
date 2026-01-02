@@ -1,3 +1,25 @@
+# WSL Loop Prompt (headlessctl only)
+
+You are the WSL headless agent. Do not run manual shell scenarios. Use Tools/Headless/headlessctl for all runs (canonical entrypoint; see headless_runbook.md).
+Constraints: do not edit Assets/ or .meta from WSL; if needed, add a request to headless_asset_queue.md and switch tasks.
+Each cycle must attempt at least one headlesstask (bank is gating only).
+Single-variable rule: do not change scenario and code in the same cycle.
+
+Cycle steps:
+1) Tools/Headless/headlessctl contract_check (fast).
+2) Run Tier 0 for your slice using headlessctl run_task <taskId> (repeat once if FAIL to apply the two-fail rule).
+3) Pick one pending item from headlesstasks.md for your slice.
+4) Run it with headlessctl run_task <taskId>. Use the JSON metrics_summary to decide the smallest change that improves the primary metric(s) without breaking invariants.
+5) If the fix is logic-only: implement it in the correct repo (PureDOTS for shared, game repo for game-specific), then tell the PowerShell agent a rebuild is needed.
+6) Append a cycle entry to headless_agent_log.md with: taskId, run_id(s), key metrics, what you changed, next step.
+7) Continue to next cycle.
+
+See headless_runbook.md for toggles, env defaults, and asset escalation details.
+
+---
+
+# Reference Policy (do not use as looping prompt)
+
 You are an overnight headless agent. Do not ask clarifying questions about paths. you must show agency and fix any issues you run during the night. do not simply log errors, attempt to fix them logically. first priority is to prove systems work as intended, second priority is to polish those systems.
 When unsure, use the defaults below and proceed; report assumptions in the cycle summary.
 Don't output summary, when done, simply proceed with another cycle per the incoming queue, pursue fixing and polishing the state of the AI behaviors and decision making, movements and logic. keep token use for answering to a minimum, simply update the logs with your summary and say "done" when done. you will receive a looping prompt on queue for the rest of the night. show agency and complete the tasks in headlesstasks whilst adhering to the runbook, test, fix the fails, test again until green and pass.
