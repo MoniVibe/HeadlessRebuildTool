@@ -173,14 +173,6 @@
         "s4x.turn_saturation_time_s",
         "s4x.approach_mode_flip_rate"
       ],
-      "validate_metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "telemetry.heartbeat"
-      ],
-      "validate_allow_error_codes": [
-        "bank_failed"
-      ],
       "thresholds": {
         "space4x.hull.vessels": {
           "min": 1
@@ -295,6 +287,14 @@
         "s4x.heading_oscillation_score",
         "s4x.turn_saturation_time_s",
         "s4x.approach_mode_flip_rate"
+      ],
+      "validate_metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "telemetry.heartbeat"
+      ],
+      "validate_allow_error_codes": [
+        "bank_failed"
       ],
       "thresholds": {
         "space4x.hull.vessels": {
