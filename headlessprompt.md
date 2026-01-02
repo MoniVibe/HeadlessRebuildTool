@@ -16,6 +16,49 @@ Cycle steps:
 
 See headless_runbook.md for toggles, env defaults, and asset escalation details.
 
+# Coordination (ops bus + build lock)
+
+Requirement: Both agents must share the same physical TRI_STATE_DIR (do not rely on defaults). Override TRI_STATE_DIR explicitly for coordination.
+
+Recommended setup:
+- PowerShell: TRI_STATE_DIR=C:\dev\tri-headless-state
+- WSL: TRI_STATE_DIR=/mnt/c/dev/tri-headless-state
+Keep the ops directory small to reduce drvfs churn.
+
+Ops bus layout (under $TRI_STATE_DIR/ops/):
+- locks/build.lock (PowerShell owns it)
+- heartbeats/wsl.json, heartbeats/ps.json
+- requests/*.json, claims/*.json, results/*.json
+
+Hard rule: while build.lock exists, WSL must not run headless binaries; switch to analysis-only work (read last summary, pick next task, prep patch).
+
+Request schema (minimal rebuild request JSON):
+{
+  "id": "uuid",
+  "type": "rebuild",
+  "requested_by": "wsl",
+  "utc": "2026-01-02T12:34:56Z",
+  "projects": ["godgame", "space4x"],
+  "reason": "new code pushed, need fresh Linux_latest",
+  "min_commit": {"godgame": "sha", "space4x": "sha", "puredots": "sha"},
+  "priority": 2
+}
+
+PowerShell loop update:
+- claim rebuild requests
+- create build.lock
+- rebuild + publish Linux_latest
+- delete build.lock
+- run headlessctl validate
+- write results/<id>.json
+
+WSL loop update:
+- write rebuild requests instead of prose handoffs
+- wait for results/<id>.json before resuming runs
+
+Non-negotiables still apply: each cycle must attempt at least one headlesstask and not end with only bank; WSL must not edit Assets/.meta.
+
+
 # PowerShell Loop Prompt (asset queue + rebuild)
 
 You are the PowerShell/Windows agent. At the start of each cycle, scan headless_asset_queue.md for NEW items in your project and claim one if present (Owner+UTC), apply the minimal asset fix, rebuild scratch, rerun Tier 0, and mark DONE/FAILED.

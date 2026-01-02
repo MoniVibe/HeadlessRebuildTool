@@ -12,6 +12,10 @@
         42
       ],
       "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 10,
       "required_bank": "G0.GODGAME_SMOKE",
       "metric_keys": [
         "godgame.registry.villagers.total",
@@ -132,6 +136,10 @@
         78
       ],
       "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 30,
       "required_bank": "",
       "metric_keys": [
         "space4x.hull.vessels",
@@ -242,6 +250,10 @@
         77
       ],
       "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 20,
       "required_bank": "S0.SPACE4X_SMOKE",
       "metric_keys": [
         "space4x.hull.vessels",
@@ -352,6 +364,10 @@
         13
       ],
       "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 40,
       "required_bank": "",
       "metric_keys": [
         "storehouse.count",

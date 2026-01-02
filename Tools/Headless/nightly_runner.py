@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import os
 import subprocess
 import sys
-
-TASKS = [
-    "G0.GODGAME_SMOKE",
-    "S0.SPACE4X_SMOKE",
-    "S0.SPACE4X_COLLISION",
-    "P0.TIME_REWIND_MICRO"
-]
 
 
 def resolve_state_dir():
@@ -22,6 +16,46 @@ def resolve_state_dir():
         return os.path.join(base, "tri-headless")
     tri_root = os.environ.get("TRI_ROOT", os.getcwd())
     return os.path.join(tri_root, ".tri", "state")
+
+
+def resolve_tasks_path():
+    return os.path.join(os.path.dirname(__file__), "headless_tasks.json")
+
+
+def load_tasks(tasks_path):
+    with open(tasks_path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data.get("tasks", {})
+
+
+def parse_task_list(value):
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def task_sort_key(task_id, task):
+    order = task.get("nightly_order")
+    if isinstance(order, int):
+        return (order, task_id)
+    if isinstance(order, float):
+        return (int(order), task_id)
+    return (1000, task_id)
+
+
+def select_tasks(task_data, tag, task_ids):
+    if task_ids:
+        missing = [task_id for task_id in task_ids if task_id not in task_data]
+        if missing:
+            raise ValueError(f"unknown tasks: {', '.join(missing)}")
+        return task_ids
+    selected = []
+    for task_id, task in task_data.items():
+        tags = task.get("tags") or []
+        if tag in tags:
+            selected.append(task_id)
+    selected.sort(key=lambda task_id: task_sort_key(task_id, task_data[task_id]))
+    return selected
 
 
 def run_headlessctl(args):
@@ -124,17 +158,71 @@ def evaluate_run(run_result, metrics_result):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Run nightly headless tasks.")
+    parser.add_argument("--tag", default="nightly", help="Task tag to select.")
+    parser.add_argument("--tasks", default="", help="Comma-separated task ids to run.")
+    args = parser.parse_args()
+
+    state_dir = resolve_state_dir()
+    lock_path = os.path.join(state_dir, "ops", "locks", "build.lock")
+    if os.path.exists(lock_path):
+        summary = {
+            "ok": True,
+            "skipped": True,
+            "reason": "build_lock",
+            "tag": args.tag,
+            "tasks": []
+        }
+        summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        return
+
+    tasks_path = resolve_tasks_path()
+    task_data = load_tasks(tasks_path)
+    task_override = parse_task_list(args.tasks)
+    try:
+        selected_tasks = select_tasks(task_data, args.tag, task_override)
+    except ValueError as exc:
+        summary = {
+            "ok": False,
+            "skipped": False,
+            "reason": "invalid_tasks",
+            "error": str(exc),
+            "tag": args.tag,
+            "tasks": task_override
+        }
+        summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        sys.exit(1)
+
+    if not selected_tasks:
+        summary = {
+            "ok": False,
+            "skipped": False,
+            "reason": "no_tasks",
+            "tag": args.tag,
+            "tasks": []
+        }
+        summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        sys.exit(1)
+
     artifact_dir = os.path.join(os.getcwd(), "nightly_artifacts")
     os.makedirs(artifact_dir, exist_ok=True)
-    state_dir = resolve_state_dir()
 
     summary = {
         "ok": True,
+        "skipped": False,
+        "tag": args.tag,
+        "tasks": selected_tasks,
         "runs": []
     }
     overall_fail = False
 
-    for task_id in TASKS:
+    for task_id in selected_tasks:
         run_result, _ = run_headlessctl(["run_task", task_id])
         run_id = run_result.get("run_id")
         seed_run_ids = run_result.get("seed_run_ids") or []
