@@ -103,9 +103,25 @@ def get_build_lock_path(state_dir):
     return os.path.join(state_dir, "ops", "locks", "build.lock")
 
 
+def get_build_state_path(state_dir):
+    return os.path.join(state_dir, "ops", "locks", "build.state.json")
+
+
 def check_build_lock(state_dir):
     if os.environ.get("HEADLESSCTL_IGNORE_LOCK") == "1":
         return None
+    state_path = get_build_state_path(state_dir)
+    if os.path.exists(state_path):
+        try:
+            data = load_json(state_path)
+        except Exception:
+            return state_path
+        state = data.get("state")
+        if state == "locked":
+            return state_path
+        if state == "unlocked":
+            return None
+        return state_path
     lock_path = get_build_lock_path(state_dir)
     if os.path.exists(lock_path):
         return lock_path
@@ -121,7 +137,28 @@ def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
-def find_binary(tri_root, project):
+def resolve_pointer_binary(state_dir, project):
+    if not state_dir or project not in ("godgame", "space4x"):
+        return None
+    pointer_path = os.path.join(state_dir, "builds", f"current_{project}.json")
+    if not os.path.isfile(pointer_path):
+        return None
+    try:
+        data = load_json(pointer_path)
+    except Exception as exc:
+        eprint(f"HEADLESSCTL: failed to read build pointer for {project}: {pointer_path} ({exc})")
+        return None
+    executable = data.get("executable")
+    if executable and os.path.exists(executable):
+        eprint(f"HEADLESSCTL: using current build pointer for {project}: {executable}")
+        return executable
+    return None
+
+
+def find_binary(tri_root, state_dir, project):
+    pointer_binary = resolve_pointer_binary(state_dir, project)
+    if pointer_binary:
+        return pointer_binary
     if project == "godgame":
         return os.path.join(tri_root, "Tools", "builds", "godgame", "Linux_latest", "Godgame_Headless.x86_64")
     if project == "space4x":
@@ -552,7 +589,7 @@ def run_task_internal(task_id, seed, pack_name):
         timeout_s = DEFAULT_TIMEOUT_S
     timeout_s = int(timeout_s)
 
-    binary = find_binary(tri_root, project)
+    binary = find_binary(tri_root, state_dir, project)
     if not binary or not os.path.exists(binary):
         return build_error_result("binary_missing", f"binary not found for project {project}: {binary}"), 2
 

@@ -22,9 +22,9 @@ See headless_runbook.md for toggles, env defaults, and asset escalation details.
 Requirement: Both agents must share the same physical TRI_STATE_DIR (do not rely on defaults). Override TRI_STATE_DIR explicitly for coordination.
 
 Recommended setup:
-- PowerShell: TRI_STATE_DIR=C:\tri-headless-state
-- WSL: TRI_STATE_DIR=/mnt/c/tri-headless-state
-Keep the ops directory small to reduce drvfs churn.
+- WSL (ext4): TRI_STATE_DIR=/home/<user>/Tri/.tri/state
+- Windows: TRI_STATE_DIR=\\wsl$\<Distro>\home\<user>\Tri\.tri\state
+Keep the ops directory on ext4 to avoid drvfs churn.
 
 Ops bus layout (under $TRI_STATE_DIR/ops/):
 - locks/build.lock (PowerShell owns it)
@@ -42,8 +42,9 @@ Request schema (minimal rebuild request JSON):
   "utc": "2026-01-02T12:34:56Z",
   "projects": ["godgame", "space4x"],
   "reason": "new code pushed, need fresh Linux_latest",
-  "min_commit": {"godgame": "sha", "space4x": "sha", "puredots": "sha"},
-  "priority": 2
+  "priority": 2,
+  "desired_build_commit": "origin/main",
+  "notes": "puredots_ref=<sha>"
 }
 
 PowerShell loop update:
