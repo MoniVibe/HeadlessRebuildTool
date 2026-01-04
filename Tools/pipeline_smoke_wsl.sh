@@ -60,7 +60,7 @@ read_pointer_exe() {
   if [ ! -f "$pointer_path" ]; then
     return 0
   fi
-  python3 - <<'PY' "$pointer_path"
+  python3 - "$pointer_path" <<'PY'
 import json,sys
 path=sys.argv[1]
 try:
@@ -115,13 +115,13 @@ while [ ! -f "$result_path" ]; do
   sleep 10
 done
 
-status="$(python3 - <<'PY'
+status="$(python3 - "$result_path" <<'PY'
 import json,sys
 with open(sys.argv[1],"r",encoding="utf-8") as handle:
     data=json.load(handle)
 print(data.get("status",""))
 PY
-"$result_path")"
+)"
 
 if [ "$status" != "ok" ]; then
   echo "pipeline_smoke_wsl: rebuild result not ok (status=${status})" >&2
