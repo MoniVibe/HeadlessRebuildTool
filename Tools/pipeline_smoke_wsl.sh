@@ -50,7 +50,61 @@ req_id="$(python3 "$TRI_ROOT/puredots/Tools/Ops/tri_ops.py" \
 results_dir="${TRI_STATE_DIR}/ops/results"
 result_path="${results_dir}/${req_id}.json"
 
-timeout_s=1200
+timeout_s="${SMOKE_TIMEOUT_S:-1200}"
+lock_file="${TRI_STATE_DIR}/ops/locks/build.lock"
+state_file="${TRI_STATE_DIR}/ops/locks/build.state.json"
+
+read_pointer_exe() {
+  local project="$1"
+  local pointer_path="${TRI_STATE_DIR}/builds/current_${project}.json"
+  if [ ! -f "$pointer_path" ]; then
+    return 0
+  fi
+  python3 - <<'PY' "$pointer_path"
+import json,sys
+path=sys.argv[1]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+    exe=data.get("executable","")
+    print(exe if exe else "")
+except Exception:
+    print("")
+PY
+}
+
+chmod_pointer_binaries() {
+  local exe
+  exe="$(read_pointer_exe space4x)"
+  if [ -n "$exe" ]; then
+    chmod +x "$exe" 2>/dev/null || true
+  fi
+  exe="$(read_pointer_exe godgame)"
+  if [ -n "$exe" ]; then
+    chmod +x "$exe" 2>/dev/null || true
+  fi
+}
+
+is_locked() {
+  if [ -f "$state_file" ]; then
+    python3 - <<'PY' "$state_file"
+import json,sys
+path=sys.argv[1]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+    print("1" if data.get("state") == "locked" else "0")
+except Exception:
+    print("1")
+PY
+    return
+  fi
+  if [ -f "$lock_file" ]; then
+    echo 1
+  else
+    echo 0
+  fi
+}
 start_ts="$(date +%s)"
 while [ ! -f "$result_path" ]; do
   now_ts="$(date +%s)"
@@ -73,6 +127,18 @@ if [ "$status" != "ok" ]; then
   echo "pipeline_smoke_wsl: rebuild result not ok (status=${status})" >&2
   exit 4
 fi
+
+lock_start_ts="$(date +%s)"
+while [ "$(is_locked)" = "1" ]; do
+  now_ts="$(date +%s)"
+  if [ $((now_ts - lock_start_ts)) -ge "$timeout_s" ]; then
+    echo "pipeline_smoke_wsl: timed out waiting for build lock release" >&2
+    exit 5
+  fi
+  sleep 5
+done
+
+chmod_pointer_binaries
 
 python3 "$TOOL_ROOT/Tools/Headless/headlessctl.py" contract_check
 

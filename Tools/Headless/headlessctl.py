@@ -137,6 +137,16 @@ def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
+def ensure_executable(binary_path):
+    try:
+        if not os.access(binary_path, os.X_OK):
+            mode = os.stat(binary_path).st_mode
+            os.chmod(binary_path, mode | 0o111)
+            eprint(f"HEADLESSCTL: chmod +x applied to {binary_path}")
+    except Exception as exc:
+        eprint(f"HEADLESSCTL: chmod +x failed for {binary_path}: {exc}")
+
+
 def resolve_pointer_binary(state_dir, project):
     if not state_dir or project not in ("godgame", "space4x"):
         return None
@@ -592,6 +602,7 @@ def run_task_internal(task_id, seed, pack_name):
     binary = find_binary(tri_root, state_dir, project)
     if not binary or not os.path.exists(binary):
         return build_error_result("binary_missing", f"binary not found for project {project}: {binary}"), 2
+    ensure_executable(binary)
 
     run_id = uuid.uuid4().hex
     runs_dir = os.path.join(state_dir, "runs")
