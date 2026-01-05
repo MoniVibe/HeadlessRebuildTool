@@ -233,7 +233,14 @@ run_task() {
   local output
   local start_ts
   start_ts="$(date +%s)"
+  local exit_code
+  set +e
   output="$(python3 "$TOOL_ROOT/Tools/Headless/headlessctl.py" run_task "$task_id" --pack nightly-default 2>&1)"
+  exit_code=$?
+  set -e
+  if [ "$exit_code" -ne 0 ]; then
+    echo "pipeline_smoke_wsl: headlessctl exit_code=${exit_code} for task ${task_id}" >&2
+  fi
   local json_line
   json_line="$(extract_json_from_output <<<"$output" || true)"
   local run_id
