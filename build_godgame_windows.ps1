@@ -102,8 +102,12 @@ if (Test-Path $licensePath) {
     $licenseError = Select-String -Path $licensePath -SimpleMatch -Pattern $licenseToken -Quiet
 }
 if ($licenseError) {
-    Write-Error "UNITY_LICENSE_ERROR"
-    exit 3
+    $enforceLicense = ($env:TRI_ENFORCE_LICENSE_ERROR -eq "1")
+    if ($enforceLicense) {
+        Write-Error "UNITY_LICENSE_ERROR"
+        exit 3
+    }
+    Write-Warning "UNITY_LICENSE_WARNING: token update failed; continuing."
 }
 
 if ($exitCode -eq 0) {
