@@ -172,36 +172,107 @@ raise SystemExit(1)
 PY
 }
 
+extract_run_id_from_output() {
+  python3 - <<'PY'
+import re
+import sys
+
+text = sys.stdin.read()
+matches = re.findall(r"run_id=([0-9a-fA-F]+)", text)
+print(matches[-1] if matches else "")
+PY
+}
+
+find_latest_run_id() {
+  python3 - "$TRI_STATE_DIR" "$1" <<'PY'
+import os
+import sys
+
+state_dir = sys.argv[1]
+since_ts = float(sys.argv[2]) if len(sys.argv) > 2 else 0
+runs_dir = os.path.join(state_dir, "runs")
+if not os.path.isdir(runs_dir):
+    print("")
+    raise SystemExit(0)
+
+best = ""
+best_mtime = 0.0
+for name in os.listdir(runs_dir):
+    path = os.path.join(runs_dir, name)
+    if not os.path.isdir(path):
+        continue
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        continue
+    if mtime >= since_ts and mtime >= best_mtime:
+        best_mtime = mtime
+        best = name
+
+print(best)
+PY
+}
+
+read_result_ok() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    print("1" if data.get("ok") else "0")
+except Exception:
+    print("0")
+PY
+}
+
 run_task() {
   local task_id="$1"
   local output
-  output="$(python3 "$TOOL_ROOT/Tools/Headless/headlessctl.py" run_task "$task_id" --pack nightly-default)"
+  local start_ts
+  start_ts="$(date +%s)"
+  output="$(python3 "$TOOL_ROOT/Tools/Headless/headlessctl.py" run_task "$task_id" --pack nightly-default 2>&1)"
   local json_line
   json_line="$(extract_json_from_output <<<"$output" || true)"
-  if [ -z "$json_line" ]; then
-    echo "pipeline_smoke_wsl: could not parse JSON output for task ${task_id}" >&2
-    echo "$output" >&2
-    exit 5
-  fi
+  local run_id
   local ok
-  ok="$(python3 - <<'PY'
+  if [ -z "$json_line" ]; then
+    run_id="$(extract_run_id_from_output <<<"$output" || true)"
+    if [ -z "$run_id" ]; then
+      run_id="$(find_latest_run_id "$start_ts" || true)"
+    fi
+    if [ -z "$run_id" ]; then
+      echo "pipeline_smoke_wsl: could not parse JSON output for task ${task_id}" >&2
+      echo "$output" >&2
+      exit 5
+    fi
+    local result_path="${TRI_STATE_DIR}/runs/${run_id}/result.json"
+    ok="$(read_result_ok "$result_path")"
+  else
+    ok="$(python3 - <<'PY'
 import json,sys
 data=json.loads(sys.stdin.read())
 print("1" if data.get("ok") else "0")
 PY
 <<<"$json_line")"
-  if [ "$ok" != "1" ]; then
-    echo "pipeline_smoke_wsl: task failed: ${task_id}" >&2
-    echo "$json_line" >&2
-    exit 5
-  fi
-  local run_id
-  run_id="$(python3 - <<'PY'
+    run_id="$(python3 - <<'PY'
 import json,sys
 data=json.loads(sys.stdin.read())
 print(data.get("run_id",""))
 PY
 <<<"$json_line")"
+  fi
+  if [ "$ok" != "1" ]; then
+    echo "pipeline_smoke_wsl: task failed: ${task_id}" >&2
+    if [ -n "$json_line" ]; then
+      echo "$json_line" >&2
+    else
+      echo "pipeline_smoke_wsl: result.json indicates failure for run_id=${run_id}" >&2
+    fi
+    exit 5
+  fi
   if [ -z "$run_id" ]; then
     echo "pipeline_smoke_wsl: missing run_id for task ${task_id}" >&2
     exit 6
