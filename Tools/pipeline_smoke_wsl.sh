@@ -142,20 +142,57 @@ chmod_pointer_binaries
 
 python3 "$TOOL_ROOT/Tools/Headless/headlessctl.py" contract_check
 
+extract_json_from_output() {
+  python3 - <<'PY'
+import json
+import re
+import sys
+
+text = sys.stdin.read()
+lines = [line.strip() for line in text.splitlines() if line.strip()]
+for line in reversed(lines):
+    if line.startswith("{") and line.endswith("}"):
+        try:
+            obj = json.loads(line)
+            print(json.dumps(obj, sort_keys=True))
+            raise SystemExit(0)
+        except Exception:
+            pass
+
+for match in reversed(list(re.finditer(r"\{.*\}", text, flags=re.S))):
+    cand = match.group(0)
+    try:
+        obj = json.loads(cand)
+        print(json.dumps(obj, sort_keys=True))
+        raise SystemExit(0)
+    except Exception:
+        pass
+
+raise SystemExit(1)
+PY
+}
+
 run_task() {
   local task_id="$1"
   local output
   output="$(python3 "$TOOL_ROOT/Tools/Headless/headlessctl.py" run_task "$task_id" --pack nightly-default)"
+  local json_line
+  json_line="$(extract_json_from_output <<<"$output" || true)"
+  if [ -z "$json_line" ]; then
+    echo "pipeline_smoke_wsl: could not parse JSON output for task ${task_id}" >&2
+    echo "$output" >&2
+    exit 5
+  fi
   local ok
   ok="$(python3 - <<'PY'
 import json,sys
 data=json.loads(sys.stdin.read())
 print("1" if data.get("ok") else "0")
 PY
-<<<"$output")"
+<<<"$json_line")"
   if [ "$ok" != "1" ]; then
     echo "pipeline_smoke_wsl: task failed: ${task_id}" >&2
-    echo "$output" >&2
+    echo "$json_line" >&2
     exit 5
   fi
   local run_id
@@ -164,7 +201,7 @@ import json,sys
 data=json.loads(sys.stdin.read())
 print(data.get("run_id",""))
 PY
-<<<"$output")"
+<<<"$json_line")"
   if [ -z "$run_id" ]; then
     echo "pipeline_smoke_wsl: missing run_id for task ${task_id}" >&2
     exit 6
