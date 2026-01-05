@@ -631,6 +631,7 @@ def run_task_internal(task_id, seed, pack_name):
     env["PUREDOTS_TELEMETRY_PATH"] = telemetry_path
     if project == "space4x":
         if scenario_abs:
+            env["SPACE4X_SCENARIO_SOURCE_PATH"] = scenario_abs
             env["SPACE4X_SCENARIO_PATH"] = scenario_abs
         elif scenario_used:
             env["SPACE4X_SCENARIO_PATH"] = scenario_used
