@@ -27,6 +27,50 @@ if ([string]::IsNullOrWhiteSpace($LogPath)) {
     exit 2
 }
 
+function Stop-StrayUnityProcesses {
+    param(
+        [string]$ProjectPath,
+        [string]$LogPath
+    )
+    $killStrays = $true
+    if (-not [string]::IsNullOrWhiteSpace($env:TRI_KILL_UNITY_STRAYS)) {
+        $killStrays = ($env:TRI_KILL_UNITY_STRAYS -eq "1")
+    }
+    if (-not $killStrays) {
+        return
+    }
+    $projLower = $ProjectPath.ToLowerInvariant()
+    $projSlash = $ProjectPath.Replace("\", "/").ToLowerInvariant()
+    $killed = 0
+    $failed = 0
+    $procs = Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq "Unity.exe" }
+    foreach ($proc in $procs) {
+        $cmd = $proc.CommandLine
+        if ([string]::IsNullOrWhiteSpace($cmd)) {
+            continue
+        }
+        $cmdLower = $cmd.ToLowerInvariant()
+        if ($cmdLower -like "*$projLower*" -or $cmdLower -like "*$projSlash*") {
+            try {
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+                $killed++
+            } catch {
+                $failed++
+            }
+        }
+    }
+    if ($killed -gt 0 -or $failed -gt 0) {
+        $msg = "UNITY_STRAY_KILL project=$ProjectPath killed=$killed failed=$failed"
+        Write-Output $msg
+        if ($LogPath) {
+            Add-Content -Path $LogPath -Value $msg -Encoding ASCII
+        }
+    }
+    if ($killed -gt 0) {
+        Start-Sleep -Seconds 5
+    }
+}
+
 $actualLogPath = $LogPath
 if ($LogPath -like '\\wsl$\*') {
     $tempDir = Join-Path $env:TEMP "tri_build_logs"
@@ -59,6 +103,8 @@ try {
     Write-Output ("LOG_PRECREATE_FAILED: " + $_.Exception.Message)
     exit 6
 }
+
+Stop-StrayUnityProcesses -ProjectPath $projectPath -LogPath $actualLogPath
 
 try {
     & $UnityExe -batchmode -nographics -quit `
