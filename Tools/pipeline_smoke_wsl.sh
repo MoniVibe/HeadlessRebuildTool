@@ -183,30 +183,56 @@ print(matches[-1] if matches else "")
 PY
 }
 
-find_latest_run_id() {
-  python3 - "$TRI_STATE_DIR" "$1" <<'PY'
+find_latest_run_id_for_task() {
+  python3 - "$TRI_STATE_DIR" "$1" "$2" <<'PY'
 import os
 import sys
+import json
+import datetime
 
 state_dir = sys.argv[1]
-since_ts = float(sys.argv[2]) if len(sys.argv) > 2 else 0
+task_id = sys.argv[2]
+since_ts = float(sys.argv[3]) if len(sys.argv) > 3 else 0
 runs_dir = os.path.join(state_dir, "runs")
 if not os.path.isdir(runs_dir):
     print("")
     raise SystemExit(0)
 
 best = ""
-best_mtime = 0.0
+best_ts = 0.0
 for name in os.listdir(runs_dir):
     path = os.path.join(runs_dir, name)
     if not os.path.isdir(path):
         continue
+    result_path = os.path.join(path, "result.json")
+    if not os.path.isfile(result_path):
+        continue
+    try:
+        with open(result_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        continue
+    if data.get("task_id") != task_id:
+        continue
+    ts = None
+    started = data.get("started_utc")
+    if started:
+        try:
+            if started.endswith("Z"):
+                started = started[:-1] + "+00:00"
+            ts = datetime.datetime.fromisoformat(started).timestamp()
+        except Exception:
+            ts = None
     try:
         mtime = os.path.getmtime(path)
     except OSError:
         continue
-    if mtime >= since_ts and mtime >= best_mtime:
-        best_mtime = mtime
+    if ts is None:
+        ts = mtime
+    if ts < since_ts:
+        continue
+    if ts >= best_ts:
+        best_ts = ts
         best = name
 
 print(best)
@@ -225,6 +251,21 @@ try:
     print("1" if data.get("ok") else "0")
 except Exception:
     print("0")
+PY
+}
+
+read_result_task_id() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    print(data.get("task_id", ""))
+except Exception:
+    print("")
 PY
 }
 
@@ -248,10 +289,10 @@ run_task() {
   if [ -z "$json_line" ]; then
     run_id="$(extract_run_id_from_output <<<"$output" || true)"
     if [ -z "$run_id" ]; then
-      run_id="$(find_latest_run_id "$start_ts" || true)"
+      run_id="$(find_latest_run_id_for_task "$task_id" "$start_ts" || true)"
       if [ -z "$run_id" ]; then
         sleep 2
-        run_id="$(find_latest_run_id 0 || true)"
+        run_id="$(find_latest_run_id_for_task "$task_id" "$start_ts" || true)"
       fi
     fi
     if [ -z "$run_id" ]; then
@@ -262,6 +303,12 @@ run_task() {
     fi
     echo "pipeline_smoke_wsl: fallback run_id=${run_id} for task ${task_id}" >&2
     local result_path="${TRI_STATE_DIR}/runs/${run_id}/result.json"
+    local result_task_id
+    result_task_id="$(read_result_task_id "$result_path")"
+    if [ "$result_task_id" != "$task_id" ]; then
+      echo "pipeline_smoke_wsl: fallback run_id=${run_id} task_id mismatch (${result_task_id})" >&2
+      exit 5
+    fi
     ok="$(read_result_ok "$result_path")"
   else
     ok="$(python3 - <<'PY'
@@ -276,6 +323,13 @@ data=json.loads(sys.stdin.read())
 print(data.get("run_id",""))
 PY
 <<<"$json_line")"
+  fi
+  if [ "$exit_code" -ne 0 ] && [ "$ok" != "1" ]; then
+    echo "pipeline_smoke_wsl: headlessctl failed for task ${task_id} (exit_code=${exit_code})" >&2
+    if [ -n "$json_line" ]; then
+      echo "$json_line" >&2
+    fi
+    exit 5
   fi
   if [ "$ok" != "1" ]; then
     echo "pipeline_smoke_wsl: task failed: ${task_id}" >&2
