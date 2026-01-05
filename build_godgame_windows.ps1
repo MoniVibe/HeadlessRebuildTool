@@ -28,7 +28,7 @@ if ([string]::IsNullOrWhiteSpace($LogPath)) {
 }
 
 $actualLogPath = $LogPath
-if ($LogPath.StartsWith("\\\\wsl$\\", [System.StringComparison]::OrdinalIgnoreCase)) {
+if ($LogPath -like '\\wsl$\*') {
     $tempDir = Join-Path $env:TEMP "tri_build_logs"
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     $tempName = [System.IO.Path]::GetFileName($LogPath)
