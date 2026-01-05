@@ -27,6 +27,17 @@ if ([string]::IsNullOrWhiteSpace($LogPath)) {
     exit 2
 }
 
+$actualLogPath = $LogPath
+if ($LogPath.StartsWith("\\\\wsl$\\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $tempDir = Join-Path $env:TEMP "tri_build_logs"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $tempName = [System.IO.Path]::GetFileName($LogPath)
+    if ([string]::IsNullOrWhiteSpace($tempName)) {
+        $tempName = "space4x_unity.log"
+    }
+    $actualLogPath = Join-Path $tempDir $tempName
+}
+
 $projectPath = Join-Path $TriRoot "space4x"
 if (-not (Test-Path $projectPath)) {
     Write-Error "Space4X project not found: $projectPath"
@@ -40,14 +51,29 @@ if (-not (Test-Path $UnityExe)) {
 & $UnityExe -batchmode -nographics -quit `
     -projectPath $projectPath `
     -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless `
-    -logFile $LogPath
+    -logFile $actualLogPath
 
 $exitCode = $LASTEXITCODE
 
+if ($actualLogPath -ne $LogPath) {
+    try {
+        $destDir = Split-Path -Parent $LogPath
+        if ($destDir) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        if (Test-Path $actualLogPath) {
+            Copy-Item -Path $actualLogPath -Destination $LogPath -Force
+        }
+    } catch {
+        Write-Warning ("LOG_COPY_FAILED: {0}" -f $_.Exception.Message)
+    }
+}
+
 $licenseToken = "[Licensing::Module] Error: Access token is unavailable; failed to update"
 $licenseError = $false
-if (Test-Path $LogPath) {
-    $licenseError = Select-String -Path $LogPath -SimpleMatch -Pattern $licenseToken -Quiet
+$licensePath = if (Test-Path $actualLogPath) { $actualLogPath } else { $LogPath }
+if (Test-Path $licensePath) {
+    $licenseError = Select-String -Path $licensePath -SimpleMatch -Pattern $licenseToken -Quiet
 }
 if ($licenseError) {
     Write-Error "UNITY_LICENSE_ERROR"
