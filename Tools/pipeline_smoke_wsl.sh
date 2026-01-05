@@ -352,7 +352,7 @@ PY
 }
 
 run_task P0.TIME_REWIND_MICRO
-run_task S0.SPACE4X_COLLISION_MICRO
-run_task G0.GODGAME_COLLISION_MICRO
+run_task S0.SPACE4X_COLLISION
+run_task G0.GODGAME_SMOKE
 
 echo "pipeline_smoke_wsl: ok"
