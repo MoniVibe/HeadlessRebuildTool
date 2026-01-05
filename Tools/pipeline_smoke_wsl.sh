@@ -242,12 +242,18 @@ run_task() {
     run_id="$(extract_run_id_from_output <<<"$output" || true)"
     if [ -z "$run_id" ]; then
       run_id="$(find_latest_run_id "$start_ts" || true)"
+      if [ -z "$run_id" ]; then
+        sleep 2
+        run_id="$(find_latest_run_id 0 || true)"
+      fi
     fi
     if [ -z "$run_id" ]; then
       echo "pipeline_smoke_wsl: could not parse JSON output for task ${task_id}" >&2
+      echo "pipeline_smoke_wsl: run_task output length=${#output}" >&2
       echo "$output" >&2
       exit 5
     fi
+    echo "pipeline_smoke_wsl: fallback run_id=${run_id} for task ${task_id}" >&2
     local result_path="${TRI_STATE_DIR}/runs/${run_id}/result.json"
     ok="$(read_result_ok "$result_path")"
   else
