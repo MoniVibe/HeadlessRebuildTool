@@ -48,12 +48,33 @@ if (-not (Test-Path $UnityExe)) {
     exit 2
 }
 
-& $UnityExe -batchmode -nographics -quit `
-    -projectPath $projectPath `
-    -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless `
-    -logFile $actualLogPath
+$logDir = Split-Path -Parent $actualLogPath
+if ($logDir) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+$logHeader = "UNITY_LOG_PLACEHOLDER utc=$([DateTime]::UtcNow.ToString('o')) path=$actualLogPath"
+Set-Content -Path $actualLogPath -Value $logHeader -Encoding ASCII
+
+try {
+    & $UnityExe -batchmode -nographics -quit `
+        -projectPath $projectPath `
+        -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless `
+        -logFile $actualLogPath
+} catch {
+    Add-Content -Path $actualLogPath -Value ("UNITY_INVOKE_EXCEPTION: " + $_.Exception.Message) -Encoding ASCII
+    exit 5
+}
 
 $exitCode = $LASTEXITCODE
+
+if (-not (Test-Path $actualLogPath)) {
+    Set-Content -Path $actualLogPath -Value ("UNITY_LOG_MISSING exit_code=" + $exitCode) -Encoding ASCII
+} else {
+    $len = (Get-Item -Path $actualLogPath).Length
+    if ($len -lt 64) {
+        Add-Content -Path $actualLogPath -Value ("UNITY_LOG_EMPTY exit_code=" + $exitCode) -Encoding ASCII
+    }
+}
 
 if ($actualLogPath -ne $LogPath) {
     try {
