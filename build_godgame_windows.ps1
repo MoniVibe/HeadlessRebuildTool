@@ -48,12 +48,17 @@ if (-not (Test-Path $UnityExe)) {
     exit 2
 }
 
-$logDir = Split-Path -Parent $actualLogPath
-if ($logDir) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+try {
+    $logDir = Split-Path -Parent $actualLogPath
+    if ($logDir) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    $logHeader = "UNITY_LOG_PLACEHOLDER utc=$([DateTime]::UtcNow.ToString('o')) path=$actualLogPath"
+    Set-Content -Path $actualLogPath -Value $logHeader -Encoding ASCII
+} catch {
+    Write-Output ("LOG_PRECREATE_FAILED: " + $_.Exception.Message)
+    exit 6
 }
-$logHeader = "UNITY_LOG_PLACEHOLDER utc=$([DateTime]::UtcNow.ToString('o')) path=$actualLogPath"
-Set-Content -Path $actualLogPath -Value $logHeader -Encoding ASCII
 
 try {
     & $UnityExe -batchmode -nographics -quit `
@@ -68,7 +73,7 @@ try {
 $exitCode = $LASTEXITCODE
 
 if (-not (Test-Path $actualLogPath)) {
-    Set-Content -Path $actualLogPath -Value ("UNITY_LOG_MISSING exit_code=" + $exitCode) -Encoding ASCII
+    Write-Output ("UNITY_LOG_MISSING: " + $actualLogPath)
 } else {
     $len = (Get-Item -Path $actualLogPath).Length
     if ($len -lt 64) {
