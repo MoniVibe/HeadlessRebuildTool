@@ -2,7 +2,7 @@
   "titles": {
     "space4x": {
       "project_path": "space4x",
-      "scenario_id": "space4x_smoke",
+      "scenario_id": "space4x",
       "seed": 42,
       "timeout_sec": 120,
       "args": []
