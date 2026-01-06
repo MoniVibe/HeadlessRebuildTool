@@ -119,7 +119,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
 
-$timestamp = Get-Date -AsUTC -Format "yyyyMMdd_HHmmss"
+$timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss")
 $buildId = "${timestamp}_$commitShort"
 
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
@@ -159,7 +159,7 @@ if (-not (Test-Path $artifactZip)) {
 
 $artifactUri = Convert-ToWslPath $artifactZip
 $jobId = "{0}_{1}_{2}" -f $buildId, $scenarioIdValue, $seedValue
-$createdUtc = Get-Date -AsUTC -Format "yyyy-MM-ddTHH:mm:ssZ"
+$createdUtc = ([DateTime]::UtcNow).ToString("o")
 
 $job = [ordered]@{
     job_id = $jobId
