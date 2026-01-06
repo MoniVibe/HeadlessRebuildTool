@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Management;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 internal static class Program
 {
@@ -17,6 +19,8 @@ internal static class Program
     private const string BuildOutcomeName = "build_outcome.json";
     private const string BuildReportJsonName = "build_report.json";
     private const string BuildReportTextName = "build_report.txt";
+    private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
+    private const int LogReadRetryDelayMs = 100;
 
     private static int Main(string[] args)
     {
@@ -68,7 +72,7 @@ internal static class Program
 
             if (runResult.TimedOut)
             {
-                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult);
+                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
                 failureMessage = "Unity build timed out.";
             }
             else if (exitOk && outcomeSucceeded)
@@ -78,7 +82,7 @@ internal static class Program
             }
             else
             {
-                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult);
+                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
                 failureMessage = hasOutcome
                     ? $"Unity exit={runResult.ExitCode} outcome={outcomeResult}"
                     : $"Unity exit={runResult.ExitCode} outcome=missing";
@@ -214,6 +218,8 @@ internal static class Program
             logger.Info($"unity_timeout pid={process.Id} timeout={options.Timeout.TotalMinutes:F1}m");
             job.Terminate(1);
             TryKillProcess(process);
+            WaitForProcessExit(process, TimeSpan.FromSeconds(2), logger);
+            KillStrayUnityProcesses(unityLog, artifactRoot, options.ExecuteMethod, logger);
             return new UnityRunResult(process.HasExited ? process.ExitCode : 124, timedOut);
         }
 
@@ -230,6 +236,104 @@ internal static class Program
         }
         catch
         {
+        }
+    }
+
+    private static void WaitForProcessExit(Process process, TimeSpan timeout, Logger logger)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.WaitForExit((int)timeout.TotalMilliseconds);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_wait_exit_failed pid={process.Id} err={ex.Message}");
+        }
+    }
+
+    private static void KillStrayUnityProcesses(string unityLog, string stagingDir, string executeMethod, Logger logger)
+    {
+        try
+        {
+            var candidates = new List<int>();
+            using var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine, Name FROM Win32_Process WHERE Name='Unity.exe'");
+            foreach (ManagementObject process in searcher.Get())
+            {
+                var commandLine = process["CommandLine"] as string;
+                if (string.IsNullOrWhiteSpace(commandLine))
+                {
+                    continue;
+                }
+
+                if (!ShouldKillUnityProcess(commandLine, unityLog, stagingDir, executeMethod))
+                {
+                    continue;
+                }
+
+                if (process["ProcessId"] is uint pid)
+                {
+                    candidates.Add(unchecked((int)pid));
+                }
+            }
+
+            foreach (var pid in candidates)
+            {
+                TryKillProcessTree(pid, logger);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_stray_scan_failed err={ex.Message}");
+        }
+    }
+
+    private static bool ShouldKillUnityProcess(string commandLine, string unityLog, string stagingDir, string executeMethod)
+    {
+        var cmd = commandLine.ToLowerInvariant();
+        var logPath = NormalizePathForMatch(unityLog);
+        var logPathAlt = NormalizePathForMatch(unityLog).Replace('\\', '/');
+        var stagingPath = NormalizePathForMatch(stagingDir);
+        var stagingPathAlt = NormalizePathForMatch(stagingDir).Replace('\\', '/');
+        var execute = executeMethod.ToLowerInvariant();
+
+        if (cmd.Contains(logPath) || cmd.Contains(logPathAlt))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(stagingPath) && (cmd.Contains(stagingPath) || cmd.Contains(stagingPathAlt)))
+        {
+            return true;
+        }
+
+        if (cmd.Contains("-executemethod") && cmd.Contains(execute) && cmd.Contains("-artifactroot") &&
+            (cmd.Contains(stagingPath) || cmd.Contains(stagingPathAlt)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizePathForMatch(string path)
+    {
+        return string.IsNullOrWhiteSpace(path) ? string.Empty : path.Trim().ToLowerInvariant();
+    }
+
+    private static void TryKillProcessTree(int pid, Logger logger)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            process.Kill(true);
+            logger.Info($"unity_stray_killed pid={pid}");
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_stray_kill_failed pid={pid} err={ex.Message}");
         }
     }
     private static void ArchiveAttemptLogs(string logsDir, int attempt, Logger logger)
@@ -320,51 +424,58 @@ internal static class Program
         return false;
     }
 
-    private static FailureSignature DetectFailureSignature(string logPath, UnityRunResult result, string? outcomeResult)
+    private static FailureSignature DetectFailureSignature(string logPath, UnityRunResult result, string? outcomeResult, Logger logger)
     {
-        if (result.TimedOut)
+        try
         {
-            var tail = ReadTail(logPath, 400);
-            if (ContainsIgnoreCase(tail, "bee_backend"))
+            if (result.TimedOut)
             {
-                return FailureSignature.BeeStall;
+                return FailureSignature.BuildTimeout;
             }
 
-            if (ContainsIgnoreCase(tail, "Importing Assets") || ContainsIgnoreCase(tail, "AssetDatabase"))
+            var text = ReadTail(logPath, 800, logger, out var logLocked);
+            if (logLocked)
+            {
+                return FailureSignature.LogLocked;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.IsNullOrWhiteSpace(outcomeResult) ? FailureSignature.InfraFail : FailureSignature.Unknown;
+            }
+
+            if (ContainsIgnoreCase(text, "Licensing::Module") || ContainsIgnoreCase(text, "license"))
+            {
+                return FailureSignature.LicenseError;
+            }
+
+            if (Regex.IsMatch(text, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
+            {
+                return FailureSignature.CompilerError;
+            }
+
+            if (ContainsIgnoreCase(text, "Importing Assets") || ContainsIgnoreCase(text, "AssetDatabase"))
             {
                 return FailureSignature.ImportLoop;
             }
 
-            return FailureSignature.BuildTimeout;
-        }
+            if (ContainsIgnoreCase(text, "bee_backend") || ContainsIgnoreCase(text, "ScriptCompilationBuildProgram"))
+            {
+                return FailureSignature.BeeStall;
+            }
 
-        var text = ReadTail(logPath, 800);
-        if (ContainsIgnoreCase(text, "Licensing::Module") || ContainsIgnoreCase(text, "license"))
+            if (string.IsNullOrWhiteSpace(outcomeResult))
+            {
+                return FailureSignature.InfraFail;
+            }
+
+            return FailureSignature.Unknown;
+        }
+        catch (Exception ex)
         {
-            return FailureSignature.LicenseError;
+            logger.Warn($"failure_signature_failed err={ex.Message}");
+            return FailureSignature.Unknown;
         }
-
-        if (Regex.IsMatch(text, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
-        {
-            return FailureSignature.CompilerError;
-        }
-
-        if (ContainsIgnoreCase(text, "Importing Assets") || ContainsIgnoreCase(text, "AssetDatabase"))
-        {
-            return FailureSignature.ImportLoop;
-        }
-
-        if (ContainsIgnoreCase(text, "bee_backend") || ContainsIgnoreCase(text, "ScriptCompilationBuildProgram"))
-        {
-            return FailureSignature.BeeStall;
-        }
-
-        if (string.IsNullOrWhiteSpace(outcomeResult))
-        {
-            return FailureSignature.InfraFail;
-        }
-
-        return FailureSignature.Unknown;
     }
 
     private static bool ContainsIgnoreCase(string text, string fragment)
@@ -416,7 +527,7 @@ internal static class Program
 
     private static void WriteFallbackManifest(string manifestPath, string stagingDir, Options options, string unityLog, Logger logger)
     {
-        var unityVersion = TryExtractUnityVersion(unityLog) ?? "unknown";
+        var unityVersion = TryExtractUnityVersion(unityLog, logger) ?? "unknown";
         var buildDir = Path.Combine(stagingDir, "build");
         var entrypoint = FindEntrypoint(buildDir);
         var dataDir = string.IsNullOrWhiteSpace(entrypoint) ? string.Empty : GetPlayerDataFolderPath(entrypoint);
@@ -465,26 +576,41 @@ internal static class Program
         logger.Info("fallback_manifest_written");
     }
 
-    private static string? TryExtractUnityVersion(string unityLog)
+    private static string? TryExtractUnityVersion(string unityLog, Logger logger)
     {
         if (!File.Exists(unityLog))
         {
             return null;
         }
 
-        foreach (var line in File.ReadLines(unityLog))
+        try
         {
-            var match = Regex.Match(line, "Initialize engine version:\\s*(.+)", RegexOptions.IgnoreCase);
-            if (match.Success)
+            foreach (var line in File.ReadLines(unityLog))
             {
-                return match.Groups[1].Value.Trim();
-            }
+                var match = Regex.Match(line, "Initialize engine version:\\s*(.+)", RegexOptions.IgnoreCase);
+                if (match.Success)
+                {
+                    return match.Groups[1].Value.Trim();
+                }
 
-            match = Regex.Match(line, "Unity Editor\\s*([0-9]+\\.[^\\s]+)", RegexOptions.IgnoreCase);
-            if (match.Success)
-            {
-                return match.Groups[1].Value.Trim();
+                match = Regex.Match(line, "Unity Editor\\s*([0-9]+\\.[^\\s]+)", RegexOptions.IgnoreCase);
+                if (match.Success)
+                {
+                    return match.Groups[1].Value.Trim();
+                }
             }
+        }
+        catch (IOException ex)
+        {
+            logger.Warn($"unity_version_read_failed path={unityLog} err={ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.Warn($"unity_version_read_denied path={unityLog} err={ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_version_read_error path={unityLog} err={ex.Message}");
         }
 
         return null;
@@ -761,6 +887,7 @@ internal static class Program
             FailureSignature.ImportLoop => "IMPORT_LOOP",
             FailureSignature.BeeStall => "BEE_STALL",
             FailureSignature.InfraFail => "INFRA_FAIL",
+            FailureSignature.LogLocked => "LOG_LOCKED",
             _ => "UNKNOWN"
         };
     }
@@ -779,22 +906,21 @@ internal static class Program
             return;
         }
 
-        var queue = new Queue<string>(maxLines);
-        foreach (var line in File.ReadLines(unityLog))
+        var tail = ReadTail(unityLog, maxLines, logger, out var logLocked);
+        if (string.IsNullOrWhiteSpace(tail))
         {
-            if (queue.Count == maxLines)
-            {
-                queue.Dequeue();
-            }
-            queue.Enqueue(line);
+            var message = logLocked ? "unity_build.log locked" : "unity_build.log empty";
+            File.WriteAllText(tailPath, message, Encoding.ASCII);
+            return;
         }
 
-        File.WriteAllLines(tailPath, queue, Encoding.ASCII);
+        File.WriteAllText(tailPath, tail, Encoding.ASCII);
         logger.Info("unity_log_tail_written");
     }
 
-    private static string ReadTail(string unityLog, int maxLines)
+    private static string ReadTail(string unityLog, int maxLines, Logger logger, out bool logLocked)
     {
+        logLocked = false;
         if (maxLines <= 0)
         {
             return string.Empty;
@@ -805,17 +931,55 @@ internal static class Program
             return string.Empty;
         }
 
-        var queue = new Queue<string>(maxLines);
-        foreach (var line in File.ReadLines(unityLog))
+        var deadline = DateTime.UtcNow + LogReadRetryWindow;
+        while (true)
         {
-            if (queue.Count == maxLines)
+            try
             {
-                queue.Dequeue();
-            }
-            queue.Enqueue(line);
-        }
+                var queue = new Queue<string>(maxLines);
+                using var stream = new FileStream(unityLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.UTF8, true);
+                while (!reader.EndOfStream)
+                {
+                    var line = reader.ReadLine();
+                    if (line == null)
+                    {
+                        break;
+                    }
 
-        return string.Join("\n", queue);
+                    if (queue.Count == maxLines)
+                    {
+                        queue.Dequeue();
+                    }
+                    queue.Enqueue(line);
+                }
+
+                return string.Join("\n", queue);
+            }
+            catch (IOException ex)
+            {
+                logLocked = true;
+                if (DateTime.UtcNow < deadline)
+                {
+                    Thread.Sleep(LogReadRetryDelayMs);
+                    continue;
+                }
+
+                logger.Warn($"unity_log_read_failed path={unityLog} err={ex.Message}");
+                return string.Empty;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logLocked = true;
+                logger.Warn($"unity_log_read_denied path={unityLog} err={ex.Message}");
+                return string.Empty;
+            }
+            catch (Exception ex)
+            {
+                logger.Warn($"unity_log_read_error path={unityLog} err={ex.Message}");
+                return string.Empty;
+            }
+        }
     }
 
     private static void WriteProcessSnapshot(string path, Logger logger)
@@ -932,6 +1096,7 @@ internal static class Program
         ImportLoop,
         BeeStall,
         InfraFail,
+        LogLocked,
         Unknown
     }
 
@@ -954,6 +1119,11 @@ internal static class Program
             {
                 File.AppendAllText(_path, line + Environment.NewLine, Encoding.ASCII);
             }
+        }
+
+        public void Warn(string message)
+        {
+            Info($"WARN {message}");
         }
     }
 
