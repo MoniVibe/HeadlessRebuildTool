@@ -29,6 +29,11 @@ CURRENT_STDERR_LOG=""
 CURRENT_PLAYER_LOG=""
 CURRENT_CORE_DUMP_PRESENT=0
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
+DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
+
 log() {
   echo "wsl_runner: $*" >&2
 }
@@ -38,7 +43,7 @@ usage() {
 Usage: wsl_runner.sh --queue <path> [--workdir <path>] [--once|--daemon]
                     [--heartbeat-interval <sec>] [--diag-timeout <sec>]
                     [--print-summary] [--requeue-stale-leases --ttl-sec <sec>]
-                    [--self-test]
+                    [--emit-triage-on-fail] [--reports-dir <path>] [--self-test]
 
 Options:
   --queue <path>              Queue root (required unless --self-test).
@@ -48,6 +53,8 @@ Options:
   --heartbeat-interval <sec>  Heartbeat interval seconds (default: 2).
   --diag-timeout <sec>        Diagnostics timeout seconds (default: 15).
   --print-summary             Print summary line after each job.
+  --emit-triage-on-fail        Emit triage summary JSON on failures (default).
+  --reports-dir <path>         Triage reports directory (default: /mnt/c/polish/queue/reports).
   --requeue-stale-leases      Requeue stale leases (helper mode).
   --ttl-sec <sec>             TTL seconds for stale leases (default: 600).
   --self-test                 Run local self-test scenarios.
@@ -1142,6 +1149,8 @@ run_job() {
   local heartbeat_interval="$4"
   local diag_timeout="$5"
   local print_summary="$6"
+  local emit_triage_on_fail="$7"
+  local reports_dir="$8"
 
   local job_basename
   job_basename="$(basename "$lease_path")"
@@ -1440,8 +1449,27 @@ run_job() {
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
+  local triage_path=""
+  if [ "$emit_triage_on_fail" -eq 1 ] && [ "$exit_reason" != "$EXIT_REASON_SUCCESS" ]; then
+    local result_zip="${queue_dir}/results/result_${job_id}.zip"
+    mkdir -p "$reports_dir"
+    triage_path="${reports_dir}/triage_${job_id}.json"
+    if [ -f "$TRIAGE_SCRIPT" ]; then
+      "$PYTHON_BIN" "$TRIAGE_SCRIPT" --result-zip "$result_zip" --outdir "$reports_dir" >/dev/null 2>&1 || triage_path="triage_failed"
+    else
+      triage_path="triage_missing"
+    fi
+  fi
   if [ "$print_summary" -eq 1 ]; then
-    print_summary_line "${run_dir}/meta.json" "$out_dir"
+    if [ "$exit_reason" = "$EXIT_REASON_SUCCESS" ]; then
+      print_summary_line "${run_dir}/meta.json" "$out_dir"
+    else
+      if [ -n "$triage_path" ]; then
+        echo "${job_id} exit_reason=${exit_reason} exit_code=${runner_exit_code} triage=${triage_path}"
+      else
+        echo "${job_id} exit_reason=${exit_reason} exit_code=${runner_exit_code}"
+      fi
+    fi
   fi
   archive_lease "$lease_path" "$lease_meta_path" "$queue_dir" "$job_id"
 }
@@ -1452,12 +1480,14 @@ run_once() {
   local heartbeat_interval="$3"
   local diag_timeout="$4"
   local print_summary="$5"
+  local emit_triage_on_fail="$6"
+  local reports_dir="$7"
   local lease_path
   lease_path="$(claim_job "$queue_dir" || true)"
   if [ -z "$lease_path" ]; then
     return 1
   fi
-  run_job "$lease_path" "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary"
+  run_job "$lease_path" "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir"
   return 0
 }
 
@@ -1467,8 +1497,10 @@ daemon_loop() {
   local heartbeat_interval="$3"
   local diag_timeout="$4"
   local print_summary="$5"
+  local emit_triage_on_fail="$6"
+  local reports_dir="$7"
   while true; do
-    if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary"; then
+    if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir"; then
       sleep 2
     fi
   done
@@ -1476,6 +1508,8 @@ daemon_loop() {
 
 self_test() {
   local print_summary="$1"
+  local emit_triage_on_fail="$2"
+  local reports_dir="$3"
   local tmp_root
   tmp_root="$(mktemp -d)"
   local queue_dir="${tmp_root}/queue"
@@ -1529,8 +1563,8 @@ JSON
 }
 JSON
 
-  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" || true
-  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" || true
+  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" || true
+  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" || true
 
   local meta_missing="${workdir}/selftest_missing/meta.json"
   local meta_hang="${workdir}/selftest_hang/meta.json"
@@ -1570,6 +1604,8 @@ main() {
   local run_self_test=0
   local requeue_mode=0
   local ttl_sec=600
+  local emit_triage_on_fail=1
+  local reports_dir="$DEFAULT_REPORTS_DIR"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -1601,6 +1637,14 @@ main() {
         print_summary=1
         shift
         ;;
+      --emit-triage-on-fail)
+        emit_triage_on_fail=1
+        shift
+        ;;
+      --reports-dir)
+        reports_dir="$2"
+        shift 2
+        ;;
       --requeue-stale-leases)
         requeue_mode=1
         shift
@@ -1628,7 +1672,7 @@ main() {
   ensure_dependencies
 
   if [ "$run_self_test" -eq 1 ]; then
-    self_test "$print_summary"
+    self_test "$print_summary" "$emit_triage_on_fail" "$reports_dir"
     exit $?
   fi
 
@@ -1643,6 +1687,9 @@ main() {
   fi
   if [[ "$workdir" != /* ]]; then
     workdir="$(pwd)/${workdir}"
+  fi
+  if [[ "$reports_dir" != /* ]]; then
+    reports_dir="$(pwd)/${reports_dir}"
   fi
 
   if [ -z "$heartbeat_interval" ] || ! [[ "$heartbeat_interval" =~ ^[0-9]+$ ]] || [ "$heartbeat_interval" -le 0 ]; then
@@ -1668,9 +1715,9 @@ main() {
   mkdir -p "$workdir"
 
   if [ "$mode" = "daemon" ]; then
-    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary"
+    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir"
   else
-    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" || true
+    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" || true
   fi
 }
 
