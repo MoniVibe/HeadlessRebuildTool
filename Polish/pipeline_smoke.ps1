@@ -10,6 +10,7 @@ param(
     [int]$TimeoutSec,
     [string[]]$Args,
     [switch]$WaitForResult,
+    [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 900
 )
 
@@ -57,10 +58,12 @@ function Get-ResultSummary {
     try {
         $metaText = Read-ZipEntryText -Archive $archive -EntryPath "meta.json"
         $exitReason = "UNKNOWN"
+        $exitCode = ""
         $failureSignature = ""
         if ($metaText) {
             $meta = $metaText | ConvertFrom-Json
             if ($meta.exit_reason) { $exitReason = $meta.exit_reason }
+            if ($meta.exit_code -ne $null) { $exitCode = $meta.exit_code }
             if ($meta.failure_signature) { $failureSignature = $meta.failure_signature }
         }
 
@@ -72,6 +75,7 @@ function Get-ResultSummary {
         }
 
         $parts = @($exitReason)
+        if ($exitCode -ne "") { $parts += "exit_code=$exitCode" }
         if ($failureSignature) { $parts += "failure_signature=$failureSignature" }
         if ($determinismHash) { $parts += "determinism_hash=$determinismHash" }
         return ($parts -join " ")
@@ -109,6 +113,9 @@ $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$
 $timeoutValue = if ($PSBoundParameters.ContainsKey("TimeoutSec")) { $TimeoutSec } else { [int]$titleDefaults.timeout_sec }
 $argsValue = if ($PSBoundParameters.ContainsKey("Args")) { $Args } else { $titleDefaults.args }
 if ($null -eq $argsValue) { $argsValue = @() }
+if ($Repeat -lt 1) {
+    throw "Repeat must be >= 1."
+}
 
 $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
@@ -158,45 +165,57 @@ if (-not (Test-Path $artifactZip)) {
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
-$jobId = "{0}_{1}_{2}" -f $buildId, $scenarioIdValue, $seedValue
-$createdUtc = ([DateTime]::UtcNow).ToString("o")
-
-$job = [ordered]@{
-    job_id = $jobId
-    commit = $commitFull
-    build_id = $buildId
-    scenario_id = $scenarioIdValue
-    seed = [int]$seedValue
-    timeout_sec = [int]$timeoutValue
-    args = @($argsValue)
-    param_overrides = [ordered]@{}
-    feature_flags = [ordered]@{}
-    artifact_uri = $artifactUri
-    created_utc = $createdUtc
-}
-
-$jobJson = $job | ConvertTo-Json -Depth 6
-$jobTempPath = Join-Path $jobsDir (".tmp_{0}.json" -f $jobId)
-$jobPath = Join-Path $jobsDir ("{0}.json" -f $jobId)
-Set-Content -Path $jobTempPath -Value $jobJson -Encoding ascii
-Move-Item -Path $jobTempPath -Destination $jobPath -Force
-
 Write-Host ("build_id={0} commit={1}" -f $buildId, $commitFull)
 Write-Host ("artifact={0}" -f $artifactZip)
-Write-Host ("job={0}" -f $jobPath)
 
-if ($WaitForResult) {
-    $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
-    $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
-    while ((Get-Date) -lt $deadline) {
-        if (Test-Path $resultZip) { break }
-        Start-Sleep -Seconds 2
+for ($i = 1; $i -le $Repeat; $i++) {
+    $suffix = ""
+    if ($Repeat -gt 1) {
+        $suffix = "_r{0:D2}" -f $i
+    }
+    $jobId = "{0}_{1}_{2}{3}" -f $buildId, $scenarioIdValue, $seedValue, $suffix
+    $createdUtc = ([DateTime]::UtcNow).ToString("o")
+
+    $job = [ordered]@{
+        job_id = $jobId
+        commit = $commitFull
+        build_id = $buildId
+        scenario_id = $scenarioIdValue
+        seed = [int]$seedValue
+        timeout_sec = [int]$timeoutValue
+        args = @($argsValue)
+        param_overrides = [ordered]@{}
+        feature_flags = [ordered]@{}
+        artifact_uri = $artifactUri
+        created_utc = $createdUtc
     }
 
-    if (-not (Test-Path $resultZip)) {
-        throw "Timed out waiting for result: $resultZip"
-    }
+    $jobJson = $job | ConvertTo-Json -Depth 6
+    $jobTempPath = Join-Path $jobsDir (".tmp_{0}.json" -f $jobId)
+    $jobPath = Join-Path $jobsDir ("{0}.json" -f $jobId)
+    Set-Content -Path $jobTempPath -Value $jobJson -Encoding ascii
+    Move-Item -Path $jobTempPath -Destination $jobPath -Force
 
-    $summary = Get-ResultSummary -ZipPath $resultZip
-    Write-Host $summary
+    Write-Host ("job={0}" -f $jobPath)
+
+    if ($WaitForResult) {
+        $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
+        $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-Path $resultZip) { break }
+            Start-Sleep -Seconds 2
+        }
+
+        if (-not (Test-Path $resultZip)) {
+            throw "Timed out waiting for result: $resultZip"
+        }
+
+        $summary = Get-ResultSummary -ZipPath $resultZip
+        if ($Repeat -gt 1) {
+            Write-Host ("run {0}/{1} {2}" -f $i, $Repeat, $summary)
+        }
+        else {
+            Write-Host $summary
+        }
+    }
 }
