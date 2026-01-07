@@ -31,6 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
 DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
+DEFAULT_TELEMETRY_MAX_BYTES=52428800
 log() {
   echo "wsl_runner: $*" >&2
 }
@@ -40,7 +41,7 @@ usage() {
 Usage: wsl_runner.sh --queue <path> [--workdir <path>] [--once|--daemon]
                     [--heartbeat-interval <sec>] [--diag-timeout <sec>]
                     [--print-summary] [--requeue-stale-leases --ttl-sec <sec>]
-                    [--emit-triage-on-fail] [--reports-dir <path>] [--self-test]
+                    [--emit-triage-on-fail] [--reports-dir <path>] [--telemetry-max-bytes <bytes>] [--self-test]
 
 Options:
   --queue <path>              Queue root (required unless --self-test).
@@ -52,6 +53,7 @@ Options:
   --print-summary             Print summary line after each job.
   --emit-triage-on-fail        Emit triage summary JSON on failures (default).
   --reports-dir <path>         Triage reports directory (default: /mnt/c/polish/queue/reports).
+  --telemetry-max-bytes <bytes> Telemetry output cap in bytes (default: 52428800).
   --requeue-stale-leases      Requeue stale leases (helper mode).
   --ttl-sec <sec>             TTL seconds for stale leases (default: 600).
   --self-test                 Run local self-test scenarios.
@@ -1176,6 +1178,7 @@ run_job() {
   local print_summary="$6"
   local emit_triage_on_fail="$7"
   local reports_dir="$8"
+  local telemetry_max_bytes="$9"
 
   local job_basename
   job_basename="$(basename "$lease_path")"
@@ -1347,6 +1350,10 @@ run_job() {
     if telemetry_disabled_in_args "${job_args[@]}"; then
       telemetry_enabled=0
     fi
+    local telemetry_max_env=""
+    if [ "$telemetry_enabled" -eq 1 ] && [ -n "$telemetry_max_bytes" ] && [ "$telemetry_max_bytes" -gt 0 ]; then
+      telemetry_max_env="$telemetry_max_bytes"
+    fi
 
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
@@ -1383,6 +1390,7 @@ run_job() {
     setsid -- env \
       TRI_PARAM_OVERRIDES="$param_overrides_json" \
       TRI_FEATURE_FLAGS="$feature_flags_json" \
+      ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
       "$entrypoint_path" "${final_args[@]}" >"$stdout_log" 2>"$stderr_log" &
     local pid=$!
     local pgid
@@ -1509,12 +1517,13 @@ run_once() {
   local print_summary="$5"
   local emit_triage_on_fail="$6"
   local reports_dir="$7"
+  local telemetry_max_bytes="$8"
   local lease_path
   lease_path="$(claim_job "$queue_dir" || true)"
   if [ -z "$lease_path" ]; then
     return 1
   fi
-  run_job "$lease_path" "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir"
+  run_job "$lease_path" "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
   return 0
 }
 
@@ -1526,8 +1535,9 @@ daemon_loop() {
   local print_summary="$5"
   local emit_triage_on_fail="$6"
   local reports_dir="$7"
+  local telemetry_max_bytes="$8"
   while true; do
-    if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir"; then
+    if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"; then
       sleep 2
     fi
   done
@@ -1537,6 +1547,7 @@ self_test() {
   local print_summary="$1"
   local emit_triage_on_fail="$2"
   local reports_dir="$3"
+  local telemetry_max_bytes="$4"
   local tmp_root
   tmp_root="$(mktemp -d)"
   local queue_dir="${tmp_root}/queue"
@@ -1590,8 +1601,8 @@ JSON
 }
 JSON
 
-  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" || true
-  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" || true
+  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
+  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
 
   local meta_missing="${workdir}/selftest_missing/meta.json"
   local meta_hang="${workdir}/selftest_hang/meta.json"
@@ -1633,6 +1644,7 @@ main() {
   local ttl_sec=600
   local emit_triage_on_fail=1
   local reports_dir="$DEFAULT_REPORTS_DIR"
+  local telemetry_max_bytes="$DEFAULT_TELEMETRY_MAX_BYTES"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -1672,6 +1684,10 @@ main() {
         reports_dir="$2"
         shift 2
         ;;
+      --telemetry-max-bytes)
+        telemetry_max_bytes="$2"
+        shift 2
+        ;;
       --requeue-stale-leases)
         requeue_mode=1
         shift
@@ -1699,7 +1715,7 @@ main() {
   ensure_dependencies
 
   if [ "$run_self_test" -eq 1 ]; then
-    self_test "$print_summary" "$emit_triage_on_fail" "$reports_dir"
+    self_test "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
     exit $?
   fi
 
@@ -1728,6 +1744,9 @@ main() {
   if [ -z "$ttl_sec" ] || ! [[ "$ttl_sec" =~ ^[0-9]+$ ]] || [ "$ttl_sec" -le 0 ]; then
     ttl_sec=600
   fi
+  if [ -z "$telemetry_max_bytes" ] || ! [[ "$telemetry_max_bytes" =~ ^[0-9]+$ ]] || [ "$telemetry_max_bytes" -le 0 ]; then
+    telemetry_max_bytes="$DEFAULT_TELEMETRY_MAX_BYTES"
+  fi
 
   ensure_queue_dirs "$queue_dir"
 
@@ -1742,9 +1761,9 @@ main() {
   mkdir -p "$workdir"
 
   if [ "$mode" = "daemon" ]; then
-    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir"
+    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
   else
-    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" || true
+    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
   fi
 }
 
