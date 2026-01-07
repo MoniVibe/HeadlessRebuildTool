@@ -51,7 +51,7 @@ function Read-ZipEntryText {
     }
 }
 
-function Get-ResultSummary {
+function Get-ResultDetails {
     param([string]$ZipPath)
     Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
     $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
@@ -61,27 +61,128 @@ function Get-ResultSummary {
         $exitCode = ""
         $failureSignature = ""
         if ($metaText) {
-            $meta = $metaText | ConvertFrom-Json
-            if ($meta.exit_reason) { $exitReason = $meta.exit_reason }
-            if ($meta.exit_code -ne $null) { $exitCode = $meta.exit_code }
-            if ($meta.failure_signature) { $failureSignature = $meta.failure_signature }
+            try {
+                $meta = $metaText | ConvertFrom-Json
+                if ($meta.exit_reason) { $exitReason = $meta.exit_reason }
+                if ($meta.exit_code -ne $null) { $exitCode = $meta.exit_code }
+                if ($meta.failure_signature) { $failureSignature = $meta.failure_signature }
+            }
+            catch {
+            }
         }
 
         $determinismHash = ""
         $invText = Read-ZipEntryText -Archive $archive -EntryPath "out/invariants.json"
+        $failingInvariants = @()
         if ($invText) {
-            $inv = $invText | ConvertFrom-Json
-            if ($inv.determinism_hash) { $determinismHash = $inv.determinism_hash }
+            try {
+                $inv = $invText | ConvertFrom-Json
+                if ($inv.determinism_hash) { $determinismHash = $inv.determinism_hash }
+                if ($inv.invariants) {
+                    foreach ($record in $inv.invariants) {
+                        if ($record.status -and $record.status -ne "PASS") {
+                            $failingInvariants += $record.id
+                        }
+                    }
+                }
+            }
+            catch {
+            }
         }
 
-        $parts = @($exitReason)
-        if ($exitCode -ne "") { $parts += "exit_code=$exitCode" }
-        if ($failureSignature) { $parts += "failure_signature=$failureSignature" }
-        if ($determinismHash) { $parts += "determinism_hash=$determinismHash" }
-        return ($parts -join " ")
+        return [ordered]@{
+            exit_reason = $exitReason
+            exit_code = $exitCode
+            failure_signature = $failureSignature
+            determinism_hash = $determinismHash
+            failing_invariants = $failingInvariants
+        }
     }
     finally {
         $archive.Dispose()
+    }
+}
+
+function Get-ResultInvariants {
+    param([string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $invText = Read-ZipEntryText -Archive $archive -EntryPath "out/invariants.json"
+        if (-not $invText) { return $null }
+        try { return ($invText | ConvertFrom-Json) } catch { return $null }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Format-ResultSummary {
+    param(
+        [int]$Index,
+        [int]$Total,
+        [hashtable]$Details
+    )
+    $parts = @(
+        "run_index=$Index",
+        "run_total=$Total",
+        "exit_reason=$($Details.exit_reason)"
+    )
+    if ($Details.exit_code -ne "") { $parts += "exit_code=$($Details.exit_code)" }
+    if ($Details.failure_signature) { $parts += "failure_signature=$($Details.failure_signature)" }
+    if ($Details.determinism_hash) { $parts += "determinism_hash=$($Details.determinism_hash)" }
+    if ($Details.failing_invariants -and $Details.failing_invariants.Count -gt 0) {
+        $parts += "failing_invariants=$([string]::Join(',', $Details.failing_invariants))"
+    }
+    return ($parts -join " ")
+}
+
+function Write-InvariantDiff {
+    param(
+        [object]$Baseline,
+        [object]$Current,
+        [string]$BaselineLabel,
+        [string]$CurrentLabel
+    )
+    if (-not $Baseline -or -not $Current) {
+        Write-Host "determinism_diff: invariants missing in one or both runs"
+        return
+    }
+
+    Write-Host ("determinism_diff sim_ticks {0}={1} {2}={3}" -f $BaselineLabel, $Baseline.sim_ticks, $CurrentLabel, $Current.sim_ticks)
+
+    $metricsA = if ($Baseline.metrics) { $Baseline.metrics | ConvertTo-Json -Compress } else { "null" }
+    $metricsB = if ($Current.metrics) { $Current.metrics | ConvertTo-Json -Compress } else { "null" }
+    Write-Host ("determinism_diff metrics {0}={1} {2}={3}" -f $BaselineLabel, $metricsA, $CurrentLabel, $metricsB)
+
+    $mapA = @{}
+    if ($Baseline.invariants) {
+        foreach ($record in $Baseline.invariants) {
+            $mapA[$record.id] = $record
+        }
+    }
+    $mapB = @{}
+    if ($Current.invariants) {
+        foreach ($record in $Current.invariants) {
+            $mapB[$record.id] = $record
+        }
+    }
+    $ids = @($mapA.Keys + $mapB.Keys) | Sort-Object -Unique
+    $ids = @($ids)
+    if ($ids.Count -eq 0) {
+        Write-Host ("determinism_diff invariants {0}=[] {1}=[]" -f $BaselineLabel, $CurrentLabel)
+        return
+    }
+    foreach ($id in $ids) {
+        $a = $mapA[$id]
+        $b = $mapB[$id]
+        $aStatus = if ($a) { $a.status } else { "<missing>" }
+        $bStatus = if ($b) { $b.status } else { "<missing>" }
+        $aObserved = if ($a) { $a.observed } else { "<missing>" }
+        $bObserved = if ($b) { $b.observed } else { "<missing>" }
+        $aExpected = if ($a) { $a.expected } else { "<missing>" }
+        $bExpected = if ($b) { $b.expected } else { "<missing>" }
+        Write-Host ("determinism_diff invariant {0} {1} status={2} observed={3} expected={4} {5} status={6} observed={7} expected={8}" -f $id, $BaselineLabel, $aStatus, $aObserved, $aExpected, $CurrentLabel, $bStatus, $bObserved, $bExpected)
     }
 }
 
@@ -208,6 +309,10 @@ $artifactUri = Convert-ToWslPath $artifactZip
 Write-Host ("build_id={0} commit={1}" -f $buildId, $commitFull)
 Write-Host ("artifact={0}" -f $artifactZip)
 
+$baselineHash = $null
+$baselineZip = $null
+$baselineIndex = 0
+
 for ($i = 1; $i -le $Repeat; $i++) {
     $suffix = ""
     if ($Repeat -gt 1) {
@@ -250,12 +355,31 @@ for ($i = 1; $i -le $Repeat; $i++) {
             throw "Timed out waiting for result: $resultZip"
         }
 
-        $summary = Get-ResultSummary -ZipPath $resultZip
-        if ($Repeat -gt 1) {
-            Write-Host ("run {0}/{1} {2}" -f $i, $Repeat, $summary)
+        $details = Get-ResultDetails -ZipPath $resultZip
+        $summary = Format-ResultSummary -Index $i -Total $Repeat -Details $details
+        Write-Host $summary
+
+        if ($details.exit_reason -in @("INFRA_FAIL", "CRASH", "HANG_TIMEOUT")) {
+            Write-Host ("stop_reason={0}" -f $details.exit_reason)
+            exit 2
         }
-        else {
-            Write-Host $summary
+
+        if ([string]::IsNullOrWhiteSpace($details.determinism_hash)) {
+            Write-Host ("stop_reason=determinism_hash_missing run_index={0}" -f $i)
+            exit 3
+        }
+
+        if ($i -eq 1) {
+            $baselineHash = $details.determinism_hash
+            $baselineZip = $resultZip
+            $baselineIndex = $i
+        }
+        elseif ($details.determinism_hash -ne $baselineHash) {
+            Write-Host ("stop_reason=determinism_hash_divergence baseline={0} current={1}" -f $baselineHash, $details.determinism_hash)
+            $baselineInv = Get-ResultInvariants -ZipPath $baselineZip
+            $currentInv = Get-ResultInvariants -ZipPath $resultZip
+            Write-InvariantDiff -Baseline $baselineInv -Current $currentInv -BaselineLabel ("run{0}" -f $baselineIndex) -CurrentLabel ("run{0}" -f $i)
+            exit 3
         }
     }
 }
