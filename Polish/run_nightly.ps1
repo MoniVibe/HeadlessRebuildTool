@@ -85,8 +85,7 @@ function Invoke-Smoke {
         [int]$RepeatCount,
         [int]$WaitTimeoutSec
     )
-    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $pipelineSmoke = Join-Path $scriptRoot "pipeline_smoke.ps1"
+    $pipelineSmoke = Join-Path $PSScriptRoot "pipeline_smoke.ps1"
     if (-not (Test-Path $pipelineSmoke)) {
         throw "pipeline_smoke.ps1 not found: $pipelineSmoke"
     }
@@ -164,7 +163,6 @@ function Summarize-Results {
 }
 
 $UnityExe = Resolve-UnityExe -ExePath $UnityExe
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $reportsDir = Join-Path $QueueRoot "reports"
 Ensure-Directory $reportsDir
 
