@@ -17,7 +17,10 @@
       "scenario_id": "godgame_smoke",
       "seed": 42,
       "timeout_sec": 120,
-      "args": []
+      "args": [
+        "--scenario",
+        "/mnt/c/dev/Tri/godgame/Assets/Scenarios/Godgame/godgame_smoke.json"
+      ]
     }
   }
 }
