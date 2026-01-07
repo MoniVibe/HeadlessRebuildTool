@@ -85,6 +85,37 @@ function Get-ResultSummary {
     }
 }
 
+function Get-ArtifactPreflight {
+    param([string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $outcomeText = Read-ZipEntryText -Archive $archive -EntryPath "logs/build_outcome.json"
+        if (-not $outcomeText) {
+            return @{ ok = $false; reason = "build_outcome_missing" }
+        }
+        $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "build_manifest.json"
+        if (-not $manifestText) {
+            return @{ ok = $false; reason = "build_manifest_missing" }
+        }
+
+        try { $outcome = $outcomeText | ConvertFrom-Json } catch { return @{ ok = $false; reason = "build_outcome_invalid" } }
+        try { $manifest = $manifestText | ConvertFrom-Json } catch { return @{ ok = $false; reason = "build_manifest_invalid" } }
+
+        if ($outcome.result -ne "Succeeded") {
+            $message = if ($outcome.message) { $outcome.message } else { "build_failed" }
+            return @{ ok = $false; reason = "build_failed"; message = $message; result = $outcome.result }
+        }
+        if ([string]::IsNullOrWhiteSpace($manifest.entrypoint)) {
+            return @{ ok = $false; reason = "entrypoint_missing" }
+        }
+        return @{ ok = $true }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
@@ -162,6 +193,15 @@ if ($supervisorExit -ne 0) {
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
 if (-not (Test-Path $artifactZip)) {
     throw "Artifact zip not found: $artifactZip"
+}
+
+$preflight = Get-ArtifactPreflight -ZipPath $artifactZip
+if (-not $preflight.ok) {
+    $summary = "BUILD_FAIL reason={0}" -f $preflight.reason
+    if ($preflight.result) { $summary += " result=$($preflight.result)" }
+    if ($preflight.message) { $summary += " message=$($preflight.message)" }
+    Write-Host $summary
+    exit 1
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
