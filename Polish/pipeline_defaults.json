@@ -14,7 +14,7 @@
     },
     "godgame": {
       "project_path": "godgame",
-      "scenario_id": "godgame_smoke",
+      "scenario_id": "godgame",
       "seed": 42,
       "timeout_sec": 120,
       "args": [
