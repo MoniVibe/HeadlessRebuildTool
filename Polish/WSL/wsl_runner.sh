@@ -20,6 +20,7 @@ HAVE_JQ=0
 HAVE_ZIP=0
 HAVE_UNZIP=0
 PYTHON_BIN=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 LAST_DIAG_START_UTC=""
 LAST_DIAG_END_UTC=""
@@ -823,6 +824,25 @@ with open(meta_path,"w",encoding="utf-8") as handle:
 PY
 }
 
+run_ml_analyzer() {
+  local meta_path="$1"
+  local out_dir="$2"
+  local analyzer="${SCRIPT_DIR}/../ML/analyze_run.py"
+
+  if [ ! -f "$analyzer" ]; then
+    log "WARN: analyzer not found: $analyzer"
+    return 0
+  fi
+  if [ -z "$PYTHON_BIN" ]; then
+    log "WARN: analyzer skipped (python missing)"
+    return 0
+  fi
+  if ! "$PYTHON_BIN" "$analyzer" --meta "$meta_path" --outdir "$out_dir"; then
+    log "WARN: analyze_run failed"
+  fi
+  return 0
+}
+
 extract_zip() {
   local zip_path="$1"
   local dest_dir="$2"
@@ -995,12 +1015,14 @@ print_summary_line() {
   local out_dir="$2"
   local progress_path="${out_dir}/progress.json"
   local invariants_path="${out_dir}/invariants.json"
+  local score_path="${out_dir}/polish_score_v0.json"
 
-  "$PYTHON_BIN" - "$meta_path" "$progress_path" "$invariants_path" <<'PY'
+  "$PYTHON_BIN" - "$meta_path" "$progress_path" "$invariants_path" "$score_path" <<'PY'
 import json,os,sys
 meta_path=sys.argv[1]
 progress_path=sys.argv[2]
 invariants_path=sys.argv[3]
+score_path=sys.argv[4]
 
 def load(path):
     if not os.path.exists(path):
@@ -1014,6 +1036,7 @@ def load(path):
 meta=load(meta_path) or {}
 progress=load(progress_path)
 inv=load(invariants_path)
+score=load(score_path) or {}
 
 progress_marker=""
 if isinstance(progress, list) and progress:
@@ -1081,6 +1104,13 @@ if det_hash:
     parts.append(f"determinism_hash={det_hash}")
 if unique_ids:
     parts.append(f"failing_invariants={','.join(unique_ids[:3])}")
+if isinstance(score, dict):
+    total_loss=score.get("total_loss")
+    grade=score.get("grade")
+    if total_loss is not None:
+        parts.append(f"total_loss={total_loss}")
+    if grade:
+        parts.append(f"grade={grade}")
 
 print(" ".join([p for p in parts if p]))
 PY
@@ -1438,6 +1468,8 @@ run_job() {
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host"
+
+  run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
   if [ "$print_summary" -eq 1 ]; then
