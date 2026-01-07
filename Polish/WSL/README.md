@@ -6,21 +6,22 @@ Runs headless scenario jobs from a queue, enforces watchdog timeouts, and publis
 Required:
 - bash
 - coreutils (date, ps, timeout, sha256sum)
-- unzip, zip
-- jq
+- python3 (or python)
 
 Optional:
+- jq (JSON parsing; python fallback if missing)
+- unzip/zip (archive handling; python zipfile fallback if missing)
 - gdb (for hang/crash backtraces)
 
 ## Usage
 Run one job:
 ```bash
-./wsl_runner.sh --queue /mnt/c/polish/queue --once
+./wsl_runner.sh --queue /home/oni/Tri/.tri/state/queue --once
 ```
 
 Run as daemon:
 ```bash
-./wsl_runner.sh --queue /mnt/c/polish/queue --daemon
+./wsl_runner.sh --queue /home/oni/Tri/.tri/state/queue --daemon
 ```
 
 Self-test:
@@ -39,12 +40,10 @@ Self-test:
 - `--once` / `--daemon`: Single-run or poll forever.
 - `--heartbeat-interval <sec>`: Updates run heartbeat + lease mtime (default: 2).
 - `--diag-timeout <sec>`: Time cap for diagnostics (default: 15).
+- `--print-summary`: Print summary line after publishing each result bundle.
+- `--requeue-stale-leases --ttl-sec <sec>`: Requeue leases past TTL.
 
 ## Queue Layout
-Canonical queue root (Windows <-> WSL):
-- Windows: `C:\polish\queue`
-- WSL: `/mnt/c/polish/queue`
-
 Expected directories under `<queue>`:
 - `jobs/` incoming `*.json` jobs
 - `leases/` claimed jobs
@@ -57,9 +56,6 @@ Accepted forms:
 - UNC paths: `\\wsl$\Distro\home\oni\...` or `//wsl$/Distro/home/oni/...`
 - Direct WSL paths on ext4
 
-Preferred form for the Windows/WSL spine:
-- `/mnt/c/polish/queue/artifacts/artifact_<build_id>.zip`
-
 UNC shares resolve under `${UNC_ROOT:-/mnt/unc}` by default.
 
 ## Result Bundle
@@ -70,6 +66,7 @@ Each job produces `result_<job_id>.zip` (published atomically). Contents include
 - `out/player.log`
 - `out/watchdog.json`
 - `out/repro.txt`
+- `out/progress.json`, `out/invariants.json`, `out/telemetry.ndjson` (when produced)
 - optional diagnostics (`gdb_bt.txt`, `system_snapshot.txt`, `ps_snapshot.txt`, `core_dump_path.txt`)
 
 ## Exit Codes
@@ -91,4 +88,6 @@ Standardized runner exit codes (also recorded in `meta.json`):
 
 ## Notes
 - `-logFile <out/player.log>` is forced unless the job args explicitly override it.
+- `--outDir <out>` + Phase 0 diagnostics paths are always injected into the command line.
 - `TRI_PARAM_OVERRIDES` and `TRI_FEATURE_FLAGS` are passed as JSON env vars (sorted keys) for determinism.
+- `invariants.json` includes `diagnostics_version: 1`; `determinism_hash` excludes build metadata and uses stable sim outputs only.
