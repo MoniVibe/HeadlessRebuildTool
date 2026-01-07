@@ -266,6 +266,22 @@ test_fail_marker_present() {
   tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
 }
 
+infra_marker_present() {
+  local pattern='scenario file not found|entrypoint missing|entrypoint not found'
+  tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
+}
+
+signal_exit_code_present() {
+  local code="$1"
+  if ! [[ "$code" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  if [ "$code" -ge 128 ] && [ "$code" -le 192 ]; then
+    return 0
+  fi
+  return 1
+}
+
 classify_exit_reason() {
   local process_exit_code="$1"
   local timed_out="$2"
@@ -289,7 +305,11 @@ classify_exit_reason() {
     echo "$EXIT_REASON_INFRA"
     return 0
   fi
-  if [ "$process_exit_code" -eq "$EXIT_CODE_CRASH" ]; then
+  if infra_marker_present; then
+    echo "$EXIT_REASON_INFRA"
+    return 0
+  fi
+  if signal_exit_code_present "$process_exit_code"; then
     echo "$EXIT_REASON_CRASH"
     return 0
   fi
@@ -299,10 +319,6 @@ classify_exit_reason() {
   fi
   if test_fail_marker_present; then
     echo "$EXIT_REASON_TEST_FAIL"
-    return 0
-  fi
-  if ! scenario_complete_marker_present; then
-    echo "$EXIT_REASON_CRASH"
     return 0
   fi
   echo "$EXIT_REASON_TEST_FAIL"
@@ -540,12 +556,13 @@ write_meta_json() {
   local start_utc="$7"
   local end_utc="$8"
   local duration_sec="$9"
-  local exit_reason="${10}"
-  local exit_code="${11}"
-  local repro_command="${12}"
-  local failure_signature="${13}"
-  local artifact_paths_json="${14}"
-  local runner_host="${15}"
+  local raw_exit_code="${10}"
+  local exit_reason="${11}"
+  local exit_code="${12}"
+  local repro_command="${13}"
+  local failure_signature="${14}"
+  local artifact_paths_json="${15}"
+  local runner_host="${16}"
 
   jq -n \
     --arg job_id "$job_id" \
@@ -556,6 +573,7 @@ write_meta_json() {
     --arg start_utc "$start_utc" \
     --arg end_utc "$end_utc" \
     --argjson duration_sec "$duration_sec" \
+    --arg raw_exit_code "$raw_exit_code" \
     --arg exit_reason "$exit_reason" \
     --argjson exit_code "$exit_code" \
     --arg repro_command "$repro_command" \
@@ -572,6 +590,7 @@ write_meta_json() {
       start_utc: $start_utc,
       end_utc: $end_utc,
       duration_sec: $duration_sec,
+      raw_exit_code: (if $raw_exit_code == "" then null else ($raw_exit_code | tonumber?) end),
       exit_reason: $exit_reason,
       exit_code: $exit_code,
       repro_command: $repro_command,
@@ -958,7 +977,7 @@ run_job() {
   local artifact_paths_json
   artifact_paths_json="$(build_artifact_paths_json "$out_dir")"
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
-    "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
+    "$start_utc" "$end_utc" "$duration_sec" "$process_exit_code" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
