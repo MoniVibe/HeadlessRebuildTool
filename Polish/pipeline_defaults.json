@@ -1,0 +1,26 @@
+{
+  "titles": {
+    "space4x": {
+      "project_path": "space4x",
+      "scenario_id": "space4x",
+      "seed": 7,
+      "timeout_sec": 90,
+      "args": [
+        "--scenario",
+        "/mnt/c/dev/Tri/space4x/Assets/Scenarios/space4x_collision_micro.json",
+        "--telemetryEnabled",
+        "0"
+      ]
+    },
+    "godgame": {
+      "project_path": "godgame",
+      "scenario_id": "godgame",
+      "seed": 42,
+      "timeout_sec": 120,
+      "args": [
+        "--scenario",
+        "/mnt/c/dev/Tri/godgame/Assets/Scenarios/Godgame/godgame_smoke.json"
+      ]
+    }
+  }
+}
