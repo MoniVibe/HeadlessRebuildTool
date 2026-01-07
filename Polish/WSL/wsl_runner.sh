@@ -26,6 +26,8 @@ LAST_DIAG_END_UTC=""
 LAST_DIAG_REASON=""
 CURRENT_STDOUT_LOG=""
 CURRENT_STDERR_LOG=""
+CURRENT_PLAYER_LOG=""
+CURRENT_CORE_DUMP_PRESENT=0
 
 log() {
   echo "wsl_runner: $*" >&2
@@ -478,13 +480,26 @@ scenario_complete_marker_present() {
 }
 
 crash_marker_present() {
-  local pattern='segmentation fault|sigsegv|signal 11|crash!!!|unityplayer\.so|fatal error'
-  tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
+  local pattern='segmentation fault|sigsegv|crash!!!|abort|sigabrt'
+  tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern" || tail_match "$CURRENT_PLAYER_LOG" "$pattern"
 }
 
 test_fail_marker_present() {
   local pattern='assert fail|invariant fail|scenario failed|assertion failed'
   tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
+}
+
+scenario_file_not_found_present() {
+  local pattern='scenario file not found'
+  tail_match "$CURRENT_PLAYER_LOG" "$pattern" || tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
+}
+
+exit_by_signal() {
+  local process_exit_code="$1"
+  if [ "$process_exit_code" -ge 128 ]; then
+    return 0
+  fi
+  return 1
 }
 
 classify_exit_reason() {
@@ -494,12 +509,24 @@ classify_exit_reason() {
     echo "$EXIT_REASON_HANG"
     return 0
   fi
+  if scenario_file_not_found_present; then
+    echo "$EXIT_REASON_INFRA"
+    return 0
+  fi
   if [ "$process_exit_code" -eq 0 ]; then
-    if scenario_complete_marker_present; then
-      echo "$EXIT_REASON_SUCCESS"
-    else
-      echo "$EXIT_REASON_CRASH"
-    fi
+    echo "$EXIT_REASON_SUCCESS"
+    return 0
+  fi
+  if exit_by_signal "$process_exit_code"; then
+    echo "$EXIT_REASON_CRASH"
+    return 0
+  fi
+  if [ "$CURRENT_CORE_DUMP_PRESENT" -eq 1 ]; then
+    echo "$EXIT_REASON_CRASH"
+    return 0
+  fi
+  if crash_marker_present; then
+    echo "$EXIT_REASON_CRASH"
     return 0
   fi
   if [ "$process_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
@@ -510,20 +537,8 @@ classify_exit_reason() {
     echo "$EXIT_REASON_INFRA"
     return 0
   fi
-  if [ "$process_exit_code" -eq "$EXIT_CODE_CRASH" ]; then
-    echo "$EXIT_REASON_CRASH"
-    return 0
-  fi
-  if crash_marker_present; then
-    echo "$EXIT_REASON_CRASH"
-    return 0
-  fi
   if test_fail_marker_present; then
     echo "$EXIT_REASON_TEST_FAIL"
-    return 0
-  fi
-  if ! scenario_complete_marker_present; then
-    echo "$EXIT_REASON_CRASH"
     return 0
   fi
   echo "$EXIT_REASON_TEST_FAIL"
@@ -962,6 +977,7 @@ find_core_dump() {
   local out_dir="$3"
   local core_path=""
   local candidate
+  CURRENT_CORE_DUMP_PRESENT=0
   for candidate in "$run_dir"/core* "$build_dir"/core*; do
     if [ -f "$candidate" ]; then
       core_path="$candidate"
@@ -970,6 +986,7 @@ find_core_dump() {
   done
   if [ -n "$core_path" ]; then
     echo "$core_path" > "$out_dir/core_dump_path.txt"
+    CURRENT_CORE_DUMP_PRESENT=1
   fi
 }
 
@@ -1369,6 +1386,9 @@ run_job() {
 
     CURRENT_STDOUT_LOG="$stdout_log"
     CURRENT_STDERR_LOG="$stderr_log"
+    CURRENT_PLAYER_LOG="$player_log"
+    CURRENT_CORE_DUMP_PRESENT=0
+    find_core_dump "$run_dir" "$build_dir" "$out_dir"
     if [ "$timed_out" -eq 1 ]; then
       exit_reason="$EXIT_REASON_HANG"
     else
@@ -1384,10 +1404,6 @@ run_job() {
     fi
     run_diagnostics "$diag_reason" "$out_dir" "$stdout_log" "$stderr_log" "" "" "$entrypoint_name" "$diag_timeout"
     diag_ran=1
-  fi
-
-  if [ "$exit_reason" != "$EXIT_REASON_SUCCESS" ]; then
-    find_core_dump "$run_dir" "$build_dir" "$out_dir"
   fi
 
   local error_line=""
