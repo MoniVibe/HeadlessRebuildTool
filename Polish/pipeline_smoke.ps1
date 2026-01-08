@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Title,
-    [Parameter(Mandatory = $true)]
+    [Parameter()]
     [string]$UnityExe,
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$LockReason = "pipeline_smoke",
@@ -22,6 +22,24 @@ function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Resolve-UnityExe {
+    param([string]$ExePath)
+    $resolved = $ExePath
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        $resolved = $env:UNITY_WIN
+    }
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        $resolved = $env:UNITY_EXE
+    }
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        throw "UnityExe not provided (use -UnityExe or set UNITY_WIN/UNITY_EXE)."
+    }
+    if (-not (Test-Path $resolved)) {
+        throw "Unity exe not found: $resolved"
+    }
+    return $resolved
 }
 
 $LockRoot = "C:\\polish\\locks"
@@ -296,9 +314,7 @@ if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
 
-if (-not (Test-Path $UnityExe)) {
-    throw "Unity exe not found: $UnityExe"
-}
+$UnityExe = Resolve-UnityExe -ExePath $UnityExe
 
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
 $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$titleDefaults.seed }
