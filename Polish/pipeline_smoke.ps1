@@ -258,7 +258,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
 
-$timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss")
+$timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
 $buildId = "${timestamp}_$commitShort"
 
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)

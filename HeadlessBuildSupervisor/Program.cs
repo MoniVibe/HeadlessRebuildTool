@@ -103,7 +103,9 @@ internal static class Program
             WriteFailureReason(failureReasonPath, failureSignature, failureMessage, logger);
         }
 
-        if (!File.Exists(outcomePath))
+        var outcomeExists = File.Exists(outcomePath);
+        var outcomeLength = outcomeExists ? new FileInfo(outcomePath).Length : 0;
+        if (!outcomeExists || outcomeLength == 0)
         {
             WriteFallbackOutcome(outcomePath, options, runResult, logger);
         }
@@ -130,8 +132,28 @@ internal static class Program
 
         if (File.Exists(zipFinal))
         {
-            logger.Info($"artifact_exists path={zipFinal}");
-            return 2;
+            var requiredEntries = new[]
+            {
+                $"{LogsFolderName}/{BuildOutcomeName}",
+                BuildManifestName
+            };
+
+            if (ZipHasEntries(zipFinal, requiredEntries, logger))
+            {
+                logger.Info($"artifact_exists path={zipFinal} valid=true");
+                return 2;
+            }
+
+            logger.Info($"artifact_exists path={zipFinal} valid=false");
+            try
+            {
+                File.Delete(zipFinal);
+            }
+            catch (Exception ex)
+            {
+                logger.Info($"artifact_delete_failed path={zipFinal} error={ex.GetType().Name}");
+                throw;
+            }
         }
 
         if (File.Exists(zipTemp))
@@ -144,6 +166,30 @@ internal static class Program
         logger.Info($"artifact_published path={zipFinal}");
 
         return success ? 0 : 1;
+    }
+
+    private static bool ZipHasEntries(string zipPath, IReadOnlyCollection<string> requiredEntries, Logger logger)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(zipPath);
+            var remaining = new HashSet<string>(requiredEntries, StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in archive.Entries)
+            {
+                remaining.Remove(entry.FullName);
+                if (remaining.Count == 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            logger.Info($"artifact_validate_failed path={zipPath} error={ex.GetType().Name}");
+            return false;
+        }
     }
 
     private static UnityRunResult RunUnity(Options options, string artifactRoot, string unityLog, Logger logger)
