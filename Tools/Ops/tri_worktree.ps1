@@ -71,7 +71,7 @@ function Normalize-BranchSegment {
     if ([string]::IsNullOrWhiteSpace($clean)) {
         return "unknown"
     }
-    return $clean.ToLowerInvariant()
+    return $clean
 }
 
 function Resolve-UnityBuildLockPath {
