@@ -1,3 +1,9 @@
+> **What this is**  
+> A local-first gameplay CI loop for Unity/DOTS: Windows builds a Linux headless server, WSL runs deterministic scenarios, and each run emits a reproducible result bundle (logs, invariants/progress, triage JSON, and a simple score).
+>
+> **Support**  
+> If this saves you time, you can sponsor development: https://github.com/sponsors/MoniVibe
+
 # Polish Queue + Pipeline Smoke (Windows -> WSL)
 
 ## Canonical Queue Root (Windows <-> WSL)
