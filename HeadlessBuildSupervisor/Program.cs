@@ -98,16 +98,19 @@ internal static class Program
             break;
         }
 
+        var buildDir = Path.Combine(stagingDir, "build");
+        var entrypoint = FindEntrypoint(buildDir);
+        if (!success && runResult != null && runResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(entrypoint))
+        {
+            success = true;
+            failureSignature = FailureSignature.Unknown;
+            failureMessage = "SUCCESS_INFERRED: Unity exit=0 and entrypoint exists; Unity did not emit build_outcome.json";
+            logger.Info("success_inferred");
+        }
+
         if (!success)
         {
             WriteFailureReason(failureReasonPath, failureSignature, failureMessage, logger);
-        }
-
-        var outcomeExists = File.Exists(outcomePath);
-        var outcomeLength = outcomeExists ? new FileInfo(outcomePath).Length : 0;
-        if (!outcomeExists || outcomeLength == 0)
-        {
-            WriteFallbackOutcome(outcomePath, options, runResult, stagingDir, logger);
         }
 
         if (!File.Exists(reportJsonPath) && !File.Exists(reportTextPath))
@@ -119,6 +122,8 @@ internal static class Program
         {
             WriteFallbackManifest(manifestPath, stagingDir, options, unityLog, logger);
         }
+
+        WriteFinalOutcome(outcomePath, options, success, failureMessage, logger);
 
         if (!success)
         {
@@ -169,7 +174,8 @@ internal static class Program
             outcomePath,
             manifestPath,
             options,
-            runResult,
+            success,
+            failureMessage,
             logger);
         File.Move(zipTemp, zipFinal);
         logger.Info($"artifact_published path={zipFinal}");
@@ -550,26 +556,12 @@ internal static class Program
         return match.Success ? match.Groups[1].Value : null;
     }
 
-    private static bool InferBuildSucceeded(UnityRunResult? result, string stagingDir)
+    private static void WriteFinalOutcome(string outcomePath, Options options, bool success, string failureMessage, Logger logger)
     {
-        if (result == null || result.ExitCode != 0)
-        {
-            return false;
-        }
-
-        var entrypoint = FindEntrypoint(Path.Combine(stagingDir, "build"));
-        return !string.IsNullOrWhiteSpace(entrypoint);
-    }
-
-    private static void WriteFallbackOutcome(string outcomePath, Options options, UnityRunResult? result, string stagingDir, Logger logger)
-    {
-        var inferredSuccess = InferBuildSucceeded(result, stagingDir);
-        var outcomeResult = inferredSuccess ? "Succeeded" : "Failed";
-        var message = inferredSuccess
-            ? "WARNING: build_outcome.json missing; inferred success from build output"
-            : result != null && result.TimedOut
-                ? "INFRA_FAIL: Unity timeout"
-                : "INFRA_FAIL: build_outcome.json missing";
+        var outcomeResult = success ? "Succeeded" : "Failed";
+        var message = success
+            ? string.IsNullOrWhiteSpace(failureMessage) ? "Succeeded" : failureMessage
+            : string.IsNullOrWhiteSpace(failureMessage) ? "INFRA_FAIL: build_outcome.json missing" : failureMessage;
         var reportPath = File.Exists(Path.Combine(Path.GetDirectoryName(outcomePath) ?? string.Empty, BuildReportJsonName))
             ? $"{LogsFolderName}/{BuildReportJsonName}"
             : $"{LogsFolderName}/{BuildReportTextName}";
@@ -585,7 +577,7 @@ internal static class Program
         json.Append("}");
 
         File.WriteAllText(outcomePath, json.ToString(), Encoding.ASCII);
-        logger.Info("fallback_outcome_written");
+        logger.Info($"outcome_final_written result={outcomeResult}");
     }
 
     private static void WriteFallbackReport(string jsonPath, string textPath, Logger logger)
@@ -653,12 +645,13 @@ internal static class Program
         string outcomePath,
         string manifestPath,
         Options options,
-        UnityRunResult? result,
+        bool success,
+        string failureMessage,
         Logger logger)
     {
         if (!File.Exists(outcomePath) || new FileInfo(outcomePath).Length == 0)
         {
-            WriteFallbackOutcome(outcomePath, options, result, stagingDir, logger);
+            WriteFinalOutcome(outcomePath, options, success, failureMessage, logger);
         }
 
         if (!File.Exists(manifestPath))
