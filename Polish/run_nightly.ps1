@@ -408,7 +408,7 @@ $triageAll = New-Object System.Collections.Generic.List[string]
 $hasErrors = $false
 
 foreach ($run in $runs) {
-    $entry = [ordered]@{
+    $entry = [pscustomobject][ordered]@{
         build_id = $run.build_id
         artifact_zip = $run.artifact_zip
         pipeline_exit_code = $run.exit_code
@@ -423,16 +423,20 @@ foreach ($run in $runs) {
         polish_score_grades = @()
         notes = @()
     }
-    if (-not [string]::IsNullOrWhiteSpace($run.error)) {
-        $entry.error = $run.error
+    $runErrorProp = $run.PSObject.Properties["error"]
+    if ($runErrorProp -and -not [string]::IsNullOrWhiteSpace([string]$runErrorProp.Value)) {
+        $entry.error = $runErrorProp.Value
         $hasErrors = $true
     }
-    if ([string]::IsNullOrWhiteSpace($run.build_id)) {
+    $buildIdValue = $null
+    $buildIdProp = $run.PSObject.Properties["build_id"]
+    if ($buildIdProp) { $buildIdValue = [string]$buildIdProp.Value }
+    if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
         if (-not $entry.error) { $entry.error = "build_id_missing" }
         $hasErrors = $true
     }
     else {
-        $stats = @(Summarize-Results -QueueRootPath $QueueRoot -BuildId $run.build_id -Title $run.title -ReportsDir $reportsDir)[0]
+        $stats = @(Summarize-Results -QueueRootPath $QueueRoot -BuildId $buildIdValue -Title $run.title -ReportsDir $reportsDir)[0]
         $entry.result_count = $stats.result_count
         $entry.exit_reason_counts = $stats.exit_counts
         $entry.determinism_hashes = $stats.determinism_hashes
@@ -442,8 +446,9 @@ foreach ($run in $runs) {
         $entry.failing_invariants = $stats.failing_invariants
         $entry.polish_score_total_loss = $stats.polish_score_total_loss
         $entry.polish_score_grades = $stats.polish_score_grades
-        if ($stats.error) {
-            $entry.error = $stats.error
+        $statsErrorProp = $stats.PSObject.Properties["error"]
+        if ($statsErrorProp -and $statsErrorProp.Value) {
+            $entry.error = $statsErrorProp.Value
             $hasErrors = $true
         }
         foreach ($path in $stats.triage_paths) {
