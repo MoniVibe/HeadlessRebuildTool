@@ -39,14 +39,14 @@ function Get-ArtifactZip {
         [datetime]$SinceUtc
     )
     if (-not (Test-Path $ArtifactsDir)) { return $null }
-    $candidates = Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File
-    if ($candidates -and $SinceUtc) {
-        $candidates = $candidates | Where-Object { $_.LastWriteTimeUtc -ge $SinceUtc }
+    $candidates = @(Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File)
+    if ($SinceUtc) {
+        $candidates = @($candidates | Where-Object { $_.LastWriteTimeUtc -ge $SinceUtc })
     }
-    if (-not $candidates -or $candidates.Count -eq 0) {
-        $candidates = Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File
+    if ($null -eq $candidates -or $candidates.Count -eq 0) {
+        $candidates = @(Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File)
     }
-    if (-not $candidates -or $candidates.Count -eq 0) { return $null }
+    if ($null -eq $candidates -or $candidates.Count -eq 0) { return $null }
     return ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
 }
 
@@ -251,9 +251,9 @@ function Summarize-Results {
         }
     }
     $pattern = "result_{0}_{1}_*.zip" -f $BuildId, $Title
-    $zips = Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name
+    $zips = @(Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name)
 
-    if (-not $zips -or $zips.Count -eq 0) {
+    if ($null -eq $zips -or $zips.Count -eq 0) {
         return [ordered]@{
             result_count = 0
             exit_reason_counts = $counts
