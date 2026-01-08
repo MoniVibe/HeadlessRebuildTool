@@ -61,6 +61,32 @@ function Parse-BuildIdFromArtifact {
     return $null
 }
 
+function Get-LatestResultZip {
+    param(
+        [string]$ResultsDir,
+        [string]$Title
+    )
+    if (-not (Test-Path $ResultsDir)) { return $null }
+    $pattern = "result_*_{0}_*.zip" -f $Title
+    $candidates = @(Get-ChildItem -Path $ResultsDir -Filter $pattern -File)
+    if ($null -eq $candidates -or $candidates.Count -eq 0) { return $null }
+    return ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
+}
+
+function Parse-BuildIdFromResult {
+    param(
+        [string]$ResultPath,
+        [string]$Title
+    )
+    if ([string]::IsNullOrWhiteSpace($ResultPath)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
+    $name = [System.IO.Path]::GetFileName($ResultPath)
+    $pattern = "^result_(.+?)_{0}_.*\\.zip$" -f [regex]::Escape($Title)
+    $match = [regex]::Match($name, $pattern)
+    if ($match.Success) { return $match.Groups[1].Value }
+    return $null
+}
+
 function Read-ZipEntryText {
     param(
         [System.IO.Compression.ZipArchive]$Archive,
@@ -441,6 +467,29 @@ foreach ($title in $titles) {
     $buildIdValue = $null
     $buildIdProp = $run.PSObject.Properties["build_id"]
     if ($buildIdProp) { $buildIdValue = [string]$buildIdProp.Value }
+    if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+        $artifactProp = $run.PSObject.Properties["artifact_zip"]
+        if ($artifactProp -and -not [string]::IsNullOrWhiteSpace([string]$artifactProp.Value)) {
+            $buildIdValue = Parse-BuildIdFromArtifact -ArtifactPath ([string]$artifactProp.Value)
+        }
+        if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+            $artifactsDir = Join-Path $queueRoot "artifacts"
+            $artifact = Get-ArtifactZip -ArtifactsDir $artifactsDir -SinceUtc $null
+            if ($artifact) {
+                $buildIdValue = Parse-BuildIdFromArtifact -ArtifactPath $artifact.FullName
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+            $resultsDir = Join-Path $queueRoot "results"
+            $latestResult = Get-LatestResultZip -ResultsDir $resultsDir -Title $run.title
+            if ($latestResult) {
+                $buildIdValue = Parse-BuildIdFromResult -ResultPath $latestResult.FullName -Title $run.title
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($buildIdValue)) {
+            $entry.build_id = $buildIdValue
+        }
+    }
     if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
         if (-not $entry.error) { $entry.error = "build_id_missing" }
         $hasErrors = $true
