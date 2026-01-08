@@ -123,8 +123,6 @@ internal static class Program
             WriteFallbackManifest(manifestPath, stagingDir, options, unityLog, logger);
         }
 
-        WriteFinalOutcome(outcomePath, options, success, failureMessage, logger);
-
         if (!success)
         {
             WriteLogTail(unityLog, Path.Combine(logsDir, "unity_build_tail.txt"), options.TailLines, logger);
@@ -649,10 +647,7 @@ internal static class Program
         string failureMessage,
         Logger logger)
     {
-        if (!File.Exists(outcomePath) || new FileInfo(outcomePath).Length == 0)
-        {
-            WriteFinalOutcome(outcomePath, options, success, failureMessage, logger);
-        }
+        WriteFinalOutcome(outcomePath, options, success, failureMessage, logger);
 
         if (!File.Exists(manifestPath))
         {
