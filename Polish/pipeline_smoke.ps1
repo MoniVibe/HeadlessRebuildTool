@@ -266,10 +266,12 @@ $artifactsDir = Join-Path $queueRootFull "artifacts"
 $jobsDir = Join-Path $queueRootFull "jobs"
 $leasesDir = Join-Path $queueRootFull "leases"
 $resultsDir = Join-Path $queueRootFull "results"
+$reportsDir = Join-Path $queueRootFull "reports"
 Ensure-Directory $artifactsDir
 Ensure-Directory $jobsDir
 Ensure-Directory $leasesDir
 Ensure-Directory $resultsDir
+Ensure-Directory $reportsDir
 
 $supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
 if (-not (Test-Path $supervisorProject)) {

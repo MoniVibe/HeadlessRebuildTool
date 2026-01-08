@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$UnityExe,
-    [string]$QueueRoot = "C:\\polish\\queue",
+    [ValidateSet("space4x", "godgame", "both")]
+    [string]$Title = "both",
+    [string]$QueueRootSpace4x = "C:\\polish\\anviloop\\space4x\\queue",
+    [string]$QueueRootGodgame = "C:\\polish\\anviloop\\godgame\\queue",
     [int]$Repeat = 10,
     [int]$WaitTimeoutSec = 1800
 )
@@ -360,29 +363,7 @@ function Summarize-Results {
 }
 
 $UnityExe = Resolve-UnityExe -ExePath $UnityExe
-$reportsDir = Join-Path $QueueRoot "reports"
-Ensure-Directory $reportsDir
-
-$runs = @()
-foreach ($title in @("space4x", "godgame")) {
-    try {
-        $runs += Invoke-Smoke -Title $title -UnityExePath $UnityExe -QueueRootPath $QueueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
-    }
-    catch {
-        $runs += [pscustomobject][ordered]@{
-            title = $title
-            build_id = $null
-            artifact_zip = $null
-            exit_code = 1
-            error = $_.Exception.Message
-            start_utc = (Get-Date).ToUniversalTime().ToString("o")
-            end_utc = (Get-Date).ToUniversalTime().ToString("o")
-        }
-    }
-}
-
 $dateStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
-$summaryPath = Join-Path $reportsDir ("nightly_{0}.json" -f $dateStamp)
 
 function Get-ToolsSha {
     $toolsRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -397,17 +378,44 @@ function Get-ToolsSha {
     return $null
 }
 
-$summary = [ordered]@{
-    date_utc = $dateStamp
-    queue_root = $QueueRoot
-    tools_sha = (Get-ToolsSha)
-    runs = [ordered]@{}
+$toolsSha = Get-ToolsSha
+$titleValue = $Title.ToLowerInvariant()
+switch ($titleValue) {
+    "space4x" { $titles = @("space4x") }
+    "godgame" { $titles = @("godgame") }
+    "both" { $titles = @("space4x", "godgame") }
+    default { throw "Unknown Title: $Title" }
 }
 
-$triageAll = New-Object System.Collections.Generic.List[string]
 $hasErrors = $false
+foreach ($title in $titles) {
+    $queueRoot = if ($title -eq "space4x") { $QueueRootSpace4x } else { $QueueRootGodgame }
+    $reportsDir = Join-Path $queueRoot "reports"
+    Ensure-Directory $reportsDir
 
-foreach ($run in $runs) {
+    try {
+        $run = Invoke-Smoke -Title $title -UnityExePath $UnityExe -QueueRootPath $queueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
+    }
+    catch {
+        $run = [pscustomobject][ordered]@{
+            title = $title
+            build_id = $null
+            artifact_zip = $null
+            exit_code = 1
+            error = $_.Exception.Message
+            start_utc = (Get-Date).ToUniversalTime().ToString("o")
+            end_utc = (Get-Date).ToUniversalTime().ToString("o")
+        }
+    }
+
+    $summary = [ordered]@{
+        date_utc = $dateStamp
+        queue_root = $queueRoot
+        tools_sha = $toolsSha
+        runs = [ordered]@{}
+    }
+
+    $triageAll = New-Object System.Collections.Generic.List[string]
     $entry = [pscustomobject][ordered]@{
         build_id = $run.build_id
         artifact_zip = $run.artifact_zip
@@ -437,7 +445,7 @@ foreach ($run in $runs) {
         $hasErrors = $true
     }
     else {
-        $stats = @(Summarize-Results -QueueRootPath $QueueRoot -BuildId $buildIdValue -Title $run.title -ReportsDir $reportsDir)[0]
+        $stats = @(Summarize-Results -QueueRootPath $queueRoot -BuildId $buildIdValue -Title $run.title -ReportsDir $reportsDir)[0]
         $entry.result_count = $stats.result_count
         $entry.exit_reason_counts = $stats.exit_counts
         $entry.determinism_hashes = $stats.determinism_hashes
@@ -457,14 +465,14 @@ foreach ($run in $runs) {
         }
     }
     $summary.runs[$run.title] = $entry
-}
 
-$summaryJson = $summary | ConvertTo-Json -Depth 6
-Set-Content -Path $summaryPath -Value $summaryJson -Encoding ascii
-
-Write-Host ("Wrote nightly summary: {0}" -f $summaryPath)
-foreach ($path in $triageAll) {
-    Write-Host ("triage={0}" -f $path)
+    $summaryPath = Join-Path $reportsDir ("nightly_{0}_{1}.json" -f $dateStamp, $title)
+    $summaryJson = $summary | ConvertTo-Json -Depth 6
+    Set-Content -Path $summaryPath -Value $summaryJson -Encoding ascii
+    Write-Host ("Wrote nightly summary: {0}" -f $summaryPath)
+    foreach ($path in $triageAll) {
+        Write-Host ("triage={0}" -f $path)
+    }
 }
 
 if ($hasErrors) {
