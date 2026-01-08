@@ -33,6 +33,31 @@ function Resolve-UnityExe {
     return $resolved
 }
 
+function Get-ArtifactZip {
+    param(
+        [string]$ArtifactsDir,
+        [datetime]$SinceUtc
+    )
+    if (-not (Test-Path $ArtifactsDir)) { return $null }
+    $candidates = Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File
+    if ($candidates -and $SinceUtc) {
+        $candidates = $candidates | Where-Object { $_.LastWriteTimeUtc -ge $SinceUtc }
+    }
+    if (-not $candidates -or $candidates.Count -eq 0) {
+        $candidates = Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File
+    }
+    if (-not $candidates -or $candidates.Count -eq 0) { return $null }
+    return ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
+}
+
+function Parse-BuildIdFromArtifact {
+    param([string]$ArtifactPath)
+    if ([string]::IsNullOrWhiteSpace($ArtifactPath)) { return $null }
+    $name = [System.IO.Path]::GetFileName($ArtifactPath)
+    if ($name -match "^artifact_(.+)\\.zip$") { return $Matches[1] }
+    return $null
+}
+
 function Read-ZipEntryText {
     param(
         [System.IO.Compression.ZipArchive]$Archive,
@@ -63,6 +88,48 @@ function Get-ResultMeta {
     }
 }
 
+function Get-ResultRunSummary {
+    param([string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $text = Read-ZipEntryText -Archive $archive -EntryPath "out/run_summary.json"
+        if (-not $text) { return $null }
+        return $text | ConvertFrom-Json
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-ResultPolishScore {
+    param([string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $text = Read-ZipEntryText -Archive $archive -EntryPath "out/polish_score_v0.json"
+        if (-not $text) { return $null }
+        return $text | ConvertFrom-Json
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-TelemetryBytesFromZip {
+    param([string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $entry = $archive.GetEntry("out/telemetry.ndjson")
+        if (-not $entry) { return $null }
+        return [double]$entry.Length
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Get-ResultInvariants {
     param([string]$ZipPath)
     Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
@@ -74,6 +141,30 @@ function Get-ResultInvariants {
     }
     finally {
         $archive.Dispose()
+    }
+}
+
+function Get-MinMax {
+    param([double[]]$Values)
+    if (-not $Values -or $Values.Count -eq 0) { return $null }
+    $min = ($Values | Measure-Object -Minimum).Minimum
+    $max = ($Values | Measure-Object -Maximum).Maximum
+    return [ordered]@{
+        min = $min
+        max = $max
+    }
+}
+
+function Get-MinMaxAvg {
+    param([double[]]$Values)
+    if (-not $Values -or $Values.Count -eq 0) { return $null }
+    $min = ($Values | Measure-Object -Minimum).Minimum
+    $max = ($Values | Measure-Object -Maximum).Maximum
+    $avg = ($Values | Measure-Object -Average).Average
+    return [ordered]@{
+        min = $min
+        avg = [Math]::Round($avg, 3)
+        max = $max
     }
 }
 
@@ -90,6 +181,7 @@ function Invoke-Smoke {
         throw "pipeline_smoke.ps1 not found: $pipelineSmoke"
     }
 
+    $startUtc = [DateTime]::UtcNow
     $invoke = @{
         Title = $Title
         UnityExe = $UnityExePath
@@ -99,21 +191,31 @@ function Invoke-Smoke {
         WaitTimeoutSec = $WaitTimeoutSec
     }
 
-    $output = & $pipelineSmoke @invoke 2>&1 | ForEach-Object { $_.ToString() }
-    $exitCode = $LASTEXITCODE
-    $buildId = $null
-    foreach ($line in $output) {
-        if ($line -match "build_id=([^ ]+)") {
-            $buildId = $Matches[1]
-            break
-        }
+    $output = @()
+    $errorText = $null
+    $exitCode = 0
+    try {
+        $output = & $pipelineSmoke @invoke 2>&1 | ForEach-Object { $_.ToString() }
+        $exitCode = $LASTEXITCODE
     }
+    catch {
+        $errorText = $_.Exception.Message
+        $exitCode = 1
+    }
+    $endUtc = [DateTime]::UtcNow
+    $artifactsDir = Join-Path $QueueRootPath "artifacts"
+    $artifact = Get-ArtifactZip -ArtifactsDir $artifactsDir -SinceUtc $startUtc
+    $artifactPath = if ($artifact) { $artifact.FullName } else { $null }
+    $buildId = Parse-BuildIdFromArtifact -ArtifactPath $artifactPath
 
     return [ordered]@{
         title = $Title
         build_id = $buildId
+        artifact_zip = $artifactPath
         exit_code = $exitCode
-        output = $output
+        error = $errorText
+        start_utc = $startUtc.ToString("o")
+        end_utc = $endUtc.ToString("o")
     }
 }
 
@@ -121,20 +223,58 @@ function Summarize-Results {
     param(
         [string]$QueueRootPath,
         [string]$BuildId,
+        [string]$Title,
         [string]$ReportsDir
     )
-    $resultsDir = Join-Path $QueueRootPath "results"
-    $pattern = "result_{0}_*.zip" -f $BuildId
-    $zips = Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name
-
     $counts = @{}
     $hashes = New-Object System.Collections.Generic.HashSet[string]
     $triagePaths = New-Object System.Collections.Generic.List[string]
+    $telemetryBytes = New-Object System.Collections.Generic.List[double]
+    $runtimeSec = New-Object System.Collections.Generic.List[double]
+    $failingInvariants = New-Object System.Collections.Generic.HashSet[string]
+    $scoreLosses = New-Object System.Collections.Generic.List[double]
+    $scoreGrades = New-Object System.Collections.Generic.HashSet[string]
+
+    $resultsDir = Join-Path $QueueRootPath "results"
+    if (-not (Test-Path $resultsDir)) {
+        return [ordered]@{
+            result_count = 0
+            exit_reason_counts = $counts
+            determinism_hashes = @()
+            telemetry_bytes = $null
+            runtime_sec = $null
+            triage_paths = @()
+            failing_invariants = @()
+            polish_score_total_loss = $null
+            polish_score_grades = @()
+            error = "results_dir_missing"
+        }
+    }
+    $pattern = "result_{0}_{1}_*.zip" -f $BuildId, $Title
+    $zips = Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name
+
+    if (-not $zips -or $zips.Count -eq 0) {
+        return [ordered]@{
+            result_count = 0
+            exit_reason_counts = $counts
+            determinism_hashes = @()
+            telemetry_bytes = $null
+            runtime_sec = $null
+            triage_paths = @()
+            failing_invariants = @()
+            polish_score_total_loss = $null
+            polish_score_grades = @()
+            error = "results_not_found"
+        }
+    }
 
     foreach ($zip in $zips) {
-        $meta = Get-ResultMeta -ZipPath $zip.FullName
-        if (-not $meta) { continue }
-        $exitReason = $meta.exit_reason
+        $runSummary = Get-ResultRunSummary -ZipPath $zip.FullName
+        $polishScore = Get-ResultPolishScore -ZipPath $zip.FullName
+        $meta = if ($runSummary) { $null } else { Get-ResultMeta -ZipPath $zip.FullName }
+        if (-not $runSummary -and -not $meta) { continue }
+
+        $exitReason = if ($runSummary -and $runSummary.exit_reason) { $runSummary.exit_reason } else { $meta.exit_reason }
         if ([string]::IsNullOrWhiteSpace($exitReason)) { $exitReason = "UNKNOWN" }
         if ($counts.ContainsKey($exitReason)) {
             $counts[$exitReason] += 1
@@ -143,22 +283,78 @@ function Summarize-Results {
             $counts[$exitReason] = 1
         }
 
-        $jobId = $meta.job_id
+        $jobId = if ($runSummary -and $runSummary.job_id) { $runSummary.job_id } else { $meta.job_id }
         if ($exitReason -ne "SUCCESS" -and -not [string]::IsNullOrWhiteSpace($jobId)) {
-            $triagePaths.Add((Join-Path $ReportsDir ("triage_{0}.json" -f $jobId)))
+            $triagePath = Join-Path $ReportsDir ("triage_{0}.json" -f $jobId)
+            if (Test-Path $triagePath) {
+                $triagePaths.Add($triagePath)
+            }
         }
 
-        $inv = Get-ResultInvariants -ZipPath $zip.FullName
-        if ($inv -and $inv.determinism_hash) {
-            [void]$hashes.Add([string]$inv.determinism_hash)
+        $determinismHash = $null
+        if ($runSummary -and $runSummary.determinism_hash) {
+            $determinismHash = [string]$runSummary.determinism_hash
+        }
+        if (-not $determinismHash) {
+            $inv = Get-ResultInvariants -ZipPath $zip.FullName
+            if ($inv -and $inv.determinism_hash) {
+                $determinismHash = [string]$inv.determinism_hash
+            }
+        }
+        if ($determinismHash) {
+            [void]$hashes.Add($determinismHash)
+        }
+
+        $telemetryValue = $null
+        if ($runSummary -and $runSummary.telemetry -and $runSummary.telemetry.bytes_total -ne $null) {
+            $telemetryValue = [double]$runSummary.telemetry.bytes_total
+        }
+        if ($telemetryValue -eq $null) {
+            $telemetryValue = Get-TelemetryBytesFromZip -ZipPath $zip.FullName
+        }
+        if ($telemetryValue -ne $null) {
+            $telemetryBytes.Add([double]$telemetryValue)
+        }
+
+        $runtime = $null
+        if ($runSummary -and $runSummary.runtime_sec -ne $null) {
+            $runtime = [double]$runSummary.runtime_sec
+        }
+        elseif ($meta -and $meta.duration_sec -ne $null) {
+            $runtime = [double]$meta.duration_sec
+        }
+        if ($runtime -ne $null) {
+            $runtimeSec.Add($runtime)
+        }
+
+        if ($runSummary -and $runSummary.failing_invariants) {
+            foreach ($invId in $runSummary.failing_invariants) {
+                if (-not [string]::IsNullOrWhiteSpace($invId)) {
+                    [void]$failingInvariants.Add([string]$invId)
+                }
+            }
+        }
+
+        if ($polishScore) {
+            if ($polishScore.total_loss -ne $null) {
+                $scoreLosses.Add([double]$polishScore.total_loss)
+            }
+            if ($polishScore.grade) {
+                [void]$scoreGrades.Add([string]$polishScore.grade)
+            }
         }
     }
 
     return [ordered]@{
-        total = $zips.Count
+        result_count = $zips.Count
         exit_counts = $counts
         determinism_hashes = @($hashes | Sort-Object)
+        telemetry_bytes = (Get-MinMax -Values $telemetryBytes)
+        runtime_sec = (Get-MinMaxAvg -Values $runtimeSec)
         triage_paths = @($triagePaths)
+        failing_invariants = @($failingInvariants | Sort-Object)
+        polish_score_total_loss = (Get-MinMaxAvg -Values $scoreLosses)
+        polish_score_grades = @($scoreGrades | Sort-Object)
     }
 }
 
@@ -167,40 +363,93 @@ $reportsDir = Join-Path $QueueRoot "reports"
 Ensure-Directory $reportsDir
 
 $runs = @()
-$runs += Invoke-Smoke -Title "space4x" -UnityExePath $UnityExe -QueueRootPath $QueueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
-$runs += Invoke-Smoke -Title "godgame" -UnityExePath $UnityExe -QueueRootPath $QueueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
+foreach ($title in @("space4x", "godgame")) {
+    try {
+        $runs += Invoke-Smoke -Title $title -UnityExePath $UnityExe -QueueRootPath $QueueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
+    }
+    catch {
+        $runs += [ordered]@{
+            title = $title
+            build_id = $null
+            artifact_zip = $null
+            exit_code = 1
+            error = $_.Exception.Message
+            start_utc = (Get-Date).ToUniversalTime().ToString("o")
+            end_utc = (Get-Date).ToUniversalTime().ToString("o")
+        }
+    }
+}
 
-$dateStamp = (Get-Date).ToString("yyyy-MM-dd")
+$dateStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
 $summaryPath = Join-Path $reportsDir ("nightly_{0}.json" -f $dateStamp)
 
+function Get-ToolsSha {
+    $toolsRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    try {
+        $sha = & git -C $toolsRoot rev-parse HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($sha)) {
+            return $sha.Trim()
+        }
+    }
+    catch {
+    }
+    return $null
+}
+
 $summary = [ordered]@{
-    date = $dateStamp
+    date_utc = $dateStamp
     queue_root = $QueueRoot
-    runs = @()
+    tools_sha = (Get-ToolsSha)
+    runs = [ordered]@{}
 }
 
 $triageAll = New-Object System.Collections.Generic.List[string]
+$hasErrors = $false
 
 foreach ($run in $runs) {
     $entry = [ordered]@{
-        title = $run.title
         build_id = $run.build_id
-        exit_code = $run.exit_code
+        artifact_zip = $run.artifact_zip
+        pipeline_exit_code = $run.exit_code
+        result_count = 0
+        exit_reason_counts = @{}
+        determinism_hashes = @()
+        telemetry_bytes = $null
+        runtime_sec = $null
+        triage_paths = @()
+        failing_invariants = @()
+        polish_score_total_loss = $null
+        polish_score_grades = @()
+        notes = @()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($run.error)) {
+        $entry.error = $run.error
+        $hasErrors = $true
     }
     if ([string]::IsNullOrWhiteSpace($run.build_id)) {
-        $entry.error = "build_id_missing"
+        if (-not $entry.error) { $entry.error = "build_id_missing" }
+        $hasErrors = $true
     }
     else {
-        $stats = Summarize-Results -QueueRootPath $QueueRoot -BuildId $run.build_id -ReportsDir $reportsDir
-        $entry.total = $stats.total
-        $entry.exit_counts = $stats.exit_counts
+        $stats = Summarize-Results -QueueRootPath $QueueRoot -BuildId $run.build_id -Title $run.title -ReportsDir $reportsDir
+        $entry.result_count = $stats.result_count
+        $entry.exit_reason_counts = $stats.exit_counts
         $entry.determinism_hashes = $stats.determinism_hashes
+        $entry.telemetry_bytes = $stats.telemetry_bytes
+        $entry.runtime_sec = $stats.runtime_sec
         $entry.triage_paths = $stats.triage_paths
+        $entry.failing_invariants = $stats.failing_invariants
+        $entry.polish_score_total_loss = $stats.polish_score_total_loss
+        $entry.polish_score_grades = $stats.polish_score_grades
+        if ($stats.error) {
+            $entry.error = $stats.error
+            $hasErrors = $true
+        }
         foreach ($path in $stats.triage_paths) {
             $triageAll.Add($path)
         }
     }
-    $summary.runs += $entry
+    $summary.runs[$run.title] = $entry
 }
 
 $summaryJson = $summary | ConvertTo-Json -Depth 6
@@ -209,4 +458,8 @@ Set-Content -Path $summaryPath -Value $summaryJson -Encoding ascii
 Write-Host ("Wrote nightly summary: {0}" -f $summaryPath)
 foreach ($path in $triageAll) {
     Write-Host ("triage={0}" -f $path)
+}
+
+if ($hasErrors) {
+    exit 1
 }
