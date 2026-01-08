@@ -355,6 +355,7 @@ function Summarize-Results {
         failing_invariants = @($failingInvariants | Sort-Object)
         polish_score_total_loss = (Get-MinMaxAvg -Values $scoreLosses)
         polish_score_grades = @($scoreGrades | Sort-Object)
+        error = $null
     }
 }
 
