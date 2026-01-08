@@ -208,15 +208,15 @@ function Invoke-Smoke {
     $artifactPath = if ($artifact) { $artifact.FullName } else { $null }
     $buildId = Parse-BuildIdFromArtifact -ArtifactPath $artifactPath
 
-    return [ordered]@{
-        title = $Title
-        build_id = $buildId
-        artifact_zip = $artifactPath
-        exit_code = $exitCode
-        error = $errorText
-        start_utc = $startUtc.ToString("o")
-        end_utc = $endUtc.ToString("o")
-    }
+        return [pscustomobject][ordered]@{
+            title = $Title
+            build_id = $buildId
+            artifact_zip = $artifactPath
+            exit_code = $exitCode
+            error = $errorText
+            start_utc = $startUtc.ToString("o")
+            end_utc = $endUtc.ToString("o")
+        }
 }
 
 function Summarize-Results {
@@ -237,7 +237,7 @@ function Summarize-Results {
 
     $resultsDir = Join-Path $QueueRootPath "results"
     if (-not (Test-Path $resultsDir)) {
-        return [ordered]@{
+        return [pscustomobject][ordered]@{
             result_count = 0
             exit_reason_counts = $counts
             determinism_hashes = @()
@@ -254,7 +254,7 @@ function Summarize-Results {
     $zips = @(Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name)
 
     if ($null -eq $zips -or $zips.Count -eq 0) {
-        return [ordered]@{
+        return [pscustomobject][ordered]@{
             result_count = 0
             exit_reason_counts = $counts
             determinism_hashes = @()
@@ -345,7 +345,7 @@ function Summarize-Results {
         }
     }
 
-    return [ordered]@{
+    return [pscustomobject][ordered]@{
         result_count = $zips.Count
         exit_counts = $counts
         determinism_hashes = @($hashes | Sort-Object)
@@ -369,7 +369,7 @@ foreach ($title in @("space4x", "godgame")) {
         $runs += Invoke-Smoke -Title $title -UnityExePath $UnityExe -QueueRootPath $QueueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
     }
     catch {
-        $runs += [ordered]@{
+        $runs += [pscustomobject][ordered]@{
             title = $title
             build_id = $null
             artifact_zip = $null
@@ -432,7 +432,7 @@ foreach ($run in $runs) {
         $hasErrors = $true
     }
     else {
-        $stats = Summarize-Results -QueueRootPath $QueueRoot -BuildId $run.build_id -Title $run.title -ReportsDir $reportsDir
+        $stats = @(Summarize-Results -QueueRootPath $QueueRoot -BuildId $run.build_id -Title $run.title -ReportsDir $reportsDir)[0]
         $entry.result_count = $stats.result_count
         $entry.exit_reason_counts = $stats.exit_counts
         $entry.determinism_hashes = $stats.determinism_hashes
