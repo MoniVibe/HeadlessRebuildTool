@@ -422,6 +422,7 @@ foreach ($run in $runs) {
         polish_score_total_loss = $null
         polish_score_grades = @()
         notes = @()
+        error = $null
     }
     $runErrorProp = $run.PSObject.Properties["error"]
     if ($runErrorProp -and -not [string]::IsNullOrWhiteSpace([string]$runErrorProp.Value)) {
