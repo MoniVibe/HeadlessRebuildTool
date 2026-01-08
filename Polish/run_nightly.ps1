@@ -90,16 +90,16 @@ function Invoke-Smoke {
         throw "pipeline_smoke.ps1 not found: $pipelineSmoke"
     }
 
-    $args = @(
-        "-Title", $Title,
-        "-UnityExe", $UnityExePath,
-        "-QueueRoot", $QueueRootPath,
-        "-Repeat", $RepeatCount,
-        "-WaitForResult",
-        "-WaitTimeoutSec", $WaitTimeoutSec
-    )
+    $invoke = @{
+        Title = $Title
+        UnityExe = $UnityExePath
+        QueueRoot = $QueueRootPath
+        Repeat = $RepeatCount
+        WaitForResult = $true
+        WaitTimeoutSec = $WaitTimeoutSec
+    }
 
-    $output = & $pipelineSmoke @args 2>&1 | ForEach-Object { $_.ToString() }
+    $output = & $pipelineSmoke @invoke 2>&1 | ForEach-Object { $_.ToString() }
     $exitCode = $LASTEXITCODE
     $buildId = $null
     foreach ($line in $output) {
