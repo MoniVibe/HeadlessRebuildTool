@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
     [string]$QueueRoot = "C:\\polish\\queue",
+    [string]$LockReason = "pipeline_smoke",
     [string]$ScenarioId,
     [int]$Seed,
     [int]$TimeoutSec,
@@ -21,6 +22,65 @@ function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+$LockRoot = "C:\\polish\\locks"
+$BuildLockMaxWaitSec = 2700
+
+function Get-BuildLockPath {
+    param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
+    $safeTitle = $Title.ToLowerInvariant()
+    return (Join-Path $LockRoot ("build_{0}.lock.json" -f $safeTitle))
+}
+
+function Acquire-BuildLock {
+    param(
+        [string]$Title,
+        [string]$QueueRoot,
+        [string]$Reason,
+        [int]$MaxWaitSec = $BuildLockMaxWaitSec
+    )
+    Ensure-Directory $LockRoot
+    $lockPath = Get-BuildLockPath -Title $Title
+    $waitedSec = 0
+    $attempt = 0
+    while ($true) {
+        try {
+            New-Item -ItemType File -Path $lockPath -ErrorAction Stop | Out-Null
+            $payload = [ordered]@{
+                title = $Title
+                pid = $PID
+                start_utc = ([DateTime]::UtcNow).ToString("o")
+                queue_root = $QueueRoot
+                reason = $Reason
+            }
+            $payloadJson = $payload | ConvertTo-Json -Depth 4
+            Set-Content -Path $lockPath -Value $payloadJson -Encoding ascii
+            return $lockPath
+        }
+        catch {
+            if (-not (Test-Path $lockPath)) { throw }
+            $attempt++
+            $sleepSec = switch ($attempt) {
+                1 { 60 }
+                2 { 120 }
+                default { 180 }
+            }
+            if ($waitedSec + $sleepSec -gt $MaxWaitSec) {
+                return $null
+            }
+            Write-Host ("build_lock_wait title={0} wait_sec={1} waited_sec={2}" -f $Title, $sleepSec, $waitedSec)
+            Start-Sleep -Seconds $sleepSec
+            $waitedSec += $sleepSec
+        }
+    }
+}
+
+function Release-BuildLock {
+    param([string]$LockPath)
+    if ([string]::IsNullOrWhiteSpace($LockPath)) { return }
+    Remove-Item -Path $LockPath -Force -ErrorAction SilentlyContinue
 }
 
 function Convert-ToWslPath {
@@ -287,10 +347,21 @@ $supervisorArgs = @(
     "--artifact-dir", $artifactsDir
 )
 
-& dotnet @supervisorArgs
-$supervisorExit = $LASTEXITCODE
-if ($supervisorExit -ne 0) {
-    Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
+$lockReasonValue = if ([string]::IsNullOrWhiteSpace($LockReason)) { "pipeline_smoke" } else { $LockReason }
+$lockPath = Acquire-BuildLock -Title $Title -QueueRoot $queueRootFull -Reason $lockReasonValue
+if (-not $lockPath) {
+    Write-Host ("BUILD_FAIL reason=build_lock_timeout title={0}" -f $Title)
+    exit 1
+}
+try {
+    & dotnet @supervisorArgs
+    $supervisorExit = $LASTEXITCODE
+    if ($supervisorExit -ne 0) {
+        Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
+    }
+}
+finally {
+    Release-BuildLock -LockPath $lockPath
 }
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)

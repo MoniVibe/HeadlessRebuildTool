@@ -189,6 +189,7 @@ function Invoke-Smoke {
         Title = $Title
         UnityExe = $UnityExePath
         QueueRoot = $QueueRootPath
+        LockReason = "run_nightly"
         Repeat = $RepeatCount
         WaitForResult = $true
         WaitTimeoutSec = $WaitTimeoutSec
