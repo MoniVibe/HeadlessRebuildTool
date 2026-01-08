@@ -107,7 +107,7 @@ internal static class Program
         var outcomeLength = outcomeExists ? new FileInfo(outcomePath).Length : 0;
         if (!outcomeExists || outcomeLength == 0)
         {
-            WriteFallbackOutcome(outcomePath, options, runResult, logger);
+            WriteFallbackOutcome(outcomePath, options, runResult, stagingDir, logger);
         }
 
         if (!File.Exists(reportJsonPath) && !File.Exists(reportTextPath))
@@ -162,6 +162,15 @@ internal static class Program
         }
 
         CreateZip(stagingDir, zipTemp, logger);
+        EnsureRequiredZipEntries(
+            zipTemp,
+            stagingDir,
+            unityLog,
+            outcomePath,
+            manifestPath,
+            options,
+            runResult,
+            logger);
         File.Move(zipTemp, zipFinal);
         logger.Info($"artifact_published path={zipFinal}");
 
@@ -541,11 +550,26 @@ internal static class Program
         return match.Success ? match.Groups[1].Value : null;
     }
 
-    private static void WriteFallbackOutcome(string outcomePath, Options options, UnityRunResult? result, Logger logger)
+    private static bool InferBuildSucceeded(UnityRunResult? result, string stagingDir)
     {
-        var message = result != null && result.TimedOut
-            ? "INFRA_FAIL: Unity timeout"
-            : "INFRA_FAIL: build_outcome.json missing";
+        if (result == null || result.ExitCode != 0)
+        {
+            return false;
+        }
+
+        var entrypoint = FindEntrypoint(Path.Combine(stagingDir, "build"));
+        return !string.IsNullOrWhiteSpace(entrypoint);
+    }
+
+    private static void WriteFallbackOutcome(string outcomePath, Options options, UnityRunResult? result, string stagingDir, Logger logger)
+    {
+        var inferredSuccess = InferBuildSucceeded(result, stagingDir);
+        var outcomeResult = inferredSuccess ? "Succeeded" : "Failed";
+        var message = inferredSuccess
+            ? "WARNING: build_outcome.json missing; inferred success from build output"
+            : result != null && result.TimedOut
+                ? "INFRA_FAIL: Unity timeout"
+                : "INFRA_FAIL: build_outcome.json missing";
         var reportPath = File.Exists(Path.Combine(Path.GetDirectoryName(outcomePath) ?? string.Empty, BuildReportJsonName))
             ? $"{LogsFolderName}/{BuildReportJsonName}"
             : $"{LogsFolderName}/{BuildReportTextName}";
@@ -554,7 +578,7 @@ internal static class Program
         json.Append("{");
         AppendJsonField(json, "build_id", options.BuildId, prependComma: false);
         AppendJsonField(json, "commit", options.Commit, prependComma: true);
-        AppendJsonField(json, "result", "Failed", prependComma: true);
+        AppendJsonField(json, "result", outcomeResult, prependComma: true);
         AppendJsonField(json, "message", message, prependComma: true);
         AppendJsonField(json, "report_path", reportPath, prependComma: true);
         AppendJsonField(json, "utc", DateTime.UtcNow.ToString("O"), prependComma: true);
@@ -620,6 +644,87 @@ internal static class Program
 
         File.WriteAllText(manifestPath, finalManifest, Encoding.ASCII);
         logger.Info("fallback_manifest_written");
+    }
+
+    private static void EnsureRequiredZipEntries(
+        string zipPath,
+        string stagingDir,
+        string unityLog,
+        string outcomePath,
+        string manifestPath,
+        Options options,
+        UnityRunResult? result,
+        Logger logger)
+    {
+        if (!File.Exists(outcomePath) || new FileInfo(outcomePath).Length == 0)
+        {
+            WriteFallbackOutcome(outcomePath, options, result, stagingDir, logger);
+        }
+
+        if (!File.Exists(manifestPath))
+        {
+            WriteFallbackManifest(manifestPath, stagingDir, options, unityLog, logger);
+        }
+
+        try
+        {
+            using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Update);
+            EnsureZipEntry(archive, $"{LogsFolderName}/{BuildOutcomeName}", outcomePath, logger);
+            EnsureZipEntry(archive, BuildManifestName, manifestPath, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.Info($"zip_repair_failed path={zipPath} error={ex.GetType().Name}");
+            throw;
+        }
+    }
+
+    private static void EnsureZipEntry(ZipArchive archive, string entryPath, string sourcePath, Logger logger)
+    {
+        ZipArchiveEntry? exactEntry = null;
+        var matches = new List<ZipArchiveEntry>();
+        foreach (var entry in archive.Entries)
+        {
+            if (string.Equals(entry.FullName, entryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(entry);
+                if (string.Equals(entry.FullName, entryPath, StringComparison.Ordinal))
+                {
+                    exactEntry = entry;
+                }
+            }
+        }
+
+        var needsReplace = exactEntry == null || exactEntry.Length == 0;
+        if (matches.Count > 0 && needsReplace)
+        {
+            foreach (var entry in matches)
+            {
+                entry.Delete();
+            }
+        }
+        else if (matches.Count > 1 && exactEntry != null)
+        {
+            foreach (var entry in matches)
+            {
+                if (!ReferenceEquals(entry, exactEntry))
+                {
+                    entry.Delete();
+                }
+            }
+        }
+
+        if (!File.Exists(sourcePath))
+        {
+            logger.Info($"zip_repair_source_missing entry={entryPath} path={sourcePath}");
+            return;
+        }
+
+        if (needsReplace)
+        {
+            archive.CreateEntryFromFile(sourcePath, entryPath, CompressionLevel.Optimal);
+            logger.Info($"zip_repaired missing={entryPath}");
+        }
     }
 
     private static string? TryExtractUnityVersion(string unityLog, Logger logger)
