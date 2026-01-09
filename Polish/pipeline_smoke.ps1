@@ -41,6 +41,9 @@ function Read-ZipEntryText {
         [string]$EntryPath
     )
     $entry = $Archive.GetEntry($EntryPath)
+    if (-not $entry) {
+        $entry = $Archive.Entries | Where-Object { $_.FullName -ieq $EntryPath } | Select-Object -First 1
+    }
     if (-not $entry) { return $null }
     $reader = New-Object System.IO.StreamReader($entry.Open())
     try {
@@ -258,7 +261,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
 
-$timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss")
+$timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
 $buildId = "${timestamp}_$commitShort"
 
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
