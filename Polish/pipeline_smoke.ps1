@@ -11,7 +11,7 @@ param(
     [string[]]$Args,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
-    [int]$WaitTimeoutSec = 900
+    [int]$WaitTimeoutSec = 1800
 )
 
 Set-StrictMode -Version Latest
@@ -33,6 +33,26 @@ function Convert-ToWslPath {
         return "/mnt/$drive/$rest"
     }
     return ($full -replace '\\', '/')
+}
+
+function Get-ResultWaitTimeoutSeconds {
+    param([int]$DefaultSeconds)
+    $envValue = $env:TRI_RESULT_TIMEOUT_SECONDS
+    $parsed = 0
+    if ([int]::TryParse($envValue, [ref]$parsed) -and $parsed -gt 0) {
+        return $parsed
+    }
+    return $DefaultSeconds
+}
+
+function Find-ResultCandidates {
+    param(
+        [string]$ResultsDir,
+        [string]$BaseId
+    )
+    if (-not (Test-Path $ResultsDir)) { return @() }
+    $pattern = "result_{0}*.zip" -f $BaseId
+    return Get-ChildItem -Path $ResultsDir -File -Filter $pattern | Sort-Object LastWriteTime -Descending
 }
 
 function Read-ZipEntryText {
@@ -370,13 +390,56 @@ for ($i = 1; $i -le $Repeat; $i++) {
 
     if ($WaitForResult) {
         $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
-        $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
-        while ((Get-Date) -lt $deadline) {
-            if (Test-Path $resultZip) { break }
+        $resultBaseId = "{0}_{1}_{2}" -f $buildId, $scenarioIdValue, $seedValue
+        $waitTimeoutSec = Get-ResultWaitTimeoutSeconds -DefaultSeconds $WaitTimeoutSec
+        $baseDeadline = (Get-Date).AddSeconds($waitTimeoutSec)
+        $stableSeconds = 5
+        $stableDeadline = $null
+        $lastSize = -1
+        $lastPath = $null
+        while ($true) {
+            $now = Get-Date
+            $candidate = $null
+            if (Test-Path $resultZip) {
+                $candidate = $resultZip
+            }
+            else {
+                $alternates = Find-ResultCandidates -ResultsDir $resultsDir -BaseId $resultBaseId
+                if ($alternates) {
+                    $candidate = @($alternates)[0].FullName
+                }
+            }
+
+            if ($candidate) {
+                if ($lastPath -ne $candidate) {
+                    $lastPath = $candidate
+                    $lastSize = -1
+                    $stableDeadline = $now.AddSeconds($stableSeconds)
+                }
+                $item = Get-Item $candidate -ErrorAction SilentlyContinue
+                if ($item) {
+                    if ($item.Length -ne $lastSize) {
+                        $lastSize = $item.Length
+                        $stableDeadline = $now.AddSeconds($stableSeconds)
+                    }
+                    if ($stableDeadline -and $now -ge $stableDeadline) {
+                        $resultZip = $candidate
+                        break
+                    }
+                }
+            }
+            elseif ($now -ge $baseDeadline) {
+                break
+            }
+
             Start-Sleep -Seconds 2
         }
 
         if (-not (Test-Path $resultZip)) {
+            $alternates = Find-ResultCandidates -ResultsDir $resultsDir -BaseId $resultBaseId
+            $alternateNames = if ($alternates) { $alternates | Select-Object -ExpandProperty Name } else { @() }
+            $alternateList = if (@($alternateNames).Count -gt 0) { [string]::Join(", ", @($alternateNames)) } else { "(none)" }
+            Write-Host ("Timed out waiting for {0}; found alternates: {1}" -f $resultZip, $alternateList)
             throw "Timed out waiting for result: $resultZip"
         }
 
