@@ -100,6 +100,12 @@ internal static class Program
 
         if (!success)
         {
+            var primaryError = TryExtractPrimaryError(unityLog, logger);
+            if (!string.IsNullOrWhiteSpace(primaryError))
+            {
+                failureMessage = $"PRIMARY_ERROR: {primaryError}";
+            }
+
             WriteFailureReason(failureReasonPath, failureSignature, failureMessage, logger);
         }
 
@@ -499,7 +505,7 @@ internal static class Program
                 return string.IsNullOrWhiteSpace(outcomeResult) ? FailureSignature.InfraFail : FailureSignature.Unknown;
             }
 
-            if (ContainsIgnoreCase(text, "Licensing::Module") || ContainsIgnoreCase(text, "license"))
+            if (ContainsStrictLicenseFailure(text))
             {
                 return FailureSignature.LicenseError;
             }
@@ -531,6 +537,58 @@ internal static class Program
             logger.Warn($"failure_signature_failed err={ex.Message}");
             return FailureSignature.Unknown;
         }
+    }
+
+    private static bool ContainsStrictLicenseFailure(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        return ContainsIgnoreCase(text, "No valid Unity license") ||
+               ContainsIgnoreCase(text, "entitlement denied") ||
+               ContainsIgnoreCase(text, "access token unavailable");
+    }
+
+    private static string? TryExtractPrimaryError(string logPath, Logger logger)
+    {
+        try
+        {
+            if (!File.Exists(logPath))
+            {
+                return null;
+            }
+
+            foreach (var line in File.ReadLines(logPath))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                if (IsPrimaryErrorLine(line))
+                {
+                    return line.Trim();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"primary_error_extract_failed err={ex.Message}");
+        }
+
+        return null;
+    }
+
+    private static bool IsPrimaryErrorLine(string line)
+    {
+        if (Regex.IsMatch(line, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        return Regex.IsMatch(line, "\\b\\w*Exception\\b");
     }
 
     private static bool ContainsIgnoreCase(string text, string fragment)
