@@ -87,11 +87,8 @@ if ($Restore) {
     exit 0
 }
 
-$backupMissing = -not (Test-Path $manifestBackup) -or -not (Test-Path $lockBackup)
-if ($backupMissing) {
-    Copy-Item -Path $manifest -Destination $manifestBackup -Force
-    Copy-Item -Path $lock -Destination $lockBackup -Force
-}
+Copy-Item -Path $manifest -Destination $manifestBackup -Force
+Copy-Item -Path $lock -Destination $lockBackup -Force
 
 $manifestMatches = $false
 $lockMatches = $false
@@ -101,6 +98,12 @@ try {
 } catch {
     $manifestMatches = $false
     $lockMatches = $false
+}
+
+$backupMissing = -not (Test-Path $manifestBackup) -or -not (Test-Path $lockBackup)
+if ($backupMissing -or (-not $manifestMatches) -or (-not $lockMatches)) {
+    Copy-Item -Path $manifest -Destination $manifestBackup -Force
+    Copy-Item -Path $lock -Destination $lockBackup -Force
 }
 
 if (-not $manifestMatches) {

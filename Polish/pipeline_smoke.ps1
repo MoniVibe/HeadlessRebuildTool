@@ -243,6 +243,15 @@ if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
 }
 
+$syncScript = Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"
+$swapScript = Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"
+if (-not (Test-Path $syncScript)) {
+    throw "Missing headless manifest sync script: $syncScript"
+}
+if (-not (Test-Path $swapScript)) {
+    throw "Missing headless manifest swap script: $swapScript"
+}
+
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
 $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$titleDefaults.seed }
 $timeoutValue = if ($PSBoundParameters.ContainsKey("TimeoutSec")) { $TimeoutSec } else { [int]$titleDefaults.timeout_sec }
@@ -290,7 +299,18 @@ $supervisorArgs = @(
     "--artifact-dir", $artifactsDir
 )
 
-& dotnet @supervisorArgs
+$swapApplied = $false
+& $syncScript -ProjectPath $projectPath
+& $swapScript -ProjectPath $projectPath
+$swapApplied = $true
+try {
+    & dotnet @supervisorArgs
+}
+finally {
+    if ($swapApplied) {
+        & $swapScript -ProjectPath $projectPath -Restore
+    }
+}
 $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
