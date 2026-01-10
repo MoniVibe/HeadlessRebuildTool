@@ -41,6 +41,9 @@ function Read-ZipEntryText {
         [string]$EntryPath
     )
     $entry = $Archive.GetEntry($EntryPath)
+    if (-not $entry) {
+        $entry = $Archive.Entries | Where-Object { $_.FullName -ieq $EntryPath } | Select-Object -First 1
+    }
     if (-not $entry) { return $null }
     $reader = New-Object System.IO.StreamReader($entry.Open())
     try {
