@@ -193,16 +193,15 @@ function Write-JobFile {
 function Invoke-WorkerOnce {
     param([string]$QueueRoot)
     $runnerWin = Join-Path $scriptRoot "WSL\\wsl_runner.sh"
-    $runnerWsl = Convert-ToWslPath -Path $runnerWin
     $queueWsl = Convert-ToWslPath -Path $QueueRoot
-    $tmpRunner = "/tmp/wsl_runner_pitchpack.sh"
-    $cmdTemplate = @'
-set -e; RUNNER='{0}'; TMP='{1}';
-awk '{{ sub(/\r$/, ""); print }}' "$RUNNER" > "$TMP";
-chmod +x "$TMP";
-"$TMP" --queue {2} --once --print-summary
-'@
-    $cmd = $cmdTemplate -f $runnerWsl, $tmpRunner, $queueWsl
+    $tmpRunnerWin = Join-Path $SessionDir "wsl_runner_pitchpack.sh"
+    $runnerText = Get-Content -Raw -Path $runnerWin
+    $normalized = $runnerText -replace "`r`n", "`n"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($tmpRunnerWin, $normalized, $utf8NoBom)
+
+    $tmpRunnerWsl = Convert-ToWslPath -Path $tmpRunnerWin
+    $cmd = "set -e; chmod +x '$tmpRunnerWsl'; '$tmpRunnerWsl' --queue $queueWsl --once --print-summary"
     & wsl.exe -e bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
         throw "wsl_worker_failed exit_code=$LASTEXITCODE"
