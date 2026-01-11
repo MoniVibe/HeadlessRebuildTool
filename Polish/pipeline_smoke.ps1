@@ -45,6 +45,29 @@ function Get-ResultWaitTimeoutSeconds {
     return $DefaultSeconds
 }
 
+function Resolve-TaskScenarioId {
+    param(
+        [string]$TasksPath,
+        [string]$TaskId,
+        [string]$Fallback
+    )
+    if ([string]::IsNullOrWhiteSpace($TaskId)) { return $Fallback }
+    if (-not (Test-Path $TasksPath)) { return $Fallback }
+    try {
+        $tasksDoc = Get-Content -Raw -Path $TasksPath | ConvertFrom-Json
+    }
+    catch {
+        return $Fallback
+    }
+    if (-not $tasksDoc -or -not $tasksDoc.tasks) { return $Fallback }
+    $tasks = $tasksDoc.tasks
+    $prop = $tasks.PSObject.Properties[$TaskId]
+    if (-not $prop) { return $Fallback }
+    $task = $prop.Value
+    if ($task -and $task.scenario_id) { return $task.scenario_id }
+    return $Fallback
+}
+
 function Find-ResultCandidates {
     param(
         [string]$ResultsDir,
@@ -305,6 +328,9 @@ Ensure-Directory $leasesDir
 Ensure-Directory $resultsDir
 Ensure-Directory $reportsDir
 
+$tasksPath = Join-Path $triRoot "Tools\\Headless\\headless_tasks.json"
+$jobScenarioId = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $scenarioIdValue -Fallback $scenarioIdValue
+
 $supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
 if (-not (Test-Path $supervisorProject)) {
     throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
@@ -370,7 +396,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
         job_id = $jobId
         commit = $commitFull
         build_id = $buildId
-        scenario_id = $scenarioIdValue
+        scenario_id = $jobScenarioId
         seed = [int]$seedValue
         timeout_sec = [int]$timeoutValue
         args = @($argsValue)

@@ -43,6 +43,29 @@ function Resolve-UnityExe {
     return $resolved
 }
 
+function Resolve-TaskScenarioId {
+    param(
+        [string]$TasksPath,
+        [string]$TaskId,
+        [string]$Fallback
+    )
+    if ([string]::IsNullOrWhiteSpace($TaskId)) { return $Fallback }
+    if (-not (Test-Path $TasksPath)) { return $Fallback }
+    try {
+        $tasksDoc = Get-Content -Raw -Path $TasksPath | ConvertFrom-Json
+    }
+    catch {
+        return $Fallback
+    }
+    if (-not $tasksDoc -or -not $tasksDoc.tasks) { return $Fallback }
+    $tasks = $tasksDoc.tasks
+    $prop = $tasks.PSObject.Properties[$TaskId]
+    if (-not $prop) { return $Fallback }
+    $task = $prop.Value
+    if ($task -and $task.scenario_id) { return $task.scenario_id }
+    return $Fallback
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -224,6 +247,7 @@ function Wait-TriageOrDie {
 function Run-HeadlessJob {
     param(
         [string]$ScenarioId,
+        [string]$ScenarioIdForJob,
         [int]$Seed,
         [int]$TimeoutSec,
         [string]$BuildId,
@@ -246,7 +270,7 @@ function Run-HeadlessJob {
         job_id = $jobId
         commit = $Commit
         build_id = $BuildId
-        scenario_id = $ScenarioId
+        scenario_id = $(if ([string]::IsNullOrWhiteSpace($ScenarioIdForJob)) { $ScenarioId } else { $ScenarioIdForJob })
         seed = [int]$Seed
         timeout_sec = [int]$TimeoutSec
         args = @()
@@ -305,6 +329,7 @@ Ensure-Directory $SessionDir
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $artifactsDir = Join-Path $queueRootFull "artifacts"
 Ensure-Directory $artifactsDir
+$tasksPath = Join-Path $triRoot "Tools\\Headless\\headless_tasks.json"
 
 $unityResolved = Resolve-UnityExe -ExePath $UnityExe
 $env:TRI_ENFORCE_LICENSE_ERROR = "0"
@@ -357,10 +382,13 @@ if ([string]::IsNullOrWhiteSpace($smokeHash1)) {
 $smokeRuns = @()
 $smokeRuns += [ordered]@{ run = 1; job_id = $smokeJobId; result_zip = $smokeResultZip; determinism_hash = $smokeHash1 }
 
+$smokeScenarioIdForJob = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $smokeScenario -Fallback $smokeScenario
+$rewindScenarioIdForJob = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $rewindScenario -Fallback $rewindScenario
+
 $suffixes = @("_r01", "_r02", "_r03")
 for ($i = 0; $i -lt $suffixes.Count; $i++) {
     $runIndex = $i + 2
-    $run = Run-HeadlessJob -ScenarioId $smokeScenario -Seed $smokeSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix $suffixes[$i] -WaitTimeoutSec $waitTimeoutSec
+    $run = Run-HeadlessJob -ScenarioId $smokeScenario -ScenarioIdForJob $smokeScenarioIdForJob -Seed $smokeSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix $suffixes[$i] -WaitTimeoutSec $waitTimeoutSec
     if ([string]::IsNullOrWhiteSpace($run.determinism_hash)) {
         throw "determinism_hash_missing for $($run.result_zip)"
     }
@@ -373,7 +401,7 @@ if ($hashes.Count -ne 1) {
     throw "determinism_hash_divergence: $hashList"
 }
 
-$rewindRun = Run-HeadlessJob -ScenarioId $rewindScenario -Seed $rewindSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix "" -WaitTimeoutSec $waitTimeoutSec
+$rewindRun = Run-HeadlessJob -ScenarioId $rewindScenario -ScenarioIdForJob $rewindScenarioIdForJob -Seed $rewindSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix "" -WaitTimeoutSec $waitTimeoutSec
 
 $summaryPath = Join-Path $SessionDir "pitchpack_space4x_v0.md"
 $commandLine = "& `"$pipelineScript`" -Title space4x -UnityExe `"$unityResolved`" -ScenarioId $smokeScenario -Seed $smokeSeed -WaitForResult -Repeat 1 -WaitTimeoutSec $waitTimeoutSec"
