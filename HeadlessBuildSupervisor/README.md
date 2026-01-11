@@ -31,12 +31,15 @@ Contains:
 - `build_manifest.json`
 - `build/` (Unity Linux server output)
 - `logs/unity_build.log`
+- `logs/editor.log`
+- `logs/editor-prev.log`
 - `logs/supervisor.log`
 - `logs/build_outcome.json`
 - `logs/build_report.json` + `logs/build_report.txt`
 - `logs/unity_build_tail.txt` (failures)
 - `logs/process_snapshot.txt` (failures)
 - `logs/crash/` (if crash artifacts exist)
+- `logs/editor_log_missing.txt` (failures, if editor log path missing)
 - `failure_reason.txt` (failures)
 
 Note: `build_manifest.json` includes a `content_hashes` entry for itself computed from the manifest content without the self-hash field.
