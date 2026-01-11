@@ -63,6 +63,8 @@ function Resolve-TaskScenarioId {
     if (-not $prop) { return $Fallback }
     $task = $prop.Value
     if ($task -and $task.scenario_id) { return $task.scenario_id }
+    if ($TaskId.StartsWith("S0.SPACE4X_")) { return "space4x" }
+    if ($TaskId.StartsWith("P1.SPACE4X_")) { return "puredots_samples" }
     return $Fallback
 }
 
