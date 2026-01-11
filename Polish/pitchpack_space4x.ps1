@@ -195,7 +195,7 @@ function Invoke-WorkerOnce {
     $runnerWin = Join-Path $scriptRoot "WSL\\wsl_runner.sh"
     $runnerWsl = Convert-ToWslPath -Path $runnerWin
     $queueWsl = Convert-ToWslPath -Path $QueueRoot
-    $cmd = "set -e; RUNNER='{0}'; sed -i 's/\\r$//' '{0}'; chmod +x '{0}'; '{0}' --queue {1} --once --print-summary" -f $runnerWsl, $queueWsl
+    $cmd = "set -e; RUNNER='{0}'; TMP='/tmp/wsl_runner_pitchpack.sh'; sed -e 's/\\r$//' '{0}' > \"$TMP\"; chmod +x \"$TMP\"; \"$TMP\" --queue {1} --once --print-summary" -f $runnerWsl, $queueWsl
     & wsl.exe -e bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
         throw "wsl_worker_failed exit_code=$LASTEXITCODE"
