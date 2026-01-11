@@ -329,7 +329,7 @@ Ensure-Directory $SessionDir
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $artifactsDir = Join-Path $queueRootFull "artifacts"
 Ensure-Directory $artifactsDir
-$tasksPath = Join-Path $triRoot "Tools\\Headless\\headless_tasks.json"
+$tasksPath = Join-Path $triRoot "Tools\\Tools\\Headless\\headless_tasks.json"
 
 $unityResolved = Resolve-UnityExe -ExePath $UnityExe
 $env:TRI_ENFORCE_LICENSE_ERROR = "0"

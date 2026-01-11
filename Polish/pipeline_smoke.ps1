@@ -328,7 +328,7 @@ Ensure-Directory $leasesDir
 Ensure-Directory $resultsDir
 Ensure-Directory $reportsDir
 
-$tasksPath = Join-Path $triRoot "Tools\\Headless\\headless_tasks.json"
+$tasksPath = Join-Path $triRoot "Tools\\Tools\\Headless\\headless_tasks.json"
 $jobScenarioId = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $scenarioIdValue -Fallback $scenarioIdValue
 
 $supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
