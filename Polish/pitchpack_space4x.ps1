@@ -196,7 +196,13 @@ function Invoke-WorkerOnce {
     $runnerWsl = Convert-ToWslPath -Path $runnerWin
     $queueWsl = Convert-ToWslPath -Path $QueueRoot
     $tmpRunner = "/tmp/wsl_runner_pitchpack.sh"
-    $cmd = "set -e; RUNNER='{0}'; TMP='{1}'; tr -d '\\015' < '{0}' > '{1}'; chmod +x '{1}'; '{1}' --queue {2} --once --print-summary" -f $runnerWsl, $tmpRunner, $queueWsl
+    $cmdTemplate = @'
+set -e; RUNNER='{0}'; TMP='{1}';
+python3 -c 'import sys; data=open(sys.argv[1],"rb").read().replace(b"\r\n", b"\n").replace(b"\r", b"\n"); open(sys.argv[2],"wb").write(data)' "$RUNNER" "$TMP";
+chmod +x "$TMP";
+"$TMP" --queue {2} --once --print-summary
+'@
+    $cmd = $cmdTemplate -f $runnerWsl, $tmpRunner, $queueWsl
     & wsl.exe -e bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
         throw "wsl_worker_failed exit_code=$LASTEXITCODE"
