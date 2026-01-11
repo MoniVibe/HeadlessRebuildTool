@@ -19,6 +19,9 @@ internal static class Program
     private const string BuildOutcomeName = "build_outcome.json";
     private const string BuildReportJsonName = "build_report.json";
     private const string BuildReportTextName = "build_report.txt";
+    private const string EditorLogName = "editor.log";
+    private const string EditorPrevLogName = "editor-prev.log";
+    private const string EditorLogMissingName = "editor_log_missing.txt";
     private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
     private const int LogReadRetryDelayMs = 100;
 
@@ -87,6 +90,8 @@ internal static class Program
                     ? $"Unity exit={runResult.ExitCode} outcome={outcomeResult}"
                     : $"Unity exit={runResult.ExitCode} outcome=missing";
             }
+
+            CaptureEditorLogs(logsDir, logger);
 
             if (attempt < attempts && ShouldRetry(failureSignature, runResult))
             {
@@ -292,6 +297,83 @@ internal static class Program
         return new UnityRunResult(process.ExitCode, timedOut);
     }
 
+    private static void CaptureEditorLogs(string logsDir, Logger logger)
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var editorDir = Path.Combine(localAppData, "Unity", "Editor");
+        var editorLog = Path.Combine(editorDir, "Editor.log");
+        var editorPrev = Path.Combine(editorDir, "Editor-prev.log");
+        var missingPath = string.Empty;
+
+        if (File.Exists(editorLog))
+        {
+            if (TryCopyFileWithRetries(editorLog, Path.Combine(logsDir, EditorLogName), logger))
+            {
+                logger.Info($"editor_log_captured src={editorLog}");
+            }
+        }
+        else
+        {
+            missingPath = editorLog;
+        }
+
+        if (File.Exists(editorPrev))
+        {
+            if (TryCopyFileWithRetries(editorPrev, Path.Combine(logsDir, EditorPrevLogName), logger))
+            {
+                logger.Info($"editor_prev_log_captured src={editorPrev}");
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(missingPath))
+        {
+            missingPath = editorPrev;
+        }
+
+        if (!string.IsNullOrWhiteSpace(missingPath))
+        {
+            var missingFile = Path.Combine(logsDir, EditorLogMissingName);
+            File.WriteAllText(missingFile, missingPath, Encoding.ASCII);
+            logger.Info($"editor_log_missing path={missingPath}");
+        }
+    }
+
+    private static bool TryCopyFileWithRetries(string sourcePath, string destPath, Logger logger)
+    {
+        var deadline = DateTime.UtcNow + LogReadRetryWindow;
+        while (true)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath) ?? ".");
+                using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var dest = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                source.CopyTo(dest);
+                return true;
+            }
+            catch (IOException ex)
+            {
+                if (DateTime.UtcNow < deadline)
+                {
+                    Thread.Sleep(LogReadRetryDelayMs);
+                    continue;
+                }
+
+                logger.Warn($"editor_log_copy_failed path={sourcePath} err={ex.Message}");
+                return false;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logger.Warn($"editor_log_copy_denied path={sourcePath} err={ex.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logger.Warn($"editor_log_copy_error path={sourcePath} err={ex.Message}");
+                return false;
+            }
+        }
+    }
+
     private static void TryKillProcess(Process process)
     {
         try
@@ -402,7 +484,16 @@ internal static class Program
     }
     private static void ArchiveAttemptLogs(string logsDir, int attempt, Logger logger)
     {
-        foreach (var file in new[] { "unity_build.log", BuildOutcomeName, BuildReportJsonName, BuildReportTextName })
+        foreach (var file in new[]
+                 {
+                     "unity_build.log",
+                     EditorLogName,
+                     EditorPrevLogName,
+                     EditorLogMissingName,
+                     BuildOutcomeName,
+                     BuildReportJsonName,
+                     BuildReportTextName
+                 })
         {
             var path = Path.Combine(logsDir, file);
             if (!File.Exists(path))
@@ -518,7 +609,11 @@ internal static class Program
                 return FailureSignature.CompilerError;
             }
 
-            if (ContainsIgnoreCase(text, "Importing Assets") || ContainsIgnoreCase(text, "AssetDatabase"))
+            var importingAssets = ContainsIgnoreCase(text, "Importing Assets");
+            var importLoopSignal = ContainsIgnoreCase(text, "Rebuilding Library") ||
+                                   ContainsIgnoreCase(text, "Refresh:") ||
+                                   ContainsIgnoreCase(text, "AssetImportState");
+            if (importingAssets && importLoopSignal)
             {
                 return FailureSignature.ImportLoop;
             }
@@ -587,6 +682,34 @@ internal static class Program
     private static bool IsPrimaryErrorLine(string line)
     {
         if (Regex.IsMatch(line, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "Build failed"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "BuildPipeline.BuildPlayer"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "executeMethod") &&
+            (ContainsIgnoreCase(line, "not found") || ContainsIgnoreCase(line, "not static")))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "ScriptCompilation") || ContainsIgnoreCase(line, "Assembly-CSharp"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "Bee.BeeException") ||
+            (ContainsIgnoreCase(line, "bee") && ContainsIgnoreCase(line, "error")) ||
+            ContainsIgnoreCase(line, "bee_backend"))
         {
             return true;
         }
