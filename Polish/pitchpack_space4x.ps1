@@ -318,9 +318,7 @@ $waitTimeoutSec = 1800
 
 $buildStartUtc = (Get-Date).ToUniversalTime()
 & $pipelineScript -Title space4x -UnityExe $unityResolved -ScenarioId $smokeScenario -Seed $smokeSeed -WaitForResult -Repeat 1 -WaitTimeoutSec $waitTimeoutSec
-if ($LASTEXITCODE -ne 0) {
-    throw "pipeline_smoke_failed exit_code=$LASTEXITCODE"
-}
+$pipelineExit = $LASTEXITCODE
 
 $artifact = Get-ArtifactZip -ArtifactsDir $artifactsDir -SinceUtc $buildStartUtc
 if (-not $artifact) {
@@ -344,6 +342,9 @@ Ensure-Directory $resultsDir
 $smokeJobId = "{0}_{1}_{2}" -f $buildId, $smokeScenario, $smokeSeed
 $smokeJobPath = Join-Path $queueRootFull ("jobs\\{0}.json" -f $smokeJobId)
 Wait-TriageOrDie -JobPath $smokeJobPath -TimeoutMinutes 10 | Out-Null
+if ($pipelineExit -ne 0) {
+    throw "pipeline_smoke_failed exit_code=$pipelineExit"
+}
 $smokeResultZip = Join-Path $resultsDir ("result_{0}.zip" -f $smokeJobId)
 if (-not (Test-Path $smokeResultZip)) {
     $smokeResultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $smokeJobId -BaseId $smokeJobId -WaitTimeoutSec $waitTimeoutSec
