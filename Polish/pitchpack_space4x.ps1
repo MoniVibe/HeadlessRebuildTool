@@ -198,7 +198,7 @@ function Invoke-WorkerOnce {
     $tmpRunner = "/tmp/wsl_runner_pitchpack.sh"
     $cmdTemplate = @'
 set -e; RUNNER='{0}'; TMP='{1}';
-awk '{ sub(/\r$/, ""); print }' "$RUNNER" > "$TMP";
+awk '{{ sub(/\r$/, ""); print }}' "$RUNNER" > "$TMP";
 chmod +x "$TMP";
 "$TMP" --queue {2} --once --print-summary
 '@
