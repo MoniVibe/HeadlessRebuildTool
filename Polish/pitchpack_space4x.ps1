@@ -190,6 +190,18 @@ function Write-JobFile {
     return $jobPath
 }
 
+function Invoke-WorkerOnce {
+    param([string]$QueueRoot)
+    $runnerWin = Join-Path $scriptRoot "WSL\\wsl_runner.sh"
+    $runnerWsl = Convert-ToWslPath -Path $runnerWin
+    $queueWsl = Convert-ToWslPath -Path $QueueRoot
+    $cmd = "set -e; RUNNER='$runnerWsl'; sed -i 's/\r$//' \"$runnerWsl\"; chmod +x \"$runnerWsl\"; \"$runnerWsl\" --queue $queueWsl --once --print-summary"
+    & wsl.exe -e bash -lc $cmd
+    if ($LASTEXITCODE -ne 0) {
+        throw "wsl_worker_failed exit_code=$LASTEXITCODE"
+    }
+}
+
 function Wait-TriageOrDie {
     param(
         [string]$JobPath,
@@ -202,6 +214,8 @@ function Wait-TriageOrDie {
     $stem = [IO.Path]::GetFileNameWithoutExtension($JobPath)
     $triagePath = "C:\\polish\\queue\\reports\\triage_$stem.json"
     Write-Host ("triage={0}" -f $triagePath)
+
+    Invoke-WorkerOnce -QueueRoot $QueueRoot
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
     while (-not (Test-Path $triagePath)) {
@@ -228,6 +242,8 @@ function Wait-TriageOrDie {
         if ($triage.exit_reason) { $exitReason = $triage.exit_reason }
         if ($triage.failure_signature) { $failureSignature = $triage.failure_signature }
     }
+
+    Write-Host ("JOB {0} triage exit_code={1} exit_reason={2}" -f $stem, $exitCode, $exitReason)
 
     if ($exitCode -ne 0) {
         $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
@@ -342,8 +358,11 @@ $timeoutSec = 600
 $waitTimeoutSec = 1800
 
 $buildStartUtc = (Get-Date).ToUniversalTime()
-& $pipelineScript -Title space4x -UnityExe $unityResolved -ScenarioId $smokeScenario -Seed $smokeSeed -WaitForResult -Repeat 1 -WaitTimeoutSec $waitTimeoutSec
+& $pipelineScript -Title space4x -UnityExe $unityResolved -ScenarioId $smokeScenario -Seed $smokeSeed -Repeat 1 -WaitTimeoutSec $waitTimeoutSec
 $pipelineExit = $LASTEXITCODE
+if ($pipelineExit -ne 0) {
+    throw "pipeline_smoke_failed exit_code=$pipelineExit"
+}
 
 $artifact = Get-ArtifactZip -ArtifactsDir $artifactsDir -SinceUtc $buildStartUtc
 if (-not $artifact) {
@@ -367,9 +386,6 @@ Ensure-Directory $resultsDir
 $smokeJobId = "{0}_{1}_{2}" -f $buildId, $smokeScenario, $smokeSeed
 $smokeJobPath = Join-Path $queueRootFull ("jobs\\{0}.json" -f $smokeJobId)
 Wait-TriageOrDie -JobPath $smokeJobPath -TimeoutMinutes 10 | Out-Null
-if ($pipelineExit -ne 0) {
-    throw "pipeline_smoke_failed exit_code=$pipelineExit"
-}
 $smokeResultZip = Join-Path $resultsDir ("result_{0}.zip" -f $smokeJobId)
 if (-not (Test-Path $smokeResultZip)) {
     $smokeResultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $smokeJobId -BaseId $smokeJobId -WaitTimeoutSec $waitTimeoutSec
@@ -404,7 +420,7 @@ if ($hashes.Count -ne 1) {
 $rewindRun = Run-HeadlessJob -ScenarioId $rewindScenario -ScenarioIdForJob $rewindScenarioIdForJob -Seed $rewindSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix "" -WaitTimeoutSec $waitTimeoutSec
 
 $summaryPath = Join-Path $SessionDir "pitchpack_space4x_v0.md"
-$commandLine = "& `"$pipelineScript`" -Title space4x -UnityExe `"$unityResolved`" -ScenarioId $smokeScenario -Seed $smokeSeed -WaitForResult -Repeat 1 -WaitTimeoutSec $waitTimeoutSec"
+$commandLine = "& `"$pipelineScript`" -Title space4x -UnityExe `"$unityResolved`" -ScenarioId $smokeScenario -Seed $smokeSeed -Repeat 1 -WaitTimeoutSec $waitTimeoutSec"
 
 $summaryLines = @()
 $summaryLines += "# Space4x PitchPack v0"
