@@ -198,7 +198,7 @@ function Invoke-WorkerOnce {
     $tmpRunner = "/tmp/wsl_runner_pitchpack.sh"
     $cmdTemplate = @'
 set -e; RUNNER='{0}'; TMP='{1}';
-python3 -c 'import sys; data=open(sys.argv[1],"rb").read().replace(bytes([13,10]), bytes([10])).replace(bytes([13]), bytes([10])); open(sys.argv[2],"wb").write(data)' "$RUNNER" "$TMP";
+python3 -c "import sys; data=open(sys.argv[1],'rb').read().replace(bytes([13,10]), bytes([10])).replace(bytes([13]), bytes([10])); open(sys.argv[2],'wb').write(data)" "$RUNNER" "$TMP";
 chmod +x "$TMP";
 "$TMP" --queue {2} --once --print-summary
 '@
