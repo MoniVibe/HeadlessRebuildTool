@@ -167,7 +167,7 @@ function Write-JobFile {
     return $jobPath
 }
 
-function Wait-ForTriageOrFail {
+function Wait-TriageOrDie {
     param(
         [string]$JobPath,
         [int]$TimeoutMinutes
@@ -257,7 +257,7 @@ function Run-HeadlessJob {
     }
 
     $jobPath = Write-JobFile -JobsDir $jobsDir -Job $job
-    Wait-ForTriageOrFail -JobPath $jobPath -TimeoutMinutes 10 | Out-Null
+    Wait-TriageOrDie -JobPath $jobPath -TimeoutMinutes 10 | Out-Null
     $baseId = "{0}_{1}_{2}" -f $BuildId, $ScenarioId, $Seed
     $resultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $jobId -BaseId $baseId -WaitTimeoutSec $WaitTimeoutSec
     $determinismHash = Get-DeterminismHash -ZipPath $resultZip
@@ -342,6 +342,8 @@ $artifactUri = Convert-ToWslPath -Path $artifactZip
 $resultsDir = Join-Path $queueRootFull "results"
 Ensure-Directory $resultsDir
 $smokeJobId = "{0}_{1}_{2}" -f $buildId, $smokeScenario, $smokeSeed
+$smokeJobPath = Join-Path $queueRootFull ("jobs\\{0}.json" -f $smokeJobId)
+Wait-TriageOrDie -JobPath $smokeJobPath -TimeoutMinutes 10 | Out-Null
 $smokeResultZip = Join-Path $resultsDir ("result_{0}.zip" -f $smokeJobId)
 if (-not (Test-Path $smokeResultZip)) {
     $smokeResultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $smokeJobId -BaseId $smokeJobId -WaitTimeoutSec $waitTimeoutSec
