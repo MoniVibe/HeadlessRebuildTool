@@ -294,8 +294,12 @@ function Assert-JobScenarioId {
     }
 
     $jobJson = Get-Content -Raw -Path $JobPath | ConvertFrom-Json
-    $scenarioValue = $jobJson.scenario_id
-    $aliasValue = $jobJson.scenarioId
+    $scenarioValue = $null
+    $scenarioProp = $jobJson.PSObject.Properties["scenario_id"]
+    if ($scenarioProp) { $scenarioValue = $scenarioProp.Value }
+    $aliasValue = $null
+    $aliasProp = $jobJson.PSObject.Properties["scenarioId"]
+    if ($aliasProp) { $aliasValue = $aliasProp.Value }
     $aliasOk = $true
     if ($aliasValue) {
         $aliasOk = ($aliasValue -eq $ExpectedScenarioId)
