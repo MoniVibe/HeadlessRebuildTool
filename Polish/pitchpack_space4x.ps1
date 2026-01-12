@@ -408,8 +408,8 @@ if ([string]::IsNullOrWhiteSpace($smokeHash1)) {
 $smokeRuns = @()
 $smokeRuns += [ordered]@{ run = 1; job_id = $smokeJobId; result_zip = $smokeResultZip; determinism_hash = $smokeHash1 }
 
-$smokeScenarioIdForJob = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $smokeScenario -Fallback $smokeScenario
-$rewindScenarioIdForJob = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $rewindScenario -Fallback $rewindScenario
+$smokeScenarioIdForJob = "space4x"
+$rewindScenarioIdForJob = "puredots_samples"
 
 $suffixes = @("_r01", "_r02", "_r03")
 for ($i = 0; $i -lt $suffixes.Count; $i++) {
