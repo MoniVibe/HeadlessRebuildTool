@@ -290,11 +290,13 @@ function Run-HeadlessJob {
     $jobId = "{0}_{1}_{2}{3}" -f $BuildId, $ScenarioId, $Seed, $suffixValue
     $createdUtc = ([DateTime]::UtcNow).ToString("o")
 
+    $scenarioIdValue = if ([string]::IsNullOrWhiteSpace($ScenarioIdForJob)) { $ScenarioId } else { $ScenarioIdForJob }
     $job = [ordered]@{
         job_id = $jobId
         commit = $Commit
         build_id = $BuildId
-        scenario_id = $(if ([string]::IsNullOrWhiteSpace($ScenarioIdForJob)) { $ScenarioId } else { $ScenarioIdForJob })
+        scenario_id = $scenarioIdValue
+        scenarioId = $scenarioIdValue
         seed = [int]$Seed
         timeout_sec = [int]$TimeoutSec
         args = @()
