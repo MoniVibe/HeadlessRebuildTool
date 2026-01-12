@@ -210,7 +210,7 @@ function Invoke-WorkerOnce {
     }
 }
 
-function Wait-TriageOrDie {
+function Wait-ForResultOrFail {
     param(
         [string]$JobPath,
         [int]$TimeoutMinutes
@@ -221,51 +221,65 @@ function Wait-TriageOrDie {
 
     $stem = [IO.Path]::GetFileNameWithoutExtension($JobPath)
     $triagePath = "C:\\polish\\queue\\reports\\triage_$stem.json"
+    $resultPath = "C:\\polish\\queue\\results\\result_$stem.zip"
     Write-Host ("triage={0}" -f $triagePath)
+    Write-Host ("result={0}" -f $resultPath)
+
+    $jobTimeUtc = (Get-Date).ToUniversalTime()
+    if (Test-Path $JobPath) {
+        $jobTimeUtc = (Get-Item $JobPath).LastWriteTimeUtc
+    }
 
     Invoke-WorkerOnce -QueueRoot $QueueRoot
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    while (-not (Test-Path $triagePath)) {
-        if ((Get-Date) -ge $deadline) {
-            throw "triage_timeout path=$triagePath"
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $resultPath) {
+            $resultItem = Get-Item $resultPath
+            if ($resultItem.LastWriteTimeUtc -ge $jobTimeUtc) {
+                return $resultPath
+            }
         }
+
+        if (Test-Path $triagePath) {
+            $triageItem = Get-Item $triagePath
+            if ($triageItem.LastWriteTimeUtc -ge $jobTimeUtc) {
+                $triageText = Get-Content -Raw -Path $triagePath
+                $triage = $null
+                try {
+                    $triage = $triageText | ConvertFrom-Json
+                }
+                catch {
+                    $triage = $null
+                }
+
+                $exitCode = 1
+                $exitReason = "triage_parse_failed"
+                $failureSignature = ""
+                if ($triage) {
+                    if ($triage.exit_code -ne $null) { $exitCode = [int]$triage.exit_code }
+                    if ($triage.exit_reason) { $exitReason = $triage.exit_reason }
+                    if ($triage.failure_signature) { $failureSignature = $triage.failure_signature }
+                }
+
+                Write-Host ("JOB {0} triage exit_code={1} exit_reason={2}" -f $stem, $exitCode, $exitReason)
+
+                $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
+                $lines = @(
+                    "triagePath: $triagePath",
+                    "exit_reason: $exitReason",
+                    "exit_code: $exitCode",
+                    "failure_signature: $failureSignature"
+                )
+                Set-Content -Encoding ascii -Path $reportPath -Value $lines
+                exit 1
+            }
+        }
+
         Start-Sleep -Seconds 2
     }
 
-    $triageText = Get-Content -Raw -Path $triagePath
-    $triage = $null
-    try {
-        $triage = $triageText | ConvertFrom-Json
-    }
-    catch {
-        $triage = $null
-    }
-
-    $exitCode = 1
-    $exitReason = "triage_parse_failed"
-    $failureSignature = ""
-    if ($triage) {
-        if ($triage.exit_code -ne $null) { $exitCode = [int]$triage.exit_code }
-        if ($triage.exit_reason) { $exitReason = $triage.exit_reason }
-        if ($triage.failure_signature) { $failureSignature = $triage.failure_signature }
-    }
-
-    Write-Host ("JOB {0} triage exit_code={1} exit_reason={2}" -f $stem, $exitCode, $exitReason)
-
-    if ($exitCode -ne 0) {
-        $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
-        $lines = @(
-            "triagePath: $triagePath",
-            "exit_reason: $exitReason",
-            "exit_code: $exitCode",
-            "failure_signature: $failureSignature"
-        )
-        Set-Content -Encoding ascii -Path $reportPath -Value $lines
-        exit 1
-    }
-
-    return $triagePath
+    throw "result_or_triage_timeout job=$JobPath"
 }
 
 function Assert-JobScenarioId {
@@ -340,9 +354,7 @@ function Run-HeadlessJob {
 
     $jobPath = Write-JobFile -JobsDir $jobsDir -Job $job
     Assert-JobScenarioId -JobPath $jobPath -ExpectedScenarioId $scenarioIdValue
-    Wait-TriageOrDie -JobPath $jobPath -TimeoutMinutes 10 | Out-Null
-    $baseId = "{0}_{1}_{2}" -f $BuildId, $ScenarioId, $Seed
-    $resultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $jobId -BaseId $baseId -WaitTimeoutSec $WaitTimeoutSec
+    $resultZip = Wait-ForResultOrFail -JobPath $jobPath -TimeoutMinutes 10
     $determinismHash = Get-DeterminismHash -ZipPath $resultZip
 
     return [ordered]@{
@@ -431,11 +443,7 @@ Ensure-Directory $resultsDir
 $smokeJobId = "{0}_{1}_{2}" -f $buildId, $smokeScenario, $smokeSeed
 $smokeJobPath = Join-Path $queueRootFull ("jobs\\{0}.json" -f $smokeJobId)
 Assert-JobScenarioId -JobPath $smokeJobPath -ExpectedScenarioId $smokeScenarioIdForJob
-Wait-TriageOrDie -JobPath $smokeJobPath -TimeoutMinutes 10 | Out-Null
-$smokeResultZip = Join-Path $resultsDir ("result_{0}.zip" -f $smokeJobId)
-if (-not (Test-Path $smokeResultZip)) {
-    $smokeResultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $smokeJobId -BaseId $smokeJobId -WaitTimeoutSec $waitTimeoutSec
-}
+$smokeResultZip = Wait-ForResultOrFail -JobPath $smokeJobPath -TimeoutMinutes 10
 $smokeHash1 = Get-DeterminismHash -ZipPath $smokeResultZip
 if ([string]::IsNullOrWhiteSpace($smokeHash1)) {
     throw "determinism_hash_missing for $smokeResultZip"
