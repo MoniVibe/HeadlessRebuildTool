@@ -582,6 +582,9 @@ def run_task_internal(task_id, seed, pack_name):
         return build_error_result("task_not_found", f"task not found: {task_id}"), 2
 
     task = tasks[task_id]
+    task_scenario_id = task.get("scenario_id")
+    if not task_scenario_id:
+        return build_error_result("scenario_id_missing", f"task missing scenario_id: {task_id}"), 2
     if pack_name is None:
         pack_name = task.get("default_pack") or "nightly-default"
 

@@ -268,6 +268,38 @@ function Wait-TriageOrDie {
     return $triagePath
 }
 
+function Assert-JobScenarioId {
+    param(
+        [string]$JobPath,
+        [string]$ExpectedScenarioId
+    )
+    if (-not (Test-Path $JobPath)) {
+        $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
+        @("job_path_missing: $JobPath") | Set-Content -Encoding ascii -Path $reportPath
+        throw "job_path_missing: $JobPath"
+    }
+
+    $jobJson = Get-Content -Raw -Path $JobPath | ConvertFrom-Json
+    $scenarioValue = $jobJson.scenario_id
+    $aliasValue = $jobJson.scenarioId
+    $aliasOk = $true
+    if ($aliasValue) {
+        $aliasOk = ($aliasValue -eq $ExpectedScenarioId)
+    }
+    $ok = ($scenarioValue -eq $ExpectedScenarioId) -and $aliasOk
+    if (-not $ok) {
+        $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
+        $lines = @(
+            "job_path: $JobPath",
+            "expected_scenario_id: $ExpectedScenarioId",
+            "scenario_id: $scenarioValue",
+            "scenarioId: $aliasValue"
+        )
+        Set-Content -Encoding ascii -Path $reportPath -Value $lines
+        throw "scenario_id_mismatch: expected=$ExpectedScenarioId scenario_id=$scenarioValue scenarioId=$aliasValue"
+    }
+}
+
 function Run-HeadlessJob {
     param(
         [string]$ScenarioId,
@@ -307,6 +339,7 @@ function Run-HeadlessJob {
     }
 
     $jobPath = Write-JobFile -JobsDir $jobsDir -Job $job
+    Assert-JobScenarioId -JobPath $jobPath -ExpectedScenarioId $scenarioIdValue
     Wait-TriageOrDie -JobPath $jobPath -TimeoutMinutes 10 | Out-Null
     $baseId = "{0}_{1}_{2}" -f $BuildId, $ScenarioId, $Seed
     $resultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $jobId -BaseId $baseId -WaitTimeoutSec $WaitTimeoutSec
@@ -364,6 +397,8 @@ $smokeScenario = "S0.SPACE4X_SMOKE"
 $smokeSeed = 77
 $rewindScenario = "P1.SPACE4X_REWIND_GATE2"
 $rewindSeed = 9102
+$smokeScenarioIdForJob = "space4x"
+$rewindScenarioIdForJob = "puredots_samples"
 $timeoutSec = 600
 $waitTimeoutSec = 1800
 
@@ -395,6 +430,7 @@ $resultsDir = Join-Path $queueRootFull "results"
 Ensure-Directory $resultsDir
 $smokeJobId = "{0}_{1}_{2}" -f $buildId, $smokeScenario, $smokeSeed
 $smokeJobPath = Join-Path $queueRootFull ("jobs\\{0}.json" -f $smokeJobId)
+Assert-JobScenarioId -JobPath $smokeJobPath -ExpectedScenarioId $smokeScenarioIdForJob
 Wait-TriageOrDie -JobPath $smokeJobPath -TimeoutMinutes 10 | Out-Null
 $smokeResultZip = Join-Path $resultsDir ("result_{0}.zip" -f $smokeJobId)
 if (-not (Test-Path $smokeResultZip)) {
@@ -407,9 +443,6 @@ if ([string]::IsNullOrWhiteSpace($smokeHash1)) {
 
 $smokeRuns = @()
 $smokeRuns += [ordered]@{ run = 1; job_id = $smokeJobId; result_zip = $smokeResultZip; determinism_hash = $smokeHash1 }
-
-$smokeScenarioIdForJob = "space4x"
-$rewindScenarioIdForJob = "puredots_samples"
 
 $suffixes = @("_r01", "_r02", "_r03")
 for ($i = 0; $i -lt $suffixes.Count; $i++) {
