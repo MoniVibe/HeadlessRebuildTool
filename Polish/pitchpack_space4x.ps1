@@ -204,7 +204,7 @@ function Invoke-WorkerOnce {
 
     $tmpRunnerWsl = Convert-ToWslPath -Path $tmpRunnerWin
     $cmd = "set -e; chmod +x '$tmpRunnerWsl'; '$tmpRunnerWsl' --queue $queueWsl --once --print-summary"
-    & wsl.exe -e bash -lc $cmd
+    $null = & wsl.exe -e bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
         throw "wsl_worker_failed exit_code=$LASTEXITCODE"
     }
