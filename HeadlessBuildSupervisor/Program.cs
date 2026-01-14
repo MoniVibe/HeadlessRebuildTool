@@ -212,6 +212,7 @@ internal static class Program
 
     private static UnityRunResult RunUnity(Options options, string artifactRoot, string unityLog, Logger logger)
     {
+        ClearSceneRecoveryArtifacts(options.ProjectPath, logger);
         Directory.CreateDirectory(Path.GetDirectoryName(unityLog) ?? artifactRoot);
         File.WriteAllText(unityLog, $"UNITY_LOG_PLACEHOLDER utc={DateTime.UtcNow:O}{Environment.NewLine}", Encoding.ASCII);
 
@@ -437,6 +438,12 @@ internal static class Program
 
     private static void CleanCaches(string projectPath, FailureSignature signature, Logger logger)
     {
+        if (signature == FailureSignature.SceneRecoveryDialog)
+        {
+            ClearSceneRecoveryArtifacts(projectPath, logger);
+            return;
+        }
+
         var targets = new List<string>();
         switch (signature)
         {
@@ -480,6 +487,11 @@ internal static class Program
             return true;
         }
 
+        if (signature == FailureSignature.SceneRecoveryDialog)
+        {
+            return true;
+        }
+
         if (result.TimedOut && signature == FailureSignature.BuildTimeout)
         {
             return false;
@@ -506,6 +518,12 @@ internal static class Program
             if (string.IsNullOrWhiteSpace(text))
             {
                 return string.IsNullOrWhiteSpace(outcomeResult) ? FailureSignature.InfraFail : FailureSignature.Unknown;
+            }
+
+            if (ContainsIgnoreCase(text, "Recovering Scene Backups") ||
+                ContainsIgnoreCase(text, "Scene backups from a previous Editor session"))
+            {
+                return FailureSignature.SceneRecoveryDialog;
             }
 
             if (ContainsStrictLicenseFailure(text))
@@ -597,6 +615,64 @@ internal static class Program
     private static bool ContainsIgnoreCase(string text, string fragment)
     {
         return text.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static void ClearSceneRecoveryArtifacts(string projectPath, Logger logger)
+    {
+        var cleanupDirs = new[]
+        {
+            Path.Combine(projectPath, "Library", "SceneBackup"),
+            Path.Combine(projectPath, "Library", "SceneBackups"),
+            Path.Combine(projectPath, "Library", "SceneBackupInfo"),
+            Path.Combine(projectPath, "Library", "StateCache", "SceneBackup"),
+            Path.Combine(projectPath, "Library", "StateCache", "SceneBackups"),
+            Path.Combine(projectPath, "Library", "StateCache")
+        };
+
+        foreach (var dir in cleanupDirs)
+        {
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(dir, true);
+                logger.Info($"scene_recovery_clean_dir path={dir}");
+            }
+            catch (Exception ex)
+            {
+                logger.Info($"scene_recovery_clean_dir_failed path={dir} err={ex.Message}");
+            }
+        }
+
+        var cleanupFiles = new[]
+        {
+            Path.Combine(projectPath, "Temp", "UnityLockfile"),
+            Path.Combine(projectPath, "Library", "EditorInstance.json"),
+            Path.Combine(projectPath, "Library", "UndoData.bin"),
+            Path.Combine(projectPath, "Library", "UndoStack.bin"),
+            Path.Combine(projectPath, "Library", "SceneVisibilityState.asset")
+        };
+
+        foreach (var file in cleanupFiles)
+        {
+            if (!File.Exists(file))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(file);
+                logger.Info($"scene_recovery_clean_file path={file}");
+            }
+            catch (Exception ex)
+            {
+                logger.Info($"scene_recovery_clean_file_failed path={file} err={ex.Message}");
+            }
+        }
     }
 
     private static string? TryReadOutcomeResult(string outcomePath)
@@ -1293,6 +1369,7 @@ internal static class Program
         BeeStall,
         InfraFail,
         LogLocked,
+        SceneRecoveryDialog,
         Unknown
     }
 

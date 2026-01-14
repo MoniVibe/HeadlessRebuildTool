@@ -11,7 +11,8 @@ param(
     [string[]]$Args,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
-    [int]$WaitTimeoutSec = 900
+    [int]$WaitTimeoutSec = 900,
+    [int]$BuildTimeoutMinutes = 90
 )
 
 Set-StrictMode -Version Latest
@@ -296,7 +297,8 @@ $supervisorArgs = @(
     "--project-path", $projectPath,
     "--build-id", $buildId,
     "--commit", $commitFull,
-    "--artifact-dir", $artifactsDir
+    "--artifact-dir", $artifactsDir,
+    "--timeout-minutes", $BuildTimeoutMinutes
 )
 
 $swapApplied = $false

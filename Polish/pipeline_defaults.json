@@ -7,7 +7,7 @@
       "timeout_sec": 90,
       "args": [
         "--scenario",
-        "/mnt/c/dev/Tri/space4x/Assets/Scenarios/space4x_collision_micro.json",
+        "/mnt/c/Dev/unity/space4x/Assets/Scenarios/space4x_collision_micro.json",
         "--telemetryEnabled",
         "1"
       ]
@@ -19,7 +19,7 @@
       "timeout_sec": 120,
       "args": [
         "--scenario",
-        "/mnt/c/dev/Tri/godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
+        "/mnt/c/Dev/unity/godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
         "--telemetryEnabled",
         "1"
       ]
