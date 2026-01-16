@@ -21,24 +21,26 @@ internal static class Program
     private const string BuildReportTextName = "build_report.txt";
     private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
     private const int LogReadRetryDelayMs = 100;
+    private const int StagingCreateRetries = 2;
+    private const int StagingCreateDelayMs = 250;
+    private const string StagingProbeFileName = ".staging_probe";
 
     private static int Main(string[] args)
     {
         var options = Options.Parse(args);
         Directory.CreateDirectory(options.ArtifactDir);
 
-        var stagingDir = options.StagingDir;
-        if (string.IsNullOrWhiteSpace(stagingDir))
-        {
-            stagingDir = Path.Combine(options.ArtifactDir, $"staging_{options.BuildId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
-        }
-
-        Directory.CreateDirectory(stagingDir);
+        var bootstrapLog = new List<string>();
+        var stagingDir = PrepareStagingDir(options, bootstrapLog);
         var logsDir = Path.Combine(stagingDir, LogsFolderName);
         Directory.CreateDirectory(logsDir);
 
         var supervisorLog = Path.Combine(logsDir, "supervisor.log");
         var logger = new Logger(supervisorLog);
+        foreach (var entry in bootstrapLog)
+        {
+            logger.Info(entry);
+        }
         logger.Info($"start build_id={options.BuildId} commit={options.Commit} staging={stagingDir}");
 
         var unityLog = Path.Combine(logsDir, "unity_build.log");
@@ -210,6 +212,166 @@ internal static class Program
         }
     }
 
+    private static string PrepareStagingDir(Options options, List<string> bootstrapLog)
+    {
+        var attemptLimit = StagingCreateRetries + 1;
+        var basePath = ResolveStagingPath(options, attempt: 0);
+        var lastError = string.Empty;
+
+        for (var attempt = 0; attempt < attemptLimit; attempt++)
+        {
+            var candidate = attempt == 0 ? basePath : ResolveStagingPath(options, attempt);
+            var allowCleanup = IsAutoStagingPath(candidate, options);
+            if (TryCreateStagingDir(candidate, allowCleanup, bootstrapLog, out var error))
+            {
+                bootstrapLog.Add($"staging_ready path={candidate} attempt={attempt + 1}");
+                return candidate;
+            }
+
+            lastError = error;
+            bootstrapLog.Add($"staging_create_failed path={candidate} attempt={attempt + 1} {error}");
+            if (attempt + 1 < attemptLimit)
+            {
+                Thread.Sleep(StagingCreateDelayMs);
+            }
+        }
+
+        throw new UnauthorizedAccessException($"Failed to create staging dir after {attemptLimit} attempts. {lastError}");
+    }
+
+    private static string ResolveStagingPath(Options options, int attempt)
+    {
+        var suffix = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        var stagingDir = options.StagingDir;
+        if (!string.IsNullOrWhiteSpace(stagingDir) && attempt == 0)
+        {
+            return stagingDir;
+        }
+
+        var retrySuffix = attempt > 0 ? $"_retry{attempt}" : string.Empty;
+        return Path.Combine(options.ArtifactDir, $"staging_{options.BuildId}_{suffix}{retrySuffix}");
+    }
+
+    private static bool TryCreateStagingDir(string path, bool allowCleanup, List<string> bootstrapLog, out string error)
+    {
+        error = string.Empty;
+        try
+        {
+            if (File.Exists(path))
+            {
+                error = DescribeStagingFailure(path, "path exists as file", null);
+                return false;
+            }
+
+            if (Directory.Exists(path) && allowCleanup)
+            {
+                if (TryDeleteDirectory(path, bootstrapLog))
+                {
+                    bootstrapLog.Add($"staging_cleanup_done path={path}");
+                }
+            }
+
+            Directory.CreateDirectory(path);
+            VerifyStagingWritable(path, bootstrapLog);
+            return true;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            error = DescribeStagingFailure(path, ex.Message, ex);
+            return false;
+        }
+        catch (IOException ex)
+        {
+            error = DescribeStagingFailure(path, ex.Message, ex);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            error = DescribeStagingFailure(path, ex.Message, ex);
+            return false;
+        }
+    }
+
+    private static bool IsAutoStagingPath(string path, Options options)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var artifactRoot = Path.GetFullPath(options.ArtifactDir)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!fullPath.StartsWith(artifactRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileName(fullPath);
+        return name.StartsWith("staging_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryDeleteDirectory(string path, List<string> bootstrapLog)
+    {
+        try
+        {
+            Directory.Delete(path, true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            bootstrapLog.Add($"staging_cleanup_failed path={path} err={ex.GetType().Name} msg={SanitizeMessage(ex.Message)}");
+            return false;
+        }
+    }
+
+    private static void VerifyStagingWritable(string path, List<string> bootstrapLog)
+    {
+        var probePath = Path.Combine(path, StagingProbeFileName);
+        File.WriteAllText(probePath, "probe", Encoding.ASCII);
+        try
+        {
+            File.Delete(probePath);
+        }
+        catch (Exception ex)
+        {
+            bootstrapLog.Add($"staging_probe_delete_failed path={probePath} err={ex.GetType().Name} msg={SanitizeMessage(ex.Message)}");
+        }
+    }
+
+    private static string DescribeStagingFailure(string path, string message, Exception? ex)
+    {
+        var existsDir = Directory.Exists(path);
+        var existsFile = File.Exists(path);
+        var readOnly = false;
+        if (existsDir || existsFile)
+        {
+            try
+            {
+                var attrs = File.GetAttributes(path);
+                readOnly = (attrs & FileAttributes.ReadOnly) != 0;
+            }
+            catch
+            {
+            }
+        }
+
+        var errorType = ex?.GetType().Name ?? "CreateFailed";
+        var sanitized = SanitizeMessage(message);
+        return $"err={errorType} msg={sanitized} exists_dir={existsDir} exists_file={existsFile} read_only={readOnly}";
+    }
+
+    private static string SanitizeMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "none";
+        }
+
+        return message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+    }
+
     private static UnityRunResult RunUnity(Options options, string artifactRoot, string unityLog, Logger logger)
     {
         ClearSceneRecoveryArtifacts(options.ProjectPath, logger);
@@ -237,6 +399,12 @@ internal static class Program
             "-artifactRoot", artifactRoot,
             "-buildOut", buildOut
         };
+        if (!string.IsNullOrWhiteSpace(options.LibraryPath))
+        {
+            Directory.CreateDirectory(options.LibraryPath);
+            args.Add("-libraryPath");
+            args.Add(options.LibraryPath);
+        }
 
         if (options.DefaultArgs.Count > 0)
         {
@@ -268,7 +436,7 @@ internal static class Program
             psi.ArgumentList.Add(arg);
         }
 
-        logger.Info($"unity_start exe={options.UnityExe}");
+        logger.Info($"unity_start exe={options.UnityExe} library_path={options.LibraryPath}");
         using var job = new JobObject();
         using var process = Process.Start(psi);
         if (process == null)
@@ -1416,6 +1584,7 @@ internal static class Program
     {
         public string UnityExe { get; private set; } = string.Empty;
         public string ProjectPath { get; private set; } = string.Empty;
+        public string LibraryPath { get; private set; } = string.Empty;
         public string BuildId { get; private set; } = string.Empty;
         public string Commit { get; private set; } = string.Empty;
         public string ArtifactDir { get; private set; } = string.Empty;
@@ -1469,6 +1638,7 @@ internal static class Program
 
             options.UnityExe = ReadRequired(map, "unity-exe");
             options.ProjectPath = ReadRequired(map, "project-path");
+            options.LibraryPath = ReadOptional(map, "library-path", string.Empty);
             options.BuildId = ReadRequired(map, "build-id");
             options.Commit = ReadRequired(map, "commit");
             options.ArtifactDir = ReadRequired(map, "artifact-dir");
@@ -1491,6 +1661,11 @@ internal static class Program
             if (string.IsNullOrWhiteSpace(options.ProjectPath) || !Directory.Exists(options.ProjectPath))
             {
                 throw new ArgumentException("project-path is missing or invalid.");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.LibraryPath))
+            {
+                options.LibraryPath = Path.Combine(options.ProjectPath, "Library_Headless");
             }
 
             return options;
