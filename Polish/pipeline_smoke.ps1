@@ -60,6 +60,36 @@ function Convert-ToWslPath {
     return ($full -replace '\\', '/')
 }
 
+function Copy-ProjectToScratch {
+    param(
+        [string]$SourcePath,
+        [string]$ScratchRoot,
+        [string]$Label
+    )
+    if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+        throw "scratch_copy source path missing"
+    }
+    if ([string]::IsNullOrWhiteSpace($ScratchRoot)) {
+        throw "scratch_copy root missing"
+    }
+
+    Ensure-Directory $ScratchRoot
+    $scratchPath = Join-Path $ScratchRoot $Label
+    if (Test-Path $scratchPath) {
+        Remove-Item -Path $scratchPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Ensure-Directory $scratchPath
+
+    foreach ($dir in @("Assets", "Packages", "ProjectSettings", "UserSettings")) {
+        $src = Join-Path $SourcePath $dir
+        if (-not (Test-Path $src)) { continue }
+        $dst = Join-Path $scratchPath $dir
+        Copy-Item -Path $src -Destination $dst -Recurse -Force
+    }
+
+    return $scratchPath
+}
+
 function Read-ZipEntryText {
     param(
         [System.IO.Compression.ZipArchive]$Archive,
@@ -269,6 +299,7 @@ $projectPath = Join-Path $triRoot $titleDefaults.project_path
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
+$sourceProjectPath = $projectPath
 
 if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
@@ -292,17 +323,21 @@ if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
 
-$commitFull = & git -C $projectPath rev-parse HEAD 2>&1
+$commitFull = & git -C $sourceProjectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
 }
-$commitShort = & git -C $projectPath rev-parse --short=8 HEAD 2>&1
+$commitShort = & git -C $sourceProjectPath rev-parse --short=8 HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
 
 $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
 $buildId = "${timestamp}_$commitShort"
+
+$scratchRoot = Join-Path $triRoot ".tri\\state\\headless_workspaces"
+$scratchLabel = "{0}_{1}" -f $titleKey, $buildId
+$projectPath = Copy-ProjectToScratch -SourcePath $sourceProjectPath -ScratchRoot $scratchRoot -Label $scratchLabel
 
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $artifactsDir = Join-Path $queueRootFull "artifacts"
