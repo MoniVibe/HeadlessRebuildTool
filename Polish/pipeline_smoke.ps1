@@ -20,6 +20,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Headless runs execute from a scratch copy and must leave the source repo clean.
+
 function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
@@ -60,6 +62,22 @@ function Convert-ToWslPath {
     return ($full -replace '\\', '/')
 }
 
+function Get-GitStatusPorcelain {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $status = & git -C $Path status --porcelain -uall 2>$null
+    return ($status | Out-String).Trim()
+}
+
+function Assert-CleanWorkingTree {
+    param([string]$Path, [string]$Phase)
+    $status = Get-GitStatusPorcelain -Path $Path
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+        $preview = ($status -split "`r?`n" | Select-Object -First 12) -join "; "
+        throw "WORKTREE_DIRTY phase=$Phase path=$Path changes=$preview"
+    }
+}
+
 function Copy-ProjectToScratch {
     param(
         [string]$SourcePath,
@@ -80,11 +98,12 @@ function Copy-ProjectToScratch {
     }
     Ensure-Directory $scratchPath
 
+    $exclude = @("!GET_MORE_ASSETS_FOR_FREE.meta")
     foreach ($dir in @("Assets", "Packages", "ProjectSettings", "UserSettings")) {
         $src = Join-Path $SourcePath $dir
         if (-not (Test-Path $src)) { continue }
         $dst = Join-Path $scratchPath $dir
-        Copy-Item -Path $src -Destination $dst -Recurse -Force
+        Copy-Item -Path $src -Destination $dst -Recurse -Force -Exclude $exclude
     }
 
     return $scratchPath
@@ -335,6 +354,12 @@ if ($LASTEXITCODE -ne 0) {
 $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
 $buildId = "${timestamp}_$commitShort"
 
+$baselineStatus = Get-GitStatusPorcelain -Path $sourceProjectPath
+if (-not [string]::IsNullOrWhiteSpace($baselineStatus)) {
+    $preview = ($baselineStatus -split "`r?`n" | Select-Object -First 8) -join "; "
+    Write-Warning "pre_run_git_dirty path=$sourceProjectPath changes=$preview"
+}
+
 $scratchRoot = Join-Path $triRoot ".tri\\state\\headless_workspaces"
 $scratchLabel = "{0}_{1}" -f $titleKey, $buildId
 $projectPath = Copy-ProjectToScratch -SourcePath $sourceProjectPath -ScratchRoot $scratchRoot -Label $scratchLabel
@@ -382,6 +407,7 @@ $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
 }
+Assert-CleanWorkingTree -Path $sourceProjectPath -Phase "post_build"
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
 if (-not (Test-Path $artifactZip)) {
