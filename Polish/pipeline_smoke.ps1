@@ -21,7 +21,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# Headless runs execute from a scratch copy.
+# Headless runs execute from a scratch copy; manifest restore precedes clean-tree checks.
 
 function Ensure-Directory {
     param([string]$Path)
@@ -176,6 +176,22 @@ function Ensure-LocalFileDependencies {
             Copy-Item -Path $sourceTarget -Destination $scratchTarget -Force
         }
         Write-Host ("local_dep_copied dep={0} src={1} dst={2}" -f $dep.Name, $sourceTarget, $scratchTarget)
+    }
+}
+
+function Get-GitStatusPorcelain {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $status = & git -C $Path status --porcelain -uall 2>$null
+    return ($status | Out-String).Trim()
+}
+
+function Assert-CleanWorkingTree {
+    param([string]$Path, [string]$Phase)
+    $status = Get-GitStatusPorcelain -Path $Path
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+        $preview = ($status -split "`r?`n" | Select-Object -First 12) -join "; "
+        throw "WORKTREE_DIRTY phase=$Phase path=$Path changes=$preview"
     }
 }
 
@@ -489,6 +505,12 @@ if ($LASTEXITCODE -ne 0) {
 $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
 $buildId = "${timestamp}_$commitShort"
 
+$baselineStatus = Get-GitStatusPorcelain -Path $sourceProjectPath
+if (-not [string]::IsNullOrWhiteSpace($baselineStatus)) {
+    $preview = ($baselineStatus -split "`r?`n" | Select-Object -First 8) -join "; "
+    Write-Warning "pre_run_git_dirty path=$sourceProjectPath changes=$preview"
+}
+
 $scratchRoot = Join-Path $triRoot ".tri\\state_win\\headless_workspaces"
 $scratchLabel = "{0}_{1}" -f $titleKey, $buildId
 $projectPath = $null
@@ -552,6 +574,12 @@ finally {
 $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
+}
+try {
+    Assert-CleanWorkingTree -Path $sourceProjectPath -Phase "post_build"
+}
+catch {
+    throw "post_build_worktree_dirty: $($_.Exception.Message)"
 }
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
