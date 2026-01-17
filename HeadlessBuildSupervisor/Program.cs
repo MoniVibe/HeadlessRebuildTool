@@ -236,6 +236,19 @@ internal static class Program
             }
         }
 
+        if (string.IsNullOrWhiteSpace(options.StagingDir))
+        {
+            var fallbackBase = Path.Combine(Path.GetTempPath(), "tri_headless_staging");
+            var fallbackPath = Path.Combine(fallbackBase, $"staging_{options.BuildId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
+            if (TryCreateStagingDir(fallbackPath, allowCleanup: false, bootstrapLog, out var fallbackError))
+            {
+                bootstrapLog.Add($"staging_fallback path={fallbackPath} reason={lastError}");
+                return fallbackPath;
+            }
+
+            lastError = $"primary={lastError} fallback={fallbackError}";
+        }
+
         throw new UnauthorizedAccessException($"Failed to create staging dir after {attemptLimit} attempts. {lastError}");
     }
 

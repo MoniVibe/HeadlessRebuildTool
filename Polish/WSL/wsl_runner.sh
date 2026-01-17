@@ -1325,7 +1325,16 @@ run_job() {
   fi
 
   if [ -z "$error_context" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
-    if ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
+    local allow_unknown_scenario=0
+    local -a scenario_default_args=()
+    local -a scenario_job_args=()
+    mapfile -t scenario_default_args < <(read_json_array_field "$manifest_path" "default_args")
+    mapfile -t scenario_job_args < <(read_json_array_field "$lease_path" "args")
+    if args_include_flag "--scenario" "${scenario_default_args[@]}" || args_include_flag "--scenario" "${scenario_job_args[@]}"; then
+      allow_unknown_scenario=1
+    fi
+
+    if [ "$allow_unknown_scenario" -eq 0 ] && ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
       error_context="scenario_not_supported:${scenario_id}"
     fi
   fi
