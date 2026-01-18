@@ -68,3 +68,17 @@ Optional polling for results:
 ```powershell
 pwsh -File Tools/Polish/pipeline_smoke.ps1 -Title space4x -UnityExe "C:\Program Files\Unity\Hub\Editor\6000.3.1f1\Editor\Unity.exe" -WaitForResult
 ```
+
+## Offline Micro Tooling
+
+### Operator report scoreboard
+```powershell
+python Tools/Polish/Tools/scoreboard_operator_reports.py --root C:\dev\Tri\out\greenify\20260118_182451\baseline
+```
+Output: `scoreboard.json` in the provided root (or pass `--out`).
+
+### Scenario validator
+```powershell
+python Tools/Polish/Tools/validate_space4x_scenarios.py --repo-root C:\dev\Tri
+```
+Validates `space4x/Assets/Scenarios` JSONs, headless question ids, and `.meta` presence.
