@@ -148,8 +148,11 @@ if (Test-Path $reportsDir) {
 }
 
 $modeLabel = if ($Apply) { "APPLY" } else { "DRY-RUN" }
-$reclaimBytes = ($deleteItems | Measure-Object -Property length -Sum).Sum
-if ($null -eq $reclaimBytes) { $reclaimBytes = 0 }
+$reclaimBytes = 0
+if ($deleteItems.Count -gt 0) {
+    $reclaimBytes = ($deleteItems | Measure-Object -Property length -Sum).Sum
+    if ($null -eq $reclaimBytes) { $reclaimBytes = 0 }
+}
 
 Write-Host ("Queue cleanup ({0})" -f $modeLabel)
 Write-Host ("Queue root: {0}" -f $queueRootFull)
