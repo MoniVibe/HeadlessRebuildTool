@@ -741,7 +741,6 @@ add("repro","repro.txt","out/repro.txt")
 add("progress_json","progress.json","out/progress.json")
 add("invariants_json","invariants.json","out/invariants.json")
 add("telemetry","telemetry.ndjson","out/telemetry.ndjson")
-add("perf_telemetry","perf_telemetry.ndjson","out/perf_telemetry.ndjson")
 add("diag_stdout_tail","diag_stdout_tail.txt","out/diag_stdout_tail.txt")
 add("diag_stderr_tail","diag_stderr_tail.txt","out/diag_stderr_tail.txt")
 add("system_snapshot","system_snapshot.txt","out/system_snapshot.txt")
@@ -1355,10 +1354,6 @@ run_job() {
     if [ "$telemetry_enabled" -eq 1 ] && [ -n "$telemetry_max_bytes" ] && [ "$telemetry_max_bytes" -gt 0 ]; then
       telemetry_max_env="$telemetry_max_bytes"
     fi
-    local perf_telemetry_env=""
-    if [ -z "${PUREDOTS_PERF_TELEMETRY_PATH:-}" ]; then
-      perf_telemetry_env="${out_dir}/perf_telemetry.ndjson"
-    fi
 
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
@@ -1396,7 +1391,6 @@ run_job() {
       TRI_PARAM_OVERRIDES="$param_overrides_json" \
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
-      ${perf_telemetry_env:+PUREDOTS_PERF_TELEMETRY_PATH=$perf_telemetry_env} \
       "$entrypoint_path" "${final_args[@]}" >"$stdout_log" 2>"$stderr_log" &
     local pid=$!
     local pgid
@@ -1767,4 +1761,10 @@ main() {
   mkdir -p "$workdir"
 
   if [ "$mode" = "daemon" ]; then
-    daemon_loop "$queue_dir" "$workdir" "$heartbeat_inter
+    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
+  else
+    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
+  fi
+}
+
+main "$@"
