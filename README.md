@@ -46,3 +46,9 @@ Avoid older `min_commit` schemas in new requests.
 - This repo includes snapshots of `headlessprompt.md`, `headless_runbook.md`, and `headlesstasks.md` for reference.
 - These docs are copied from Tri and may need manual sync if the main repo changes.
 - Space4X Tier 2 behavior loops are currently failing in nightly (missing loops); rebuild tooling is stable but the pipeline is not fully green.
+
+## Lean Git hygiene
+- One branch per task; delete after merge.
+- Prune remotes regularly (`git fetch --prune`).
+- Avoid duplicate clones; prefer `git worktree`.
+- Never commit logs, zips, or build outputs.

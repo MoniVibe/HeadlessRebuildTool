@@ -19,6 +19,25 @@ Queue layout (under the root):
 - `leases/` claimed jobs (WSL runner moves jobs here)
 - `results/` published `result_<job_id>.zip` bundles
 
+## Queue retention cleanup (safe-by-default)
+Script:
+- `Tools/Polish/cleanup_queue.ps1`
+
+Dry-run (default):
+```powershell
+pwsh -File Tools/Polish/cleanup_queue.ps1 -QueueRoot "C:\polish\queue" -RetentionDays 21 -KeepLastPerScenario 5
+```
+
+Apply deletions:
+```powershell
+pwsh -File Tools/Polish/cleanup_queue.ps1 -QueueRoot "C:\polish\queue" -RetentionDays 21 -KeepLastPerScenario 5 -Apply
+```
+
+Notes:
+- Keeps the last K result bundles per scenario even if older than the cutoff.
+- Artifacts referenced by kept results are preserved.
+- Prints estimated reclaim before deletion.
+
 ## Path Mapping Rules
 - Windows path `C:\polish\queue\...` is read in WSL as `/mnt/c/polish/queue/...`.
 - `artifact_uri` in job JSON should use the WSL-visible path:
