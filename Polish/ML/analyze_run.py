@@ -2,6 +2,7 @@
 import argparse
 import glob
 import json
+import math
 import os
 
 
@@ -154,6 +155,89 @@ def gather_telemetry(out_dir):
     return entries, bytes_total, format_hint
 
 
+def percentile(values, p):
+    if not values:
+        return None
+    values = sorted(values)
+    if len(values) == 1:
+        return float(values[0])
+    position = (len(values) - 1) * p
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return float(values[lower])
+    weight = position - lower
+    return float(values[lower] * (1.0 - weight) + values[upper] * weight)
+
+
+def parse_perf_telemetry(out_dir):
+    perf = {
+        "available": False,
+        "tick_total_ms": {"p50": None, "p95": None},
+        "reserved_bytes_peak": None,
+        "allocated_bytes_peak": None,
+        "structural_change_delta": {"p95": None},
+        "source": "out/perf_telemetry.ndjson",
+        "samples": {"tick_total_ms": 0, "structural_change_delta": 0},
+    }
+    path = os.path.join(out_dir, "perf_telemetry.ndjson")
+    if not os.path.isfile(path):
+        return perf
+
+    tick_total_new = []
+    tick_total_old = []
+    structural_delta_new = []
+    structural_delta_old = []
+    reserved_peak_new = None
+    reserved_peak_old = None
+    allocated_peak_new = None
+    allocated_peak_old = None
+
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(obj, dict) or obj.get("type") != "metric":
+                continue
+            metric = obj.get("metric")
+            value = to_float(obj.get("value"))
+            if value is None:
+                continue
+            if metric == "timing.total_ms":
+                tick_total_new.append(value)
+            elif metric == "timing.total":
+                tick_total_old.append(value)
+            elif metric == "memory.reserved_bytes":
+                reserved_peak_new = value if reserved_peak_new is None else max(reserved_peak_new, value)
+            elif metric == "memory.reserved.bytes":
+                reserved_peak_old = value if reserved_peak_old is None else max(reserved_peak_old, value)
+            elif metric == "memory.allocated_bytes":
+                allocated_peak_new = value if allocated_peak_new is None else max(allocated_peak_new, value)
+            elif metric == "memory.allocated.bytes":
+                allocated_peak_old = value if allocated_peak_old is None else max(allocated_peak_old, value)
+            elif metric == "structural.change_delta":
+                structural_delta_new.append(value)
+            elif metric == "structural.changeDelta":
+                structural_delta_old.append(value)
+
+    perf["available"] = True
+    tick_total = tick_total_new if tick_total_new else tick_total_old
+    structural_delta = structural_delta_new if structural_delta_new else structural_delta_old
+    perf["tick_total_ms"]["p50"] = percentile(tick_total, 0.50)
+    perf["tick_total_ms"]["p95"] = percentile(tick_total, 0.95)
+    perf["reserved_bytes_peak"] = reserved_peak_new if reserved_peak_new is not None else reserved_peak_old
+    perf["allocated_bytes_peak"] = allocated_peak_new if allocated_peak_new is not None else allocated_peak_old
+    perf["structural_change_delta"]["p95"] = percentile(structural_delta, 0.95)
+    perf["samples"]["tick_total_ms"] = len(tick_total)
+    perf["samples"]["structural_change_delta"] = len(structural_delta)
+    return perf
+
+
 def compute_score(exit_reason, runtime_sec, runtime_budget_sec, telemetry_bytes, telemetry_budget_bytes):
     breakdown = []
     total_loss = 0.0
@@ -242,6 +326,7 @@ def main():
         failing_invariants = collect_failing_invariants(inv)
 
     telemetry_files, telemetry_bytes, telemetry_format = gather_telemetry(out_dir)
+    perf_summary = parse_perf_telemetry(out_dir)
 
     artifact_paths = meta.get("artifact_paths")
     artifacts_present = []
@@ -272,6 +357,7 @@ def main():
             "bytes_total": int(telemetry_bytes),
             "format_hint": telemetry_format,
         },
+        "perf": perf_summary,
         "artifacts_present": artifacts_present,
     }
 
