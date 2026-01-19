@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "generated_utc": "YYYY-MM-DDTHH:MM:SSZ",
+  "commit": "",
+  "scenario_id": "",
+  "perf": {
+    "tick_total_ms": {
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reserved_bytes_peak": 0.0,
+    "allocated_bytes_peak": 0.0,
+    "structural_change_delta": {
+      "p95": 0.0
+    }
+  }
+}
