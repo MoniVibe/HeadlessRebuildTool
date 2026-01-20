@@ -47,6 +47,11 @@ New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 
 $manifestBackup = Join-Path $backupDir "manifest.json"
 $lockBackup = Join-Path $backupDir "packages-lock.json"
+$assetsDir = Join-Path $ProjectPath "Assets"
+$visualScriptingDir = Join-Path $assetsDir "Unity.VisualScripting.Generated"
+$visualScriptingBackup = Join-Path $backupDir "Unity.VisualScripting.Generated"
+$visualScriptingMeta = $visualScriptingDir + ".meta"
+$visualScriptingMetaBackup = $visualScriptingBackup + ".meta"
 
 function Disable-PackageDir {
     param([string]$DirName)
@@ -72,6 +77,36 @@ function Enable-PackageDir {
     }
 }
 
+function Disable-VisualScriptingGenerated {
+    if (Test-Path $visualScriptingBackup) {
+        Remove-Item -Path $visualScriptingBackup -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $visualScriptingMetaBackup) {
+        Remove-Item -Path $visualScriptingMetaBackup -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $visualScriptingDir) {
+        Move-Item -Path $visualScriptingDir -Destination $visualScriptingBackup -Force
+    }
+    if (Test-Path $visualScriptingMeta) {
+        Move-Item -Path $visualScriptingMeta -Destination $visualScriptingMetaBackup -Force
+    }
+}
+
+function Enable-VisualScriptingGenerated {
+    if (Test-Path $visualScriptingDir) {
+        Remove-Item -Path $visualScriptingDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $visualScriptingMeta) {
+        Remove-Item -Path $visualScriptingMeta -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $visualScriptingBackup) {
+        Move-Item -Path $visualScriptingBackup -Destination $visualScriptingDir -Force
+    }
+    if (Test-Path $visualScriptingMetaBackup) {
+        Move-Item -Path $visualScriptingMetaBackup -Destination $visualScriptingMeta -Force
+    }
+}
+
 if ($Restore) {
     if (Test-Path $manifestBackup) {
         Copy-Item -Path $manifestBackup -Destination $manifest -Force
@@ -82,6 +117,7 @@ if ($Restore) {
 
     Enable-PackageDir "Coplay"
     Enable-PackageDir "com.coplaydev.coplay"
+    Enable-VisualScriptingGenerated
 
     Write-Output "HEADLESS_MANIFEST_RESTORED project=$projectName"
     exit 0
@@ -115,6 +151,7 @@ if (-not $lockMatches) {
 
 Disable-PackageDir "Coplay"
 Disable-PackageDir "com.coplaydev.coplay"
+Disable-VisualScriptingGenerated
 
 $manifestObj = Get-Content -Path $manifest -Raw | ConvertFrom-Json
 $depNames = @()
