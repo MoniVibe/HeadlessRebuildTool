@@ -33,6 +33,7 @@ TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
 DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
 DEFAULT_TELEMETRY_MAX_BYTES=52428800
+DEFAULT_STATUS_INTERVAL=30
 log() {
   echo "wsl_runner: $*" >&2
 }
@@ -40,7 +41,7 @@ log() {
 usage() {
   cat <<'USAGE'
 Usage: wsl_runner.sh --queue <path> [--workdir <path>] [--once|--daemon]
-                    [--heartbeat-interval <sec>] [--diag-timeout <sec>]
+                    [--heartbeat-interval <sec>] [--status-interval <sec>] [--diag-timeout <sec>]
                     [--print-summary] [--requeue-stale-leases --ttl-sec <sec>]
                     [--emit-triage-on-fail] [--reports-dir <path>] [--telemetry-max-bytes <bytes>] [--self-test]
 
@@ -50,12 +51,13 @@ Options:
   --once                      Process one job and exit (default).
   --daemon                    Poll forever.
   --heartbeat-interval <sec>  Heartbeat interval seconds (default: 2).
+  --status-interval <sec>     Status log interval seconds (default: 30).
   --diag-timeout <sec>        Diagnostics timeout seconds (default: 15).
   --print-summary             Print summary line after each job.
   --emit-triage-on-fail        Emit triage summary JSON on failures (default).
   --reports-dir <path>         Triage reports directory (default: /mnt/c/polish/queue/reports).
   --telemetry-max-bytes <bytes> Telemetry output cap in bytes (default: 52428800).
-  --requeue-stale-leases      Requeue stale leases (helper mode).
+  --requeue-stale-leases      Requeue stale leases (helper mode; with --daemon, continues running).
   --ttl-sec <sec>             TTL seconds for stale leases (default: 600).
   --self-test                 Run local self-test scenarios.
 USAGE
@@ -1047,6 +1049,27 @@ ensure_queue_dirs() {
   mkdir -p "${queue_dir}/results/.tmp" "${queue_dir}/leases/archive"
 }
 
+count_queue_files() {
+  local dir="$1"
+  local pattern="$2"
+  if [ ! -d "$dir" ]; then
+    echo "0"
+    return 0
+  fi
+  find "$dir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null | wc -l | tr -d ' '
+}
+
+log_queue_counts() {
+  local queue_dir="$1"
+  local jobs
+  local leases
+  local results
+  jobs="$(count_queue_files "${queue_dir}/jobs" "*.json")"
+  leases="$(count_queue_files "${queue_dir}/leases" "*.json")"
+  results="$(count_queue_files "${queue_dir}/results" "result_*.zip")"
+  log "queue: jobs=${jobs} leases=${leases} results=${results}"
+}
+
 find_core_dump() {
   local run_dir="$1"
   local build_dir="$2"
@@ -1226,11 +1249,12 @@ run_job() {
   local queue_dir="$2"
   local workdir="$3"
   local heartbeat_interval="$4"
-  local diag_timeout="$5"
-  local print_summary="$6"
-  local emit_triage_on_fail="$7"
-  local reports_dir="$8"
-  local telemetry_max_bytes="$9"
+  local status_interval="$5"
+  local diag_timeout="$6"
+  local print_summary="$7"
+  local emit_triage_on_fail="$8"
+  local reports_dir="$9"
+  local telemetry_max_bytes="${10}"
 
   local job_basename
   job_basename="$(basename "$lease_path")"
@@ -1304,6 +1328,9 @@ run_job() {
   if [ -z "$error_context" ] && [ -z "$artifact_uri" ]; then
     error_context="artifact_uri_missing"
   fi
+
+  log "job_start id=${job_id} scenario=${scenario_id:-unknown} seed=${seed:-unknown} out_dir=${out_dir}"
+  log_queue_counts "$queue_dir"
 
   local lease_meta_path="${queue_dir}/leases/${job_id}.lease.json"
   local runner_host
@@ -1454,6 +1481,7 @@ run_job() {
     local heartbeat_path="${run_dir}/heartbeat"
     local deadline=$((start_epoch + timeout_sec))
     local next_heartbeat=$start_epoch
+    local next_status=$start_epoch
     while kill -0 "$pid" 2>/dev/null; do
       local now
       now="$(date -u +%s)"
@@ -1471,6 +1499,10 @@ run_job() {
         touch "$lease_meta_path" 2>/dev/null || true
         touch "$lease_path" 2>/dev/null || true
         next_heartbeat=$((now + heartbeat_interval))
+      fi
+      if [ "$status_interval" -gt 0 ] && [ "$now" -ge "$next_status" ]; then
+        log_queue_counts "$queue_dir"
+        next_status=$((now + status_interval))
       fi
       sleep 1
     done
@@ -1543,6 +1575,8 @@ run_job() {
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
+  log "job_end id=${job_id} exit_reason=${exit_reason} exit_code=${runner_exit_code}"
+  log_queue_counts "$queue_dir"
   local triage_path=""
   if [ "$emit_triage_on_fail" -eq 1 ] && [ "$exit_reason" != "$EXIT_REASON_SUCCESS" ]; then
     local result_zip="${queue_dir}/results/result_${job_id}.zip"
@@ -1572,17 +1606,18 @@ run_once() {
   local queue_dir="$1"
   local workdir="$2"
   local heartbeat_interval="$3"
-  local diag_timeout="$4"
-  local print_summary="$5"
-  local emit_triage_on_fail="$6"
-  local reports_dir="$7"
-  local telemetry_max_bytes="$8"
+  local status_interval="$4"
+  local diag_timeout="$5"
+  local print_summary="$6"
+  local emit_triage_on_fail="$7"
+  local reports_dir="$8"
+  local telemetry_max_bytes="$9"
   local lease_path
   lease_path="$(claim_job "$queue_dir" || true)"
   if [ -z "$lease_path" ]; then
     return 1
   fi
-  run_job "$lease_path" "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
+  run_job "$lease_path" "$queue_dir" "$workdir" "$heartbeat_interval" "$status_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
   return 0
 }
 
@@ -1590,13 +1625,21 @@ daemon_loop() {
   local queue_dir="$1"
   local workdir="$2"
   local heartbeat_interval="$3"
-  local diag_timeout="$4"
-  local print_summary="$5"
-  local emit_triage_on_fail="$6"
-  local reports_dir="$7"
-  local telemetry_max_bytes="$8"
+  local status_interval="$4"
+  local diag_timeout="$5"
+  local print_summary="$6"
+  local emit_triage_on_fail="$7"
+  local reports_dir="$8"
+  local telemetry_max_bytes="$9"
+  local next_status=0
   while true; do
-    if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"; then
+    local now
+    now="$(date -u +%s)"
+    if [ "$status_interval" -gt 0 ] && [ "$now" -ge "$next_status" ]; then
+      log_queue_counts "$queue_dir"
+      next_status=$((now + status_interval))
+    fi
+    if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$status_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"; then
       sleep 2
     fi
   done
@@ -1660,8 +1703,8 @@ JSON
 }
 JSON
 
-  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
-  run_once "$queue_dir" "$workdir" 1 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
+  run_once "$queue_dir" "$workdir" 1 10 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
+  run_once "$queue_dir" "$workdir" 1 10 5 "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
 
   local meta_missing="${workdir}/selftest_missing/meta.json"
   local meta_hang="${workdir}/selftest_hang/meta.json"
@@ -1696,6 +1739,7 @@ main() {
   local workdir="${HOME}/polish/runs"
   local mode="once"
   local heartbeat_interval=2
+  local status_interval="$DEFAULT_STATUS_INTERVAL"
   local diag_timeout=15
   local print_summary=0
   local run_self_test=0
@@ -1725,6 +1769,10 @@ main() {
         ;;
       --heartbeat-interval)
         heartbeat_interval="$2"
+        shift 2
+        ;;
+      --status-interval)
+        status_interval="$2"
         shift 2
         ;;
       --diag-timeout)
@@ -1797,6 +1845,9 @@ main() {
   if [ -z "$heartbeat_interval" ] || ! [[ "$heartbeat_interval" =~ ^[0-9]+$ ]] || [ "$heartbeat_interval" -le 0 ]; then
     heartbeat_interval=2
   fi
+  if [ -z "$status_interval" ] || ! [[ "$status_interval" =~ ^[0-9]+$ ]] || [ "$status_interval" -le 0 ]; then
+    status_interval="$DEFAULT_STATUS_INTERVAL"
+  fi
   if [ -z "$diag_timeout" ] || ! [[ "$diag_timeout" =~ ^[0-9]+$ ]] || [ "$diag_timeout" -le 0 ]; then
     diag_timeout=15
   fi
@@ -1811,7 +1862,9 @@ main() {
 
   if [ "$requeue_mode" -eq 1 ]; then
     requeue_stale_leases "$queue_dir" "$ttl_sec"
-    exit 0
+    if [ "$mode" != "daemon" ]; then
+      exit 0
+    fi
   fi
 
   if ! ensure_workdir_ext4 "$workdir"; then
@@ -1820,9 +1873,9 @@ main() {
   mkdir -p "$workdir"
 
   if [ "$mode" = "daemon" ]; then
-    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
+    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$status_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
   else
-    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
+    run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$status_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
   fi
 }
 
