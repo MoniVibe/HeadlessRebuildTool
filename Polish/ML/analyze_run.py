@@ -154,6 +154,79 @@ def gather_telemetry(out_dir):
     return entries, bytes_total, format_hint
 
 
+def summarize_telemetry(out_dir):
+    summary = {
+        "schema_version": 1,
+        "scenario_id": None,
+        "runtime_sec": None,
+        "tick_samples": 0,
+        "tick_min": None,
+        "tick_max": None,
+        "frame_samples": 0,
+        "event_total": 0,
+        "top_event_types": [],
+    }
+    ndjson_path = os.path.join(out_dir, "telemetry.ndjson")
+    if not os.path.isfile(ndjson_path):
+        return summary
+
+    event_counts = {}
+    tick_min = None
+    tick_max = None
+    tick_samples = 0
+    frame_samples = 0
+    event_total = 0
+
+    with open(ndjson_path, "r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("\ufeff"):
+                line = line.lstrip("\ufeff")
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+
+            entry_type = obj.get("type")
+            if entry_type == "frameTiming":
+                frame_samples += 1
+            if entry_type == "event":
+                event_total += 1
+                event_name = obj.get("event") or obj.get("name") or obj.get("id") or obj.get("key")
+                if event_name:
+                    key = str(event_name)
+                    event_counts[key] = event_counts.get(key, 0) + 1
+
+            tick_value = obj.get("tick")
+            if tick_value is None:
+                tick_value = obj.get("frame")
+            if tick_value is None:
+                tick_value = obj.get("sim_tick")
+            try:
+                tick_int = int(tick_value)
+            except Exception:
+                tick_int = None
+            if tick_int is not None:
+                tick_samples += 1
+                if tick_min is None or tick_int < tick_min:
+                    tick_min = tick_int
+                if tick_max is None or tick_int > tick_max:
+                    tick_max = tick_int
+
+    top_events = sorted(event_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+    summary["tick_samples"] = tick_samples
+    summary["tick_min"] = tick_min
+    summary["tick_max"] = tick_max
+    summary["frame_samples"] = frame_samples
+    summary["event_total"] = event_total
+    summary["top_event_types"] = [{"event": name, "count": count} for name, count in top_events]
+    return summary
+
+
 def compute_score(exit_reason, runtime_sec, runtime_budget_sec, telemetry_bytes, telemetry_budget_bytes):
     breakdown = []
     total_loss = 0.0
@@ -242,6 +315,7 @@ def main():
         failing_invariants = collect_failing_invariants(inv)
 
     telemetry_files, telemetry_bytes, telemetry_format = gather_telemetry(out_dir)
+    telemetry_summary = summarize_telemetry(out_dir)
 
     artifact_paths = meta.get("artifact_paths")
     artifacts_present = []
@@ -272,8 +346,12 @@ def main():
             "bytes_total": int(telemetry_bytes),
             "format_hint": telemetry_format,
         },
+        "telemetry_summary": telemetry_summary,
         "artifacts_present": artifacts_present,
     }
+
+    telemetry_summary["scenario_id"] = run_summary["scenario_id"]
+    telemetry_summary["runtime_sec"] = run_summary["runtime_sec"]
 
     total_loss, breakdown, grade = compute_score(
         meta.get("exit_reason"),
