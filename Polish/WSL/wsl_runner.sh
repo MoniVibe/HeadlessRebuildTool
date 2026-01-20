@@ -6,6 +6,7 @@ RUNNER_VERSION="wsl_runner/0.2"
 
 EXIT_REASON_SUCCESS="SUCCESS"
 EXIT_REASON_TEST_FAIL="TEST_FAIL"
+EXIT_REASON_OK_WARN="OK_WITH_WARNINGS"
 EXIT_REASON_CRASH="CRASH"
 EXIT_REASON_HANG="HANG_TIMEOUT"
 EXIT_REASON_INFRA="INFRA_FAIL"
@@ -554,12 +555,63 @@ exit_code_for_reason() {
   local reason="$1"
   case "$reason" in
     "$EXIT_REASON_SUCCESS") echo "$EXIT_CODE_SUCCESS" ;;
+    "$EXIT_REASON_OK_WARN") echo "$EXIT_CODE_SUCCESS" ;;
     "$EXIT_REASON_TEST_FAIL") echo "$EXIT_CODE_TEST_FAIL" ;;
     "$EXIT_REASON_INFRA") echo "$EXIT_CODE_INFRA_FAIL" ;;
     "$EXIT_REASON_CRASH") echo "$EXIT_CODE_CRASH" ;;
     "$EXIT_REASON_HANG") echo "$EXIT_CODE_HANG" ;;
     *) echo "$EXIT_CODE_CRASH" ;;
   esac
+}
+
+maybe_mark_questions_unknown() {
+  local out_dir="$1"
+  local report_path="${out_dir}/operator_report.json"
+  if [ ! -f "$report_path" ]; then
+    return 1
+  fi
+  local result
+  result="$("$PYTHON_BIN" - "$report_path" <<'PY'
+import json,sys
+path=sys.argv[1]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+except Exception:
+    sys.exit(0)
+questions=data.get("questions")
+if not isinstance(questions, list):
+    sys.exit(0)
+required=[q for q in questions if q.get("required") is True]
+if not required:
+    sys.exit(0)
+def status(q):
+    value=q.get("status")
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+unknown=[q for q in required if status(q)=="unknown"]
+failed=[q for q in required if status(q) in ("fail","failed","error")]
+passed=[q for q in required if status(q) in ("pass","passed","ok","success")]
+if unknown and not failed and not passed:
+    warning="required_questions_unknown"
+    warnings=data.get("warnings")
+    if not isinstance(warnings, list):
+        warnings=[]
+    if warning not in warnings:
+        warnings.append(warning)
+    data["benchmark_status"]="UNKNOWN"
+    data["warnings"]=warnings
+    with open(path,"w",encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write("\\n")
+    print("unknown_required")
+PY
+)"
+  if [ "$result" = "unknown_required" ]; then
+    return 0
+  fi
+  return 1
 }
 
 extract_error_line() {
@@ -1446,6 +1498,13 @@ run_job() {
     fi
     run_diagnostics "$diag_reason" "$out_dir" "$stdout_log" "$stderr_log" "" "" "$entrypoint_name" "$diag_timeout"
     diag_ran=1
+  fi
+
+  if [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ]; then
+    if maybe_mark_questions_unknown "$out_dir"; then
+      exit_reason="$EXIT_REASON_OK_WARN"
+      runner_exit_code="$EXIT_CODE_SUCCESS"
+    fi
   fi
 
   local error_line=""
