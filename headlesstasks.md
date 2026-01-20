@@ -212,3 +212,13 @@ Format:
 - H-SX07 Tech diffusion MVP. Scenario: `$TRI_STATE_DIR/scenarios/space4x_tech_diffusion_micro.json`. Metric: diffusion reach. Target: >= 50% nodes within 600 ticks. Status: pending.
 - H-SX08 Situation phase progression. Scenario: `$TRI_STATE_DIR/scenarios/space4x_situation_brownout_micro.json`. Metric: ordered phase transitions + event counts. Target: no skipped phases; events match phase. Status: pending.
 - H-SX09 Refit/repair loop MVP. Scenario: `$TRI_STATE_DIR/scenarios/space4x_refit_micro.json`. Metric: refit start -> completion + maintenance events. Target: completion <= 600 ticks; events > 0. Status: pending.
+- UTC: 2026-01-19T18:35:10Z
+- Agent: nightly-space4x
+- Project: Space4X
+- Task: H-T02 Payload stability
+- Scenario: space4x_smoke.json + scenario_space_01_perf_gate_100k.json
+- Baseline: telemetry sizes 33390176 and 2075895 bytes; truncation markers not found
+- Threshold: no truncation markers; size <= 40000000 (smoke) and <= 3000000 (perf_gate_100k)
+- Action: Ran smoke + perf_gate_100k with PUREDOTS_TELEMETRY_LEVEL=summary; checked telemetry sizes and logs
+- Result: PASS
+- Notes: perf_gate_250k/500k/1m aborted early; WSL crash during perf_gate_500k run.
