@@ -53,6 +53,14 @@ function Reset-HeadlessManifests {
     }
 }
 
+function Remove-UnityLockfile {
+    param([string]$RepoPath)
+    $lockPath = Join-Path $RepoPath "Temp\\UnityLockfile"
+    if (Test-Path $lockPath) {
+        Remove-Item -Force $lockPath
+    }
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -472,6 +480,7 @@ if ($LASTEXITCODE -ne 0) {
 try {
     $puredotsPackage = Ensure-PureDotsLink -RepoName $repoName -WorktreePath $worktreePath -Root $Root
     Reset-HeadlessManifests -RepoPath $worktreePath
+    Remove-UnityLockfile -RepoPath $worktreePath
 }
 catch {
     $lines = @(
