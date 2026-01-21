@@ -16,6 +16,43 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Ensure-PureDotsLink {
+    param(
+        [string]$RepoName,
+        [string]$WorktreePath,
+        [string]$Root
+    )
+    if ($RepoName -ne "space4x" -and $RepoName -ne "godgame") { return $null }
+    $target = Join-Path $Root "puredots"
+    if (-not (Test-Path $target)) {
+        throw "PureDOTS repo missing: $target"
+    }
+    $worktreeParent = Split-Path $WorktreePath -Parent
+    $linkPath = Join-Path $worktreeParent "puredots"
+    if (-not (Test-Path $linkPath)) {
+        New-Item -ItemType Junction -Path $linkPath -Target $target | Out-Null
+    }
+    $packageJson = Join-Path $linkPath "Packages\\com.moni.puredots\\package.json"
+    if (-not (Test-Path $packageJson)) {
+        throw "PureDOTS package.json missing at $packageJson"
+    }
+    return $packageJson
+}
+
+function Reset-HeadlessManifests {
+    param([string]$RepoPath)
+    $paths = @(
+        "Packages\\manifest.headless.json",
+        "Packages\\packages-lock.headless.json"
+    )
+    foreach ($relPath in $paths) {
+        $fullPath = Join-Path $RepoPath $relPath
+        if (Test-Path $fullPath) {
+            & git -C $RepoPath checkout -- $relPath 2>$null
+        }
+    }
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -430,6 +467,47 @@ else {
 }
 if ($LASTEXITCODE -ne 0) {
     throw "git worktree add failed for $worktreePath"
+}
+
+try {
+    $puredotsPackage = Ensure-PureDotsLink -RepoName $repoName -WorktreePath $worktreePath -Root $Root
+    Reset-HeadlessManifests -RepoPath $worktreePath
+}
+catch {
+    $lines = @(
+        "# EngineerTick v1",
+        "",
+        "* goal_id: $goalId",
+        "* repo: $repoName",
+        "* task: $($goal.task)",
+        "* base_ref: $effectiveBaseRef",
+        "* branch: $branchName (not pushed)",
+        "* bootstrap: FAIL",
+        "* bootstrap_error: $($_.Exception.Message)",
+        ""
+    )
+    Write-Report -Path $reportPath -Lines $lines
+    exit 1
+}
+
+$preProbeStatus = & git -C $worktreePath status --porcelain
+if ($preProbeStatus) {
+    $lines = @(
+        "# EngineerTick v1",
+        "",
+        "* goal_id: $goalId",
+        "* repo: $repoName",
+        "* task: $($goal.task)",
+        "* base_ref: $effectiveBaseRef",
+        "* branch: $branchName (not pushed)",
+        "* bootstrap: FAIL",
+        "* bootstrap_error: worktree dirty before probe",
+        "* pre_probe_status:",
+        $preProbeStatus,
+        ""
+    )
+    Write-Report -Path $reportPath -Lines $lines
+    exit 1
 }
 
 $shortTag = Apply-GoalPatch -Task $goal.task -RepoPath $worktreePath

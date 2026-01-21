@@ -4,3 +4,7 @@ nightly_summary.json
 *.log
 *.tmp
 .DS_Store
+
+# HeadlessBuildSupervisor build outputs
+HeadlessBuildSupervisor/bin/
+HeadlessBuildSupervisor/obj/
