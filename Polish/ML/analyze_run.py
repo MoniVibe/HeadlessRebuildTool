@@ -155,6 +155,40 @@ def gather_telemetry(out_dir):
     return entries, bytes_total, format_hint
 
 
+def compute_telemetry_summary(out_dir, top_limit=5):
+    summary = {"event_total": 0, "top_event_types": []}
+    path = os.path.join(out_dir, "telemetry.ndjson")
+    if not os.path.isfile(path):
+        summary["source"] = "missing"
+        return summary
+
+    counts = {}
+    total = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            total += 1
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                event_type = obj.get("type") or obj.get("event") or obj.get("name") or obj.get("event_type")
+            else:
+                event_type = None
+            if event_type is None:
+                event_type = "unknown"
+            counts[str(event_type)] = counts.get(str(event_type), 0) + 1
+
+    top = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:top_limit]
+    summary["event_total"] = total
+    summary["top_event_types"] = [{"type": key, "count": value} for key, value in top]
+    summary["source"] = "out/telemetry.ndjson"
+    return summary
+
+
 def percentile(values, p):
     if not values:
         return None
@@ -326,6 +360,7 @@ def main():
         failing_invariants = collect_failing_invariants(inv)
 
     telemetry_files, telemetry_bytes, telemetry_format = gather_telemetry(out_dir)
+    telemetry_summary = compute_telemetry_summary(out_dir)
     perf_summary = parse_perf_telemetry(out_dir)
 
     artifact_paths = meta.get("artifact_paths")
@@ -357,6 +392,7 @@ def main():
             "bytes_total": int(telemetry_bytes),
             "format_hint": telemetry_format,
         },
+        "telemetry_summary": telemetry_summary,
         "perf": perf_summary,
         "artifacts_present": artifacts_present,
     }

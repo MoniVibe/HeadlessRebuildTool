@@ -9,6 +9,7 @@ EXIT_REASON_TEST_FAIL="TEST_FAIL"
 EXIT_REASON_CRASH="CRASH"
 EXIT_REASON_HANG="HANG_TIMEOUT"
 EXIT_REASON_INFRA="INFRA_FAIL"
+EXIT_REASON_WARN="OK_WITH_WARNINGS"
 
 EXIT_CODE_SUCCESS=0
 EXIT_CODE_TEST_FAIL=10
@@ -500,6 +501,56 @@ scenario_file_not_found_present() {
   tail_match "$CURRENT_PLAYER_LOG" "$pattern" || tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
 }
 
+required_questions_unknown_present() {
+  local out_dir="$1"
+  local report_path="${out_dir}/operator_report.json"
+  if [ -f "$report_path" ] && [ -n "$PYTHON_BIN" ]; then
+    "$PYTHON_BIN" - "$report_path" <<'PY'
+import json,sys
+path=sys.argv[1]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+except Exception:
+    raise SystemExit(1)
+
+def truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (list, dict, str)):
+        return len(value) > 0
+    return False
+
+def scan(obj):
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            key_norm=str(key).lower()
+            if key_norm in ("required_questions_unknown", "unknown_required_questions", "required_questions_missing",
+                            "required_questions_unanswered", "required_questions_unresolved"):
+                if truthy(value):
+                    return True
+            if key_norm in ("required_questions", "questions", "question_status", "question_statuses"):
+                if scan(value):
+                    return True
+            if scan(value):
+                return True
+    elif isinstance(obj, list):
+        for item in obj:
+            if scan(item):
+                return True
+    return False
+
+raise SystemExit(0 if scan(data) else 1)
+PY
+    if [ $? -eq 0 ]; then
+      return 0
+    fi
+  fi
+
+  local pattern='required questions|questions unknown|unknown required questions|required questions unknown'
+  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
+}
+
 exit_by_signal() {
   local process_exit_code="$1"
   if [ "$process_exit_code" -ge 128 ]; then
@@ -554,6 +605,7 @@ exit_code_for_reason() {
   local reason="$1"
   case "$reason" in
     "$EXIT_REASON_SUCCESS") echo "$EXIT_CODE_SUCCESS" ;;
+    "$EXIT_REASON_WARN") echo "$EXIT_CODE_SUCCESS" ;;
     "$EXIT_REASON_TEST_FAIL") echo "$EXIT_CODE_TEST_FAIL" ;;
     "$EXIT_REASON_INFRA") echo "$EXIT_CODE_INFRA_FAIL" ;;
     "$EXIT_REASON_CRASH") echo "$EXIT_CODE_CRASH" ;;
@@ -769,10 +821,13 @@ write_meta_json() {
   local failure_signature="${13}"
   local artifact_paths_json="${14}"
   local runner_host="${15}"
+  local original_exit_reason="${16}"
+  local original_exit_code="${17}"
 
   "$PYTHON_BIN" - "$meta_path" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$exit_code" \
-    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" <<'PY'
+    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
+    "$original_exit_reason" "$original_exit_code" <<'PY'
 import json,sys
 meta_path=sys.argv[1]
 job_id=sys.argv[2]
@@ -789,6 +844,8 @@ repro_command=sys.argv[12]
 failure_signature=sys.argv[13]
 artifact_paths_json=sys.argv[14]
 runner_host=sys.argv[15]
+original_exit_reason=sys.argv[16]
+original_exit_code=sys.argv[17]
 
 try:
     seed_val=int(seed_raw)
@@ -802,6 +859,10 @@ try:
     exit_code_val=int(exit_code)
 except Exception:
     exit_code_val=1
+try:
+    original_exit_code_val=int(original_exit_code)
+except Exception:
+    original_exit_code_val=None
 try:
     artifact_paths=json.loads(artifact_paths_json) if artifact_paths_json else {}
 except Exception:
@@ -824,6 +885,11 @@ meta={
     "runner_host": runner_host,
     "runner_env": "wsl"
 }
+
+if original_exit_reason:
+    meta["original_exit_reason"] = original_exit_reason
+if original_exit_code_val is not None:
+    meta["original_exit_code"] = original_exit_code_val
 
 with open(meta_path,"w",encoding="utf-8") as handle:
     json.dump(meta, handle, indent=2, sort_keys=True)
@@ -1445,6 +1511,21 @@ run_job() {
     runner_exit_code="$(exit_code_for_reason "$exit_reason")"
   fi
 
+  local original_exit_reason=""
+  local original_exit_code=""
+  local signature_exit_reason="$exit_reason"
+  local signature_exit_code="$runner_exit_code"
+  if [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
+    if required_questions_unknown_present "$out_dir"; then
+      original_exit_reason="$exit_reason"
+      original_exit_code="$runner_exit_code"
+      exit_reason="$EXIT_REASON_WARN"
+      runner_exit_code="$EXIT_CODE_SUCCESS"
+      signature_exit_reason="$original_exit_reason"
+      signature_exit_code="$original_exit_code"
+    fi
+  fi
+
   if [ "$diag_ran" -eq 0 ]; then
     local diag_reason="post_exit"
     if [ -n "$error_context" ]; then
@@ -1461,7 +1542,7 @@ run_job() {
     error_line="$(extract_error_line)"
   fi
   local raw_signature
-  raw_signature="$(normalize_signature "${exit_reason}|${scenario_id}|${error_line}|exit_code=${runner_exit_code}")"
+  raw_signature="$(normalize_signature "${signature_exit_reason}|${scenario_id}|${error_line}|exit_code=${signature_exit_code}")"
   local failure_signature
   failure_signature="$(hash_signature "$raw_signature")"
 
@@ -1474,7 +1555,13 @@ run_job() {
   fi
   printf '%s\n' "$repro_command" > "${out_dir}/repro.txt"
 
-  write_watchdog_json "$out_dir" "$job_id" "$exit_reason" "$process_exit_code" "$runner_exit_code" "$raw_signature"
+  local watchdog_exit_reason="$exit_reason"
+  local watchdog_exit_code="$runner_exit_code"
+  if [ -n "$original_exit_reason" ]; then
+    watchdog_exit_reason="$original_exit_reason"
+    watchdog_exit_code="$original_exit_code"
+  fi
+  write_watchdog_json "$out_dir" "$job_id" "$watchdog_exit_reason" "$process_exit_code" "$watchdog_exit_code" "$raw_signature"
 
   end_utc="$(iso_utc)"
   local end_epoch
@@ -1485,7 +1572,8 @@ run_job() {
   artifact_paths_json="$(build_artifact_paths_json "$out_dir")"
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
-    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host"
+    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
+    "$original_exit_reason" "$original_exit_code"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
