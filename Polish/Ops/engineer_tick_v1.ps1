@@ -16,6 +16,18 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Convert-ToWslPath {
+    param([string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
+    if ($match.Success) {
+        $drive = $match.Groups[1].Value.ToLowerInvariant()
+        $rest = $match.Groups[2].Value -replace '\\', '/'
+        return "/mnt/$drive/$rest"
+    }
+    return ($full -replace '\\', '/')
+}
+
 function Read-JsonFileSafe {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return $null }
@@ -67,6 +79,150 @@ function Normalize-GoalSpecForJob {
         return $normalized
     }
     return $normalized.TrimStart("./")
+}
+
+function Read-LogTail {
+    param(
+        [string]$Path,
+        [int]$TailLines = 200
+    )
+    if (-not (Test-Path $Path)) { return @() }
+    try {
+        return Get-Content -Path $Path -Tail $TailLines
+    }
+    catch {
+        return @()
+    }
+}
+
+function Find-PrimaryErrorLine {
+    param([string[]]$Lines)
+    if (-not $Lines) { return $null }
+    $patterns = @(
+        'error CS\d+',
+        'Unhandled Exception',
+        'Exception',
+        'Build failed',
+        'error:'
+    )
+    foreach ($line in $Lines) {
+        foreach ($pattern in $patterns) {
+            if ($line -match $pattern) {
+                return $line
+            }
+        }
+    }
+    return $null
+}
+
+function Find-LatestArtifactAfter {
+    param(
+        [string]$ArtifactsDir,
+        [DateTime]$StartUtc
+    )
+    if (-not (Test-Path $ArtifactsDir)) { return $null }
+    return Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File |
+        Where-Object { $_.LastWriteTimeUtc -ge $StartUtc } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+}
+
+function Read-JsonFileFromPath {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        return (Get-Content -Raw -Path $Path | ConvertFrom-Json)
+    }
+    catch {
+        return $null
+    }
+}
+
+function Find-LatestGoodArtifact {
+    param(
+        [string]$ArtifactsDir,
+        [string]$RepoName
+    )
+    if (-not (Test-Path $ArtifactsDir)) { return $null }
+    $needle = if ($RepoName -eq "godgame") { "Godgame_Headless" } else { "Space4X_Headless" }
+    $candidates = Get-ChildItem -Path $ArtifactsDir -Filter "artifact_*.zip" -File |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 40
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    foreach ($candidate in $candidates) {
+        $archive = $null
+        try {
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($candidate.FullName)
+            $manifestEntry = $archive.GetEntry("build_manifest.json")
+            if (-not $manifestEntry) { continue }
+            $reader = New-Object System.IO.StreamReader($manifestEntry.Open())
+            $manifestText = $reader.ReadToEnd()
+            $reader.Dispose()
+            $manifest = $manifestText | ConvertFrom-Json
+            if ($manifest.entrypoint -notlike "*$needle*") { continue }
+            $outcomeEntry = $archive.GetEntry("logs/build_outcome.json")
+            if ($outcomeEntry) {
+                $reader = New-Object System.IO.StreamReader($outcomeEntry.Open())
+                $outcomeText = $reader.ReadToEnd()
+                $reader.Dispose()
+                $outcome = $outcomeText | ConvertFrom-Json
+                if ($outcome.result -ne "Succeeded") { continue }
+            }
+            return [ordered]@{
+                path = $candidate.FullName
+                build_id = $manifest.build_id
+                commit = $manifest.commit
+            }
+        }
+        catch {
+        }
+        finally {
+            if ($archive) { $archive.Dispose() }
+        }
+    }
+    return $null
+}
+
+function Enqueue-FallbackValidation {
+    param(
+        [string]$ArtifactsDir,
+        [string]$RepoName,
+        [string]$ScenarioId,
+        [string]$ScenarioRel,
+        [string]$GoalId,
+        [string]$GoalSpec,
+        [string]$QueueRoot,
+        [int]$Seed
+    )
+    $artifact = Find-LatestGoodArtifact -ArtifactsDir $ArtifactsDir -RepoName $RepoName
+    if (-not $artifact) { return $null }
+    $jobsDir = Join-Path $QueueRoot "jobs"
+    Ensure-Directory $jobsDir
+    $jobId = "{0}_{1}_{2}" -f $artifact.build_id, $ScenarioId, $Seed
+    $job = [ordered]@{
+        job_id = $jobId
+        commit = $artifact.commit
+        build_id = $artifact.build_id
+        scenario_id = $ScenarioId
+        scenario_rel = $ScenarioRel
+        seed = [int]$Seed
+        timeout_sec = 90
+        args = @("--telemetryEnabled", "1")
+        param_overrides = [ordered]@{}
+        feature_flags = [ordered]@{}
+        artifact_uri = (Convert-ToWslPath $artifact.path)
+        created_utc = (Get-Date).ToUniversalTime().ToString("o")
+        repo_root = (Convert-ToWslPath (Join-Path $Root $RepoName))
+        validation_mode = "fallback_latest_good_artifact"
+    }
+    if ($GoalId) { $job.goal_id = $GoalId }
+    if ($GoalSpec) { $job.goal_spec = $GoalSpec }
+    $jobJson = $job | ConvertTo-Json -Depth 6
+    $tmp = Join-Path $jobsDir (".tmp_{0}.json" -f $jobId)
+    $path = Join-Path $jobsDir ("{0}.json" -f $jobId)
+    Set-Content -Path $tmp -Value $jobJson -Encoding ascii
+    Move-Item -Path $tmp -Destination $path -Force
+    return $path
 }
 
 function Insert-AfterPattern {
@@ -339,6 +495,7 @@ if (-not (Test-Path $pipelineSmoke)) {
 $seedA = if ($repoName -eq "godgame") { 42 } else { 7 }
 $seedB = if ($repoName -eq "godgame") { 43 } else { 11 }
 
+$buildStartUtc = (Get-Date).ToUniversalTime()
 $smokeOutput = & $pipelineSmoke `
     -Title $repoName `
     -UnityExe $unityPath `
@@ -349,6 +506,96 @@ $smokeOutput = & $pipelineSmoke `
     -Seed $seedA `
     -GoalId $goalId `
     -GoalSpec $goalSpecJob 2>&1
+
+$smokeExit = $LASTEXITCODE
+$buildFailLine = $smokeOutput | Where-Object { $_ -like "BUILD_FAIL*" } | Select-Object -First 1
+$artifactPath = ""
+$artifactLine = $smokeOutput | Where-Object { $_ -like "artifact=*" } | Select-Object -Last 1
+if ($artifactLine) { $artifactPath = ($artifactLine -replace '^artifact=', '').Trim() }
+if (-not $artifactPath) {
+    $artifactCandidate = Find-LatestArtifactAfter -ArtifactsDir (Join-Path $QueueRoot "artifacts") -StartUtc $buildStartUtc
+    if ($artifactCandidate) { $artifactPath = $artifactCandidate.FullName }
+}
+
+if ($smokeExit -ne 0 -or $buildFailLine) {
+    $inspectRoot = Join-Path $reportsDir "_inspect"
+    Ensure-Directory $inspectRoot
+    $inspectDir = Join-Path $inspectRoot ("buildfail_{0}" -f $timestamp)
+    Ensure-Directory $inspectDir
+
+    $primaryErrorPath = Join-Path $reportsDir ("primary_error_{0}.txt" -f $timestamp)
+    $headline = if ($buildFailLine) { $buildFailLine } else { "BUILD_FAIL" }
+    $logPath = ""
+    $outcomeSummary = ""
+
+    if ($artifactPath -and (Test-Path $artifactPath)) {
+        Expand-Archive -Path $artifactPath -DestinationPath $inspectDir -Force
+        $outcomeFile = Get-ChildItem -Path $inspectDir -Recurse -Filter "build_outcome.json" | Select-Object -First 1
+        if ($outcomeFile) {
+            $outcome = Read-JsonFileFromPath -Path $outcomeFile.FullName
+            if ($outcome) {
+                $outcomeSummary = "result=$($outcome.result) message=$($outcome.message)"
+                if ($outcome.message) { $headline = $outcome.message }
+            }
+        }
+        $logCandidate = Get-ChildItem -Path $inspectDir -Recurse -Filter "unity_build_tail.txt" | Select-Object -First 1
+        if (-not $logCandidate) {
+            $logCandidate = Get-ChildItem -Path $inspectDir -Recurse -Filter "Editor.log" | Select-Object -First 1
+        }
+        if (-not $logCandidate) {
+            $logCandidate = Get-ChildItem -Path $inspectDir -Recurse -Filter "*Editor.log" | Select-Object -First 1
+        }
+        if ($logCandidate) {
+            $logPath = $logCandidate.FullName
+            $tailLines = Read-LogTail -Path $logPath -TailLines 240
+            $primaryLine = Find-PrimaryErrorLine -Lines $tailLines
+            if ($primaryLine) { $headline = $primaryLine }
+        }
+    }
+    $primaryLines = @(
+        "headline=$headline",
+        "artifact_path=$artifactPath",
+        "inspect_dir=$inspectDir",
+        "log_path=$logPath",
+        "build_outcome=$outcomeSummary"
+    )
+    Set-Content -Path $primaryErrorPath -Value $primaryLines -Encoding ascii
+
+    $fallbackJob = $null
+    if (-not $DryRun) {
+        $fallbackJob = Enqueue-FallbackValidation `
+            -ArtifactsDir (Join-Path $QueueRoot "artifacts") `
+            -RepoName $repoName `
+            -ScenarioId $goal.scenario_id `
+            -ScenarioRel $goal.scenario_rel `
+            -GoalId $goalId `
+            -GoalSpec $goalSpecJob `
+            -QueueRoot $QueueRoot `
+            -Seed $seedA
+    }
+
+    $lines = @(
+        "# EngineerTick v1",
+        "",
+        "* goal_id: $goalId",
+        "* repo: $repoName",
+        "* task: $($goal.task)",
+        "* base_ref: $effectiveBaseRef",
+        "* branch: $branchName",
+        "* commit: $commitSha",
+        "* probe: PASS",
+        "* probe_log: $($probe.log_path)",
+        "* build: FAIL",
+        "* build_fail_headline: $headline",
+        "* build_fail_artifact: $artifactPath",
+        "* build_fail_inspect_dir: $inspectDir",
+        "* primary_error_file: $primaryErrorPath",
+        "* fallback_job: $fallbackJob",
+        ""
+    )
+    Write-Report -Path $reportPath -Lines $lines
+    exit 1
+}
 
 $jobPath = ""
 $buildId = ""
