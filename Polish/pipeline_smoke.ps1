@@ -412,6 +412,7 @@ if (-not $preflight.ok) {
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
+$repoRootWsl = Convert-ToWslPath $projectPath
 Write-Host ("build_id={0} commit={1}" -f $buildId, $commitFull)
 Write-Host ("artifact={0}" -f $artifactZip)
 
@@ -439,6 +440,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
         feature_flags = [ordered]@{}
         artifact_uri = $artifactUri
         created_utc = $createdUtc
+        repo_root = $repoRootWsl
     }
     if ($scenarioRelValue) {
         $job.scenario_rel = $scenarioRelValue
