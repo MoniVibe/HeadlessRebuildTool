@@ -43,7 +43,8 @@ usage() {
 Usage: wsl_runner.sh --queue <path> [--workdir <path>] [--once|--daemon]
                     [--heartbeat-interval <sec>] [--diag-timeout <sec>]
                     [--print-summary] [--requeue-stale-leases --ttl-sec <sec>]
-                    [--emit-triage-on-fail] [--reports-dir <path>] [--telemetry-max-bytes <bytes>] [--self-test]
+                    [--emit-triage-on-fail] [--reports-dir <path>] [--telemetry-max-bytes <bytes>]
+                    [--status-interval <sec>] [--self-test]
 
 Options:
   --queue <path>              Queue root (required unless --self-test).
@@ -56,6 +57,7 @@ Options:
   --emit-triage-on-fail        Emit triage summary JSON on failures (default).
   --reports-dir <path>         Triage reports directory (default: /mnt/c/polish/queue/reports).
   --telemetry-max-bytes <bytes> Telemetry output cap in bytes (default: 52428800).
+  --status-interval <sec>      Emit a periodic idle status line while daemonized (default: 0 = off).
   --requeue-stale-leases      Requeue stale leases (helper mode).
   --ttl-sec <sec>             TTL seconds for stale leases (default: 600).
   --self-test                 Run local self-test scenarios.
@@ -1760,9 +1762,25 @@ daemon_loop() {
   local emit_triage_on_fail="$6"
   local reports_dir="$7"
   local telemetry_max_bytes="$8"
+  local status_interval="$9"
+  local last_status_epoch=0
+  local now_epoch=0
   while true; do
     if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"; then
+      if [ "${status_interval:-0}" -gt 0 ]; then
+        now_epoch="$(date +%s)"
+        if [ $((now_epoch - last_status_epoch)) -ge "$status_interval" ]; then
+          log "status idle queue=${queue_dir}"
+          last_status_epoch="$now_epoch"
+        fi
+      fi
       sleep 2
+    elif [ "${status_interval:-0}" -gt 0 ]; then
+      now_epoch="$(date +%s)"
+      if [ $((now_epoch - last_status_epoch)) -ge "$status_interval" ]; then
+        log "status job_complete queue=${queue_dir}"
+        last_status_epoch="$now_epoch"
+      fi
     fi
   done
 }
@@ -1866,6 +1884,7 @@ main() {
   local run_self_test=0
   local requeue_mode=0
   local ttl_sec=600
+  local status_interval=0
   local emit_triage_on_fail=1
   local reports_dir="$DEFAULT_REPORTS_DIR"
   local telemetry_max_bytes="$DEFAULT_TELEMETRY_MAX_BYTES"
@@ -1910,6 +1929,10 @@ main() {
         ;;
       --telemetry-max-bytes)
         telemetry_max_bytes="$2"
+        shift 2
+        ;;
+      --status-interval)
+        status_interval="$2"
         shift 2
         ;;
       --requeue-stale-leases)
@@ -1985,7 +2008,7 @@ main() {
   mkdir -p "$workdir"
 
   if [ "$mode" = "daemon" ]; then
-    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
+    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" "$status_interval"
   else
     run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
   fi
