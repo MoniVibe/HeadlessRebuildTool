@@ -33,6 +33,7 @@ TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
 DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
 DEFAULT_TELEMETRY_MAX_BYTES=52428800
+SCENARIO_MAP_FILE="${TOOLS_ROOT}/Polish/WSL/scenario_map.json"
 log() {
   echo "wsl_runner: $*" >&2
 }
@@ -192,6 +193,88 @@ resolve_artifact_uri() {
   fi
 
   echo "$uri"
+}
+
+is_absolute_path() {
+  local value="$1"
+  if [[ "$value" == /* ]]; then
+    return 0
+  fi
+  if [[ "$value" =~ ^[A-Za-z]:[\\/].* ]]; then
+    return 0
+  fi
+  if [[ "$value" == \\\\* || "$value" == //wsl$/* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+normalize_rel_path() {
+  local value="$1"
+  value="${value//\\//}"
+  value="${value#./}"
+  echo "$value"
+}
+
+resolve_repo_root() {
+  local job_root="$1"
+  local candidate=""
+  for candidate in "$job_root" "${TRI_REPO_ROOT:-}" "${TRI_ROOT:-}"; do
+    if [ -n "$candidate" ] && [ -d "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  if [ -d "/mnt/c/dev/unity_clean" ]; then
+    echo "/mnt/c/dev/unity_clean"
+    return 0
+  fi
+  if [ -d "/mnt/c/dev/Tri" ]; then
+    echo "/mnt/c/dev/Tri"
+    return 0
+  fi
+  echo ""
+}
+
+map_scenario_id_to_rel() {
+  local scenario_id="$1"
+  if [ -z "$scenario_id" ] || [ ! -f "$SCENARIO_MAP_FILE" ]; then
+    echo ""
+    return 0
+  fi
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    jq -r --arg id "$scenario_id" '.[$id] // empty' "$SCENARIO_MAP_FILE" 2>/dev/null || true
+    return 0
+  fi
+  "$PYTHON_BIN" - "$SCENARIO_MAP_FILE" "$scenario_id" <<'PY'
+import json,sys
+path=sys.argv[1]
+key=sys.argv[2]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+except Exception:
+    data={}
+value=data.get(key,"")
+print(value if isinstance(value,str) else "")
+PY
+}
+
+resolve_scenario_path() {
+  local scenario_rel="$1"
+  local repo_root="$2"
+  local normalized
+  normalized="$(normalize_rel_path "$scenario_rel")"
+  if is_absolute_path "$normalized"; then
+    resolve_artifact_uri "$normalized"
+    return 0
+  fi
+  if [ -z "$repo_root" ]; then
+    echo "$normalized"
+    return 0
+  fi
+  repo_root="${repo_root%/}"
+  echo "${repo_root}/${normalized}"
 }
 
 json_valid() {
@@ -1299,6 +1382,8 @@ run_job() {
   local commit=""
   local build_id=""
   local scenario_id=""
+  local scenario_rel=""
+  local repo_root=""
   local seed=""
   local timeout_sec=""
   local artifact_uri=""
@@ -1317,6 +1402,8 @@ run_job() {
     commit="$(json_get_string "$lease_path" "commit")"
     build_id="$(json_get_string "$lease_path" "build_id")"
     scenario_id="$(json_get_string "$lease_path" "scenario_id")"
+    scenario_rel="$(json_get_string "$lease_path" "scenario_rel")"
+    repo_root="$(json_get_string "$lease_path" "repo_root")"
     seed="$(json_get_string "$lease_path" "seed")"
     timeout_sec="$(json_get_string "$lease_path" "timeout_sec")"
     artifact_uri="$(json_get_string "$lease_path" "artifact_uri")"
@@ -1324,8 +1411,16 @@ run_job() {
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
   fi
 
-  if [ -z "$error_context" ] && [ -z "$scenario_id" ]; then
-    error_context="scenario_id_missing"
+  if [ -z "$scenario_rel" ] && [ -n "$scenario_id" ]; then
+    scenario_rel="$(map_scenario_id_to_rel "$scenario_id")"
+  fi
+  if [ -n "$scenario_rel" ]; then
+    scenario_rel="$(normalize_rel_path "$scenario_rel")"
+  fi
+  repo_root="$(resolve_repo_root "$repo_root")"
+
+  if [ -z "$error_context" ] && [ -z "$scenario_id" ] && [ -z "$scenario_rel" ]; then
+    error_context="scenario_missing"
   fi
   if [ -z "$error_context" ] && [ -z "$seed" ]; then
     error_context="seed_missing"
@@ -1410,7 +1505,7 @@ run_job() {
     fi
   fi
 
-  if [ -z "$error_context" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
+  if [ -z "$error_context" ] && [ -n "$scenario_id" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
     if ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
       error_context="scenario_not_supported:${scenario_id}"
     fi
@@ -1445,9 +1540,24 @@ run_job() {
       perf_telemetry_env="${out_dir}/perf_telemetry.ndjson"
     fi
 
+    local scenario_arg_value=""
+    if [ -n "$scenario_rel" ]; then
+      scenario_arg_value="$(resolve_scenario_path "$scenario_rel" "$repo_root")"
+      if ! is_absolute_path "$scenario_arg_value" && [ -z "$repo_root" ]; then
+        error_context="repo_root_missing"
+      fi
+    elif [ -n "$scenario_id" ]; then
+      scenario_arg_value="$scenario_id"
+    fi
+
+    if [ -n "$error_context" ]; then
+      :
+    else
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
-      final_args+=("--scenario" "$scenario_id")
+      if [ -n "$scenario_arg_value" ]; then
+        final_args+=("--scenario" "$scenario_arg_value")
+      fi
     fi
     if ! args_include_flag "--seed" "${final_args[@]}"; then
       final_args+=("--seed" "$seed")
@@ -1464,6 +1574,7 @@ run_job() {
     fi
 
     repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${final_args[@]}")"
+    fi
   fi
 
   local diag_ran=0
