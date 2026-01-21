@@ -1,0 +1,30 @@
+{
+  "goal_id": "space4x_ftl_01",
+  "goal_version": "v0",
+  "description": "Detect a basic FTL jump signal in Space4x.",
+  "proof": {
+    "telemetry_event_prefixes": [
+      "goal.ftl.",
+      "ftl."
+    ],
+    "log_regex": [
+      "FTL_?(JUMP|COMPLETE|ENGAGE)",
+      "ftl\\s+jump"
+    ],
+    "operator_contains": [
+      "ftl",
+      "jump"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "telemetry",
+      "log",
+      "operator"
+    ]
+  },
+  "delta": {
+    "telemetry_event_prefix": "goal.ftl.",
+    "min_count": 2
+  }
+}

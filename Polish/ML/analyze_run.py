@@ -4,6 +4,8 @@ import glob
 import json
 import math
 import os
+import subprocess
+import sys
 
 
 def load_json(path):
@@ -329,6 +331,48 @@ def compute_score(exit_reason, runtime_sec, runtime_budget_sec, telemetry_bytes,
     return total_loss, breakdown, grade
 
 
+def resolve_goal_spec_path(script_dir, goal_spec_value, goal_id):
+    repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+    if goal_spec_value:
+        candidate = goal_spec_value
+        if not os.path.isabs(candidate):
+            candidate = os.path.join(repo_root, candidate)
+        if os.path.isfile(candidate):
+            return candidate
+    if goal_id:
+        candidate = os.path.join(repo_root, "Goals", "specs", f"{goal_id}.json")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def maybe_score_goal(meta, run_summary, out_dir):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    score_goal_path = os.path.abspath(os.path.join(script_dir, "..", "Goals", "score_goal.py"))
+    if not os.path.isfile(score_goal_path):
+        return None
+
+    goal_spec_value = meta.get("goal_spec") or run_summary.get("goal_spec")
+    goal_id = meta.get("goal_id") or run_summary.get("goal_id")
+    goal_spec_path = resolve_goal_spec_path(script_dir, goal_spec_value, goal_id)
+    if not goal_spec_path:
+        return None
+
+    result_root = os.path.abspath(os.path.join(out_dir, ".."))
+    try:
+        subprocess.run(
+            [sys.executable, score_goal_path, "--result_root", result_root, "--goal_spec", goal_spec_path],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+
+    report_path = os.path.join(out_dir, "goal_report.json")
+    return load_json(report_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate ML-friendly run summary and score.")
     parser.add_argument("--meta", required=True)
@@ -419,7 +463,16 @@ def main():
         "grade": grade,
     }
 
-    write_json(os.path.join(out_dir, "run_summary.json"), run_summary)
+    run_summary_path = os.path.join(out_dir, "run_summary.json")
+    write_json(run_summary_path, run_summary)
+
+    goal_report = maybe_score_goal(meta, run_summary, out_dir)
+    if isinstance(goal_report, dict):
+        run_summary["goal_id"] = goal_report.get("goal_id")
+        run_summary["goal_version"] = goal_report.get("goal_version")
+        run_summary["goal_status"] = goal_report.get("goal_status")
+        run_summary["goal_score"] = goal_report.get("goal_score")
+        write_json(run_summary_path, run_summary)
     write_json(os.path.join(out_dir, "polish_score_v0.json"), polish_score)
 
 

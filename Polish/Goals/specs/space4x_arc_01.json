@@ -1,0 +1,30 @@
+{
+  "goal_id": "space4x_arc_01",
+  "goal_version": "v0",
+  "description": "Detect an arc/navigation maneuver signal in Space4x.",
+  "proof": {
+    "telemetry_event_prefixes": [
+      "goal.arc.",
+      "nav.arc."
+    ],
+    "log_regex": [
+      "ARC_?(START|COMPLETE|ENTER|EXIT)",
+      "orbit\\s+arc"
+    ],
+    "operator_contains": [
+      "arc",
+      "orbit"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "telemetry",
+      "log",
+      "operator"
+    ]
+  },
+  "delta": {
+    "telemetry_event_prefix": "goal.arc.",
+    "min_count": 2
+  }
+}
