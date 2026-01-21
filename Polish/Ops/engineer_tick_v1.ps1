@@ -3,6 +3,7 @@ param(
     [string]$Root = "C:\\Dev\\unity_clean",
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$UnityExe,
+    [string]$BaseRef,
     [switch]$DryRun
 )
 
@@ -240,6 +241,15 @@ $repoName = [string]$goal.repo
 if ([string]::IsNullOrWhiteSpace($repoName)) {
     throw "Goal missing repo field."
 }
+$todayStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd")
+$effectiveBaseRef = ""
+if ($PSBoundParameters.ContainsKey("BaseRef") -and -not [string]::IsNullOrWhiteSpace($BaseRef)) {
+    $effectiveBaseRef = $BaseRef
+}
+elseif ($repoName -eq "space4x") {
+    $effectiveBaseRef = "nightly/base_space4x_$todayStamp"
+}
+
 $repoPath = Join-Path $Root $repoName
 if (-not (Test-Path $repoPath)) {
     throw "Repo path missing: $repoPath"
@@ -256,7 +266,12 @@ if ([string]::IsNullOrWhiteSpace($goalIdSafe)) {
 $branchName = "wild/engv1_{0}_{1}" -f $timestamp, $goalIdSafe
 $worktreePath = Join-Path $worktreeRoot $timestamp
 
-& git -C $repoPath worktree add -b $branchName $worktreePath
+if ($effectiveBaseRef) {
+    & git -C $repoPath worktree add -b $branchName $worktreePath $effectiveBaseRef
+}
+else {
+    & git -C $repoPath worktree add -b $branchName $worktreePath
+}
 if ($LASTEXITCODE -ne 0) {
     throw "git worktree add failed for $worktreePath"
 }
@@ -272,6 +287,7 @@ if (-not $probe.success) {
         "* goal_id: $goalId",
         "* repo: $repoName",
         "* task: $($goal.task)",
+        "* base_ref: $effectiveBaseRef",
         "* branch: $branchName (not pushed)",
         "* probe: FAIL",
         "* probe_log: $($probe.log_path)",
@@ -290,6 +306,7 @@ if (-not $gitStatus) {
         "* goal_id: $goalId",
         "* repo: $repoName",
         "* task: $($goal.task)",
+        "* base_ref: $effectiveBaseRef",
         "* branch: $branchName (not pushed)",
         "* probe: PASS",
         "* note: no changes detected",
@@ -369,6 +386,7 @@ $lines = @(
     "* goal_id: $goalId",
     "* repo: $repoName",
     "* task: $($goal.task)",
+    "* base_ref: $effectiveBaseRef",
     "* branch: $branchName",
     "* commit: $commitSha",
     "* probe: PASS",
