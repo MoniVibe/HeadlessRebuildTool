@@ -123,10 +123,10 @@ function Apply-GoalPatch {
         throw "Patch target not found: $target"
     }
     $pattern = 'UpdateProgress\("run", "start", tick\)'
-    $insertText = "UnityEngine.Debug.Log(\"[Anviloop] $logToken\");"
+    $insertText = 'UnityEngine.Debug.Log("[Anviloop] ' + $logToken + '");'
     $applied = Insert-AfterPattern -Path $target -Pattern $pattern -InsertText $insertText
     if (-not $applied) {
-        $fallbackText = "UnityEngine.Debug.Log(\"[Anviloop] ${logToken}_REASSERT\");"
+        $fallbackText = 'UnityEngine.Debug.Log("[Anviloop] ' + $logToken + '_REASSERT");'
         $applied = Insert-AfterPattern -Path $target -Pattern $pattern -InsertText $fallbackText
     }
     if (-not $applied) {
