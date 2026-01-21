@@ -521,6 +521,25 @@ def truthy(value):
         return len(value) > 0
     return False
 
+def has_unknown_required_questions(obj):
+    if not isinstance(obj, dict):
+        return False
+    questions = obj.get("questions")
+    if isinstance(questions, list):
+        for item in questions:
+            if not isinstance(item, dict):
+                continue
+            if item.get("required") is True:
+                status = str(item.get("status", "")).lower()
+                if status in ("unknown", "missing"):
+                    return True
+                if item.get("unknown_reason"):
+                    return True
+    return False
+
+if has_unknown_required_questions(data):
+    raise SystemExit(0)
+
 def scan(obj):
     if isinstance(obj, dict):
         for key, value in obj.items():
