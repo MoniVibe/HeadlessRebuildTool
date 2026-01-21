@@ -4,9 +4,12 @@ param(
     [string]$Title,
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
+    [string]$ProjectPathOverride,
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$ScenarioId,
     [string]$ScenarioRel,
+    [string]$GoalId,
+    [string]$GoalSpec,
     [int]$Seed,
     [int]$TimeoutSec,
     [string[]]$Args,
@@ -46,6 +49,23 @@ function Normalize-ScenarioRel {
             return $normalized.Substring($assetsIndex)
         }
         throw "ScenarioRel must be relative or contain Assets/: $Value"
+    }
+    return $normalized.TrimStart("./")
+}
+
+function Normalize-GoalSpecPath {
+    param(
+        [string]$GoalSpecPath,
+        [string]$RepoRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($GoalSpecPath)) { return "" }
+    $normalized = $GoalSpecPath -replace '\\', '/'
+    if ($normalized -match '^[A-Za-z]:/' -or $normalized.StartsWith('/')) {
+        $root = ($RepoRoot -replace '\\', '/').TrimEnd('/')
+        if ($normalized.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $normalized.Substring($root.Length).TrimStart('/')
+        }
+        return $normalized
     }
     return $normalized.TrimStart("./")
 }
@@ -308,6 +328,10 @@ if (-not $titleDefaults) {
 }
 
 $projectPath = Join-Path $triRoot $titleDefaults.project_path
+if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
+    $projectPath = $ProjectPathOverride
+}
+$projectPath = [System.IO.Path]::GetFullPath($projectPath)
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
@@ -327,6 +351,8 @@ if (-not (Test-Path $swapScript)) {
 
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
 $scenarioRelValue = if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $ScenarioRel } else { $titleDefaults.scenario_rel }
+$goalIdValue = if ($PSBoundParameters.ContainsKey("GoalId")) { $GoalId } else { "" }
+$goalSpecValue = if ($PSBoundParameters.ContainsKey("GoalSpec")) { Normalize-GoalSpecPath -GoalSpecPath $GoalSpec -RepoRoot $triRoot } else { "" }
 $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$titleDefaults.seed }
 $timeoutValue = if ($PSBoundParameters.ContainsKey("TimeoutSec")) { $TimeoutSec } else { [int]$titleDefaults.timeout_sec }
 $argsValue = if ($PSBoundParameters.ContainsKey("Args")) { $Args } else { $titleDefaults.args }
@@ -444,6 +470,12 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     if ($scenarioRelValue) {
         $job.scenario_rel = $scenarioRelValue
+    }
+    if ($goalIdValue) {
+        $job.goal_id = $goalIdValue
+    }
+    if ($goalSpecValue) {
+        $job.goal_spec = $goalSpecValue
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6

@@ -927,11 +927,13 @@ write_meta_json() {
   local runner_host="${15}"
   local original_exit_reason="${16}"
   local original_exit_code="${17}"
+  local goal_id="${18}"
+  local goal_spec="${19}"
 
   "$PYTHON_BIN" - "$meta_path" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" <<'PY'
+    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" <<'PY'
 import json,sys
 meta_path=sys.argv[1]
 job_id=sys.argv[2]
@@ -950,6 +952,8 @@ artifact_paths_json=sys.argv[14]
 runner_host=sys.argv[15]
 original_exit_reason=sys.argv[16]
 original_exit_code=sys.argv[17]
+goal_id=sys.argv[18]
+goal_spec=sys.argv[19]
 
 try:
     seed_val=int(seed_raw)
@@ -994,6 +998,10 @@ if original_exit_reason:
     meta["original_exit_reason"] = original_exit_reason
 if original_exit_code_val is not None:
     meta["original_exit_code"] = original_exit_code_val
+if goal_id:
+    meta["goal_id"] = goal_id
+if goal_spec:
+    meta["goal_spec"] = goal_spec
 
 with open(meta_path,"w",encoding="utf-8") as handle:
     json.dump(meta, handle, indent=2, sort_keys=True)
@@ -1389,6 +1397,8 @@ run_job() {
   local seed=""
   local timeout_sec=""
   local artifact_uri=""
+  local goal_id=""
+  local goal_spec=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
 
@@ -1409,6 +1419,8 @@ run_job() {
     seed="$(json_get_string "$lease_path" "seed")"
     timeout_sec="$(json_get_string "$lease_path" "timeout_sec")"
     artifact_uri="$(json_get_string "$lease_path" "artifact_uri")"
+    goal_id="$(json_get_string "$lease_path" "goal_id")"
+    goal_spec="$(json_get_string "$lease_path" "goal_spec")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
   fi
@@ -1705,7 +1717,7 @@ run_job() {
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code"
+    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
