@@ -4,6 +4,7 @@ param(
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$UnityExe,
     [string]$BaseRef,
+    [bool]$FactoryHost = $true,
     [switch]$DryRun
 )
 
@@ -64,6 +65,38 @@ function Remove-UnityLockfile {
             Remove-Item -Force $lockPath
         }
     }
+}
+
+function Stop-UnityEditorsForFactory {
+    param([int]$MinAgeMinutes = 2)
+    $cutoff = (Get-Date).AddMinutes(-$MinAgeMinutes)
+    $killed = New-Object System.Collections.Generic.List[int]
+    $procs = Get-CimInstance Win32_Process -Filter "Name='Unity.exe' OR Name='Unity'"
+    foreach ($proc in $procs) {
+        $shouldKill = $true
+        if ($proc.CreationDate) {
+            try {
+                $started = [Management.ManagementDateTimeConverter]::ToDateTime($proc.CreationDate)
+                if ($started -gt $cutoff) {
+                    $shouldKill = $false
+                }
+            }
+            catch {
+            }
+        }
+        if ($shouldKill) {
+            try {
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+                $killed.Add([int]$proc.ProcessId)
+            }
+            catch {
+            }
+        }
+    }
+    if ($killed.Count -gt 0) {
+        Start-Sleep -Seconds 2
+    }
+    return $killed
 }
 
 function Stop-UnityForProject {
@@ -499,6 +532,7 @@ if ([string]::IsNullOrWhiteSpace($goalIdSafe)) {
 $branchName = "wild/engv1_{0}_{1}" -f $timestamp, $goalIdSafe
 $worktreePath = Join-Path $worktreeRoot $timestamp
 $killedPids = @()
+$factoryKilledPids = @()
 
 if ($effectiveBaseRef) {
     & git -C $repoPath worktree add -b $branchName $worktreePath $effectiveBaseRef
@@ -514,6 +548,10 @@ try {
     $puredotsPackage = Ensure-PureDotsLink -RepoName $repoName -WorktreePath $worktreePath -Root $Root
     Reset-HeadlessManifests -RepoPath $worktreePath
     Remove-UnityLockfile -RepoPath $worktreePath
+    if ($FactoryHost) {
+        $factoryKilledPids += Stop-UnityEditorsForFactory
+        Remove-UnityLockfile -RepoPath $worktreePath
+    }
     $killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 }
 catch {
@@ -556,6 +594,10 @@ if ($preProbeStatus) {
 $shortTag = Apply-GoalPatch -Task $goal.task -RepoPath $worktreePath
 
 $unityPath = Resolve-UnityExe -Preferred $UnityExe
+if ($FactoryHost) {
+    $factoryKilledPids += Stop-UnityEditorsForFactory
+    Remove-UnityLockfile -RepoPath $worktreePath
+}
 $killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 $probe = Invoke-UnityProbe -UnityExePath $unityPath -ProjectPath $worktreePath -ReportsDir $reportsDir -Timestamp $timestamp
 if (-not $probe.success) {
@@ -618,6 +660,10 @@ $seedA = if ($repoName -eq "godgame") { 42 } else { 7 }
 $seedB = if ($repoName -eq "godgame") { 43 } else { 11 }
 
 $buildStartUtc = (Get-Date).ToUniversalTime()
+if ($FactoryHost) {
+    $factoryKilledPids += Stop-UnityEditorsForFactory
+    Remove-UnityLockfile -RepoPath $worktreePath
+}
 $killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 $smokeOutput = & $pipelineSmoke `
     -Title $repoName `

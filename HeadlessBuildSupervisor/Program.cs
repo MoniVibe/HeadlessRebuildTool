@@ -22,6 +22,7 @@ internal static class Program
     private const string EditorLogName = "editor.log";
     private const string EditorPrevLogName = "editor-prev.log";
     private const string EditorLogMissingName = "editor_log_missing.txt";
+    private const string UnityProjectLockSignature = "another unity instance is running with this project open";
     private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ProjectLockTimeout = TimeSpan.FromSeconds(30);
     private const int LogReadRetryDelayMs = 100;
@@ -59,6 +60,7 @@ internal static class Program
         UnityRunResult? runResult = null;
 
         var attempts = options.MaxRetries + 1;
+        var lockRetryUsed = false;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             if (attempt > 1)
@@ -74,32 +76,57 @@ internal static class Program
                 TryCopyFileWithRetries(unityLog, unityLogLegacy, logger);
             }
 
-            var outcomeResult = TryReadOutcomeResult(outcomePath);
-            var hasOutcome = !string.IsNullOrWhiteSpace(outcomeResult);
-            var outcomeSucceeded = hasOutcome && outcomeResult.Equals("Succeeded", StringComparison.OrdinalIgnoreCase);
-            var exitOk = runResult.ExitCode == 0;
+            var projectLockDetected = DetectUnityProjectLock(logsDir, options.BuildId, logger);
+            if (projectLockDetected)
+            {
+                failureSignature = FailureSignature.UnityProjectLock;
+                failureMessage = "UNITY_PROJECT_LOCK";
+                if (!lockRetryUsed)
+                {
+                    lockRetryUsed = true;
+                    logger.Warn("unity_project_lock_detected");
+                    KillUnityProcessesForLock(includeHub: false, logger: logger);
+                    DeleteUnityLockfiles(options.ProjectPath, logger);
+                    if (attempt == attempts)
+                    {
+                        attempts++;
+                    }
+                    continue;
+                }
 
-            if (runResult.TimedOut)
-            {
-                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
-                failureMessage = "Unity build timed out.";
-            }
-            else if (exitOk && outcomeSucceeded)
-            {
-                success = true;
-                break;
+                logger.Warn("unity_project_lock_persistent");
+                KillUnityProcessesForLock(includeHub: true, logger: logger);
+                failureMessage = "UNITY_PROJECT_LOCK_PERSISTENT";
             }
             else
             {
-                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
-                failureMessage = hasOutcome
-                    ? $"Unity exit={runResult.ExitCode} outcome={outcomeResult}"
-                    : $"Unity exit={runResult.ExitCode} outcome=missing";
+                var outcomeResult = TryReadOutcomeResult(outcomePath);
+                var hasOutcome = !string.IsNullOrWhiteSpace(outcomeResult);
+                var outcomeSucceeded = hasOutcome && outcomeResult.Equals("Succeeded", StringComparison.OrdinalIgnoreCase);
+                var exitOk = runResult.ExitCode == 0;
+
+                if (runResult.TimedOut)
+                {
+                    failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
+                    failureMessage = "Unity build timed out.";
+                }
+                else if (exitOk && outcomeSucceeded)
+                {
+                    success = true;
+                    break;
+                }
+                else
+                {
+                    failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
+                    failureMessage = hasOutcome
+                        ? $"Unity exit={runResult.ExitCode} outcome={outcomeResult}"
+                        : $"Unity exit={runResult.ExitCode} outcome=missing";
+                }
             }
 
             CaptureEditorLogs(logsDir, options.BuildId, logger);
 
-            if (attempt < attempts && ShouldRetry(failureSignature, runResult))
+            if (!projectLockDetected && attempt < attempts && ShouldRetry(failureSignature, runResult))
             {
                 logger.Info($"retrying after signature={failureSignature}");
                 CleanCaches(options.ProjectPath, failureSignature, logger);
@@ -583,6 +610,99 @@ internal static class Program
         {
             logger.Warn($"unity_project_kill_remaining pids={string.Join(",", remaining)}");
         }
+    }
+
+    private static void KillUnityProcessesForLock(bool includeHub, Logger logger)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Unity",
+            "Unity.exe",
+            "UnityPackageManager",
+            "UnityCrashHandler64",
+            "UnityLicensingClient"
+        };
+        if (includeHub)
+        {
+            names.Add("UnityHub");
+            names.Add("UnityHub.exe");
+        }
+
+        var clauses = new List<string>();
+        foreach (var name in names)
+        {
+            clauses.Add($"Name='{name}'");
+        }
+
+        var query = $"SELECT ProcessId, Name FROM Win32_Process WHERE {string.Join(" OR ", clauses)}";
+        var killed = new List<int>();
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(query);
+            foreach (ManagementObject process in searcher.Get())
+            {
+                if (process["ProcessId"] is uint pid)
+                {
+                    try
+                    {
+                        using var target = Process.GetProcessById((int)pid);
+                        target.Kill(true);
+                        killed.Add((int)pid);
+                        logger.Info($"unity_lock_killed name={process["Name"]} pid={pid}");
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warn($"unity_lock_kill_failed name={process["Name"]} pid={pid} err={ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_lock_kill_scan_failed err={ex.Message}");
+        }
+
+        if (killed.Count > 0)
+        {
+            Thread.Sleep(2000);
+        }
+    }
+
+    private static bool DetectUnityProjectLock(string logsDir, string buildId, Logger logger)
+    {
+        var stdoutPath = Path.Combine(logsDir, $"unity_stdout_{buildId}.log");
+        var stderrPath = Path.Combine(logsDir, $"unity_stderr_{buildId}.log");
+        if (LogContainsUnityProjectLock(stdoutPath) || LogContainsUnityProjectLock(stderrPath))
+        {
+            logger.Warn("unity_project_lock_signature_detected");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LogContainsUnityProjectLock(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            foreach (var line in File.ReadLines(path))
+            {
+                if (line.IndexOf(UnityProjectLockSignature, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private static List<int> FindUnityProcessesForProject(string projectPath, Logger logger)
@@ -1484,6 +1604,7 @@ internal static class Program
             FailureSignature.BeeStall => "BEE_STALL",
             FailureSignature.InfraFail => "INFRA_FAIL",
             FailureSignature.LogLocked => "LOG_LOCKED",
+            FailureSignature.UnityProjectLock => "UNITY_PROJECT_LOCK",
             _ => "UNKNOWN"
         };
     }
@@ -1693,6 +1814,7 @@ internal static class Program
         BeeStall,
         InfraFail,
         LogLocked,
+        UnityProjectLock,
         Unknown
     }
 
