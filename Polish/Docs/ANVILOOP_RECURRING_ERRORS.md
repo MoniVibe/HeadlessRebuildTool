@@ -98,3 +98,34 @@ ERR-20260122-008
 - Prevention: TBD
 - Verification: TBD
 - Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
+- Commit: TBD
+
+ERR-20260122_102459
+- FirstSeen: 2026-01-22
+- Symptom: [Space4XHeadlessBuilder] Build failed. Details written to C:\polish\queue\artifacts\staging_20260122_093123_022_b67ce739_20260122_093127\build\Space4X_HeadlessBuildFailure.log
+- Signature: [Space4XHeadlessBuilder] Build failed. Details written to C:\polish\queue\artifacts\staging_20260122_093123_022_b67ce739_20260122_093127\build\Space4X_HeadlessBuildFailure.log
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD
+
+ERR-20260122_112718
+- FirstSeen: 2026-01-22
+- Symptom: DisplayProgressNotification: Build Failed
+- Signature: DisplayProgressNotification: Build Failed
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD
+
+ERR-20260122-009
+- FirstSeen: 2026-01-22
+- Symptom: Player build fails with PPtr cast errors during script-only build.
+- Signature: PPtr cast failed when dereferencing! Casting from Texture2D to MonoScript.
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD

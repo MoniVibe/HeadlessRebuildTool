@@ -1870,7 +1870,7 @@ internal static class Program
         public List<string> DefaultArgs { get; } = new List<string>();
         public List<string> Scenarios { get; } = new List<string>();
         public string Notes { get; private set; } = string.Empty;
-        public TimeSpan Timeout { get; private set; } = TimeSpan.FromMinutes(30);
+        public TimeSpan Timeout { get; private set; } = TimeSpan.FromMinutes(60);
         public int MaxRetries { get; private set; } = 1;
         public int TailLines { get; private set; } = 200;
 
@@ -1921,7 +1921,7 @@ internal static class Program
             options.StagingDir = ReadOptional(map, "staging-dir", string.Empty);
             options.BuildOut = ReadOptional(map, "build-out", string.Empty);
             options.Notes = ReadOptional(map, "notes", string.Empty);
-            options.Timeout = TimeSpan.FromMinutes(ReadOptionalInt(map, "timeout-minutes", 30));
+            options.Timeout = TimeSpan.FromMinutes(ReadOptionalInt(map, "timeout-minutes", 60));
             options.MaxRetries = ReadOptionalInt(map, "max-retries", 1);
             options.TailLines = ReadOptionalInt(map, "tail-lines", 200);
 
