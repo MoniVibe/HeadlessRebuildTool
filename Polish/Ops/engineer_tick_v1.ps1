@@ -579,8 +579,9 @@ try {
     $puredotsPackage = Ensure-PureDotsLink -RepoName $repoName -WorktreePath $worktreePath -Root $Root
     Reset-HeadlessManifests -RepoPath $worktreePath
     $worktreeCleanup = Clear-WorktreeBuildCache -RepoPath $worktreePath
-    if ($worktreeCleanup.Count -gt 0) {
-        $cleanupLine = "* worktree_cleanup: " + ($worktreeCleanup -join ", ")
+    $cleanupItems = @($worktreeCleanup)
+    if ($cleanupItems.Count -gt 0) {
+        $cleanupLine = "* worktree_cleanup: " + ($cleanupItems -join ", ")
     }
     else {
         $cleanupLine = "* worktree_cleanup: none"
