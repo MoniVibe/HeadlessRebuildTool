@@ -4,12 +4,13 @@ param(
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$UnityExe,
     [string]$BaseRef,
-    [bool]$FactoryHost = $true,
+    [switch]$NoFactoryHost,
     [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$FactoryHost = -not $NoFactoryHost
 
 function Ensure-Directory {
     param([string]$Path)
@@ -468,6 +469,39 @@ function Get-ArtifactPreflightStatus {
     return $payload
 }
 
+function Ensure-BaseRef {
+    param(
+        [string]$RepoPath,
+        [string]$BaseRef
+    )
+    $result = [ordered]@{
+        ensured = $false
+        sha = ""
+        pushed = $false
+        error = ""
+    }
+    if ([string]::IsNullOrWhiteSpace($BaseRef)) { return $result }
+    & git -C $RepoPath rev-parse --verify --quiet $BaseRef 2>$null
+    if ($LASTEXITCODE -eq 0) { return $result }
+    & git -C $RepoPath fetch --prune 2>$null | Out-Null
+    $sha = (& git -C $RepoPath rev-parse origin/main 2>$null).Trim()
+    if ([string]::IsNullOrWhiteSpace($sha)) {
+        $result.error = "origin/main missing"
+        return $result
+    }
+    & git -C $RepoPath branch -f $BaseRef $sha 2>$null | Out-Null
+    $result.ensured = $true
+    $result.sha = $sha
+    & git -C $RepoPath push -u origin $BaseRef --force 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $result.pushed = $true
+    }
+    else {
+        $result.error = "push_failed"
+    }
+    return $result
+}
+
 function Find-LatestGoodArtifact {
     param(
         [string]$ArtifactsDir,
@@ -583,6 +617,40 @@ function Insert-AfterPattern {
     return $true
 }
 
+function Insert-AfterPatternMulti {
+    param(
+        [string]$Path,
+        [string]$Pattern,
+        [string[]]$InsertLines
+    )
+    $lines = Get-Content -Path $Path
+    $output = New-Object System.Collections.Generic.List[string]
+    $inserted = $false
+    $anyInserted = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $output.Add($line)
+        if (-not $inserted -and $line -match $Pattern) {
+            $indent = $line -replace '^(\\s*).*$', '$1'
+            foreach ($insertLine in $InsertLines) {
+                $fullLine = $indent + $insertLine
+                if (-not ($lines -contains $fullLine)) {
+                    $output.Add($fullLine)
+                    $anyInserted = $true
+                }
+            }
+            $inserted = $true
+        }
+    }
+    if (-not $inserted) {
+        return $false
+    }
+    if ($anyInserted) {
+        Set-Content -Path $Path -Value $output -Encoding ascii
+    }
+    return $true
+}
+
 function Apply-GoalPatch {
     param(
         [string]$Task,
@@ -593,7 +661,8 @@ function Apply-GoalPatch {
     switch ($Task) {
         "ftl_spool_stub" {
             $shortTag = "ftl_spool_stub"
-            $logToken = "FTL_JUMP_STUB"
+            Apply-FtlProofPatch -RepoPath $RepoPath
+            return $shortTag
         }
         "arc_orientation_convergence_stub" {
             $shortTag = "arc_orientation_stub"
@@ -620,6 +689,71 @@ function Apply-GoalPatch {
         throw "Failed to apply goal patch for $Task"
     }
     return $shortTag
+}
+
+function Apply-FtlProofPatch {
+    param([string]$RepoPath)
+    $target = Join-Path $RepoPath "Assets\\Scripts\\Space4x\\Headless\\Space4XHeadlessDiagnosticsSystem.cs"
+    if (-not (Test-Path $target)) {
+        throw "Patch target not found: $target"
+    }
+
+    Insert-AfterPattern -Path $target -Pattern '^using Space4x\\.Scenario;' -InsertText 'using Space4X.Registry;'
+    Insert-AfterPattern -Path $target -Pattern '^using Unity\\.Entities;' -InsertText 'using Unity.Mathematics;'
+    Insert-AfterPattern -Path $target -Pattern '^using Unity\\.Mathematics;' -InsertText 'using Unity.Transforms;'
+
+    $fieldLines = @(
+        "private Entity _ftlTarget;",
+        "private byte _ftlState;",
+        "private uint _ftlSpoolStartTick;",
+        "private float3 _ftlStartPos;"
+    )
+    $fieldsApplied = Insert-AfterPatternMulti -Path $target -Pattern 'private byte _exitHandled;' -InsertLines $fieldLines
+    if (-not $fieldsApplied) {
+        throw "Failed to add FTL fields in diagnostics system."
+    }
+
+    $proofLines = @(
+        "if (_runStarted == 1)",
+        "{",
+        "    if (_ftlState == 0)",
+        "    {",
+        "        foreach (var (transform, entity) in SystemAPI.Query<RefRW<LocalTransform>>()",
+        "            .WithAll<CapitalShipTag>()",
+        "            .WithEntityAccess())",
+        "        {",
+        "            _ftlTarget = entity;",
+        "            _ftlStartPos = transform.ValueRO.Position;",
+        "            _ftlSpoolStartTick = tick;",
+        "            _ftlState = 1;",
+        "            UnityEngine.Debug.Log($\"[Anviloop][FTL] FTL_ENGAGE entity={entity.Index} tick={tick}\");",
+        "            break;",
+        "        }",
+        "    }",
+        "",
+        "    if (_ftlState == 1 && tick >= _ftlSpoolStartTick + 60)",
+        "    {",
+        "        _ftlState = 2;",
+        "        UnityEngine.Debug.Log($\"[Anviloop][FTL] FTL_COMPLETE entity={_ftlTarget.Index} tick={tick}\");",
+        "    }",
+        "",
+        "    if (_ftlState == 2)",
+        "    {",
+        "        if (state.EntityManager.Exists(_ftlTarget) && SystemAPI.HasComponent<LocalTransform>(_ftlTarget))",
+        "        {",
+        "            var transform = SystemAPI.GetComponentRW<LocalTransform>(_ftlTarget);",
+        "            var delta = new float3(1000f, 0f, 0f);",
+        "            transform.ValueRW.Position += delta;",
+        "            _ftlState = 3;",
+        "            UnityEngine.Debug.Log($\"[Anviloop][FTL] FTL_JUMP entity={_ftlTarget.Index} delta={delta.x},{delta.y},{delta.z} tick={tick}\");",
+        "        }",
+        "    }",
+        "}"
+    )
+    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'Space4XHeadlessDiagnostics\\.UpdateProgress\\(\"complete\", \"end\", tick\\);' -InsertLines $proofLines
+    if (-not $proofApplied) {
+        throw "Failed to insert FTL proof markers."
+    }
 }
 
 function Find-FirstCompileError {
@@ -740,6 +874,20 @@ $repoPath = Join-Path $Root $repoName
 if (-not (Test-Path $repoPath)) {
     throw "Repo path missing: $repoPath"
 }
+$baseRefAutofixLine = "* base_ref_autofix: none"
+if ($effectiveBaseRef) {
+    $baseRefFix = Ensure-BaseRef -RepoPath $repoPath -BaseRef $effectiveBaseRef
+    if ($baseRefFix.ensured) {
+        $suffix = if ($baseRefFix.pushed) { "" } else { " (push_failed)" }
+        $baseRefAutofixLine = "* base_ref_autofix: created/updated $effectiveBaseRef -> $($baseRefFix.sha)$suffix"
+    }
+    elseif ($baseRefFix.error) {
+        $baseRefAutofixLine = "* base_ref_autofix: failed $effectiveBaseRef ($($baseRefFix.error))"
+        if ($baseRefFix.error -eq "origin/main missing") {
+            throw "Base ref auto-heal failed: origin/main missing"
+        }
+    }
+}
 
 $worktreeRoot = Join-Path "C:\\polish\\worktrees" $repoName
 Ensure-Directory $worktreeRoot
@@ -791,6 +939,7 @@ catch {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $baseRefAutofixLine,
         $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* bootstrap: FAIL",
@@ -810,6 +959,7 @@ if ($preProbeStatus) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $baseRefAutofixLine,
         $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* bootstrap: FAIL",
@@ -839,6 +989,7 @@ if (-not $probe.success) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $baseRefAutofixLine,
         $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* probe: FAIL",
@@ -859,6 +1010,7 @@ if (-not $gitStatus) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $baseRefAutofixLine,
         $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* probe: PASS",
@@ -1088,6 +1240,7 @@ if ($smokeFailed) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $baseRefAutofixLine,
         $cleanupLine,
         $hangKillLine,
         "* branch: $branchName",
@@ -1108,26 +1261,43 @@ if ($smokeFailed) {
 }
 
 $jobPath = ""
+$jobFileName = ""
 $buildId = ""
 $jobLine = $smokeOutput | Where-Object { $_ -like "job=*" } | Select-Object -Last 1
-if ($jobLine) { $jobPath = ($jobLine -replace '^job=', '').Trim() }
+if ($jobLine) {
+    $jobPath = ($jobLine -replace '^job=', '').Trim()
+    if (-not [string]::IsNullOrWhiteSpace($jobPath)) {
+        $jobFileName = Split-Path -Leaf $jobPath
+    }
+}
 $buildLine = $smokeOutput | Where-Object { $_ -like "build_id=*" } | Select-Object -Last 1
 if ($buildLine -and $buildLine -match 'build_id=([^\s]+)') { $buildId = $Matches[1] }
 
 $queuedJobs = @()
+if (-not [string]::IsNullOrWhiteSpace($jobFileName)) {
+    $queuedJobs += $jobFileName
+}
+
 if (-not [string]::IsNullOrWhiteSpace($jobPath) -and (Test-Path $jobPath)) {
-    $queuedJobs += (Split-Path -Leaf $jobPath)
-    $job = Get-Content -Raw -Path $jobPath | ConvertFrom-Json
-    $job.seed = [int]$seedB
-    $job.job_id = "{0}_{1}_{2}" -f $job.build_id, $job.scenario_id, $seedB
-    $job.created_utc = (Get-Date).ToUniversalTime().ToString("o")
-    $jobsDir = Join-Path $QueueRoot "jobs"
-    Ensure-Directory $jobsDir
-    $jobTempPath = Join-Path $jobsDir (".tmp_{0}.json" -f $job.job_id)
-    $jobPathB = Join-Path $jobsDir ("{0}.json" -f $job.job_id)
-    ($job | ConvertTo-Json -Depth 6) | Set-Content -Path $jobTempPath -Encoding ascii
-    Move-Item -Path $jobTempPath -Destination $jobPathB -Force
-    $queuedJobs += (Split-Path -Leaf $jobPathB)
+    $jobJson = Get-Content -Raw -Path $jobPath
+    if (-not [string]::IsNullOrWhiteSpace($jobJson)) {
+        $snapshotDir = Join-Path $reportsDir "jobs_snapshot"
+        Ensure-Directory $snapshotDir
+        $snapshotPath = Join-Path $snapshotDir $jobFileName
+        Set-Content -Path $snapshotPath -Value $jobJson -Encoding ascii
+
+        $job = $jobJson | ConvertFrom-Json
+        $job.seed = [int]$seedB
+        $job.job_id = "{0}_{1}_{2}" -f $job.build_id, $job.scenario_id, $seedB
+        $job.created_utc = (Get-Date).ToUniversalTime().ToString("o")
+        $jobsDir = Join-Path $QueueRoot "jobs"
+        Ensure-Directory $jobsDir
+        $jobTempPath = Join-Path $jobsDir (".tmp_{0}.json" -f $job.job_id)
+        $jobPathB = Join-Path $jobsDir ("{0}.json" -f $job.job_id)
+        ($job | ConvertTo-Json -Depth 6) | Set-Content -Path $jobTempPath -Encoding ascii
+        Move-Item -Path $jobTempPath -Destination $jobPathB -Force
+        $queuedJobs += (Split-Path -Leaf $jobPathB)
+    }
 }
 
 $cursorPayload = @{
@@ -1144,6 +1314,7 @@ $lines = @(
     "* repo: $repoName",
     "* task: $($goal.task)",
     "* base_ref: $effectiveBaseRef",
+    $baseRefAutofixLine,
     $cleanupLine,
     $hangKillLine,
     "* branch: $branchName",

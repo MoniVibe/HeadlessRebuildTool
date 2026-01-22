@@ -142,3 +142,13 @@ BUILD_FAIL
 - Prevention: TBD
 - Verification: TBD
 - Commit: TBD
+
+ERR-20260122-010
+- FirstSeen: 2026-01-22
+- Symptom: EngineerTick fails pre-build because base ref is missing.
+- Signature: fatal: invalid reference: nightly/base_space4x_YYYYMMDD
+- RootCause: nightly base ref not created for the day.
+- Fix: auto-create/update base ref from origin/main before worktree add.
+- Prevention: EngineerTick base ref auto-heal.
+- Verification: TBD
+- Commit: TBD
