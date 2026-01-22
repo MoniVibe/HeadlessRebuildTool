@@ -481,7 +481,7 @@ function Ensure-BaseRef {
         error = ""
     }
     if ([string]::IsNullOrWhiteSpace($BaseRef)) { return $result }
-    & git -C $RepoPath rev-parse --verify --quiet $BaseRef 2>$null
+    & git -C $RepoPath rev-parse --verify --quiet $BaseRef 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { return $result }
     & git -C $RepoPath fetch --prune 2>$null | Out-Null
     $sha = (& git -C $RepoPath rev-parse origin/main 2>$null).Trim()
