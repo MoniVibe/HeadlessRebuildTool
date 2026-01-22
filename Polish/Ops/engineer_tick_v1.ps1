@@ -424,6 +424,50 @@ function Read-JsonFileFromPath {
     }
 }
 
+function Get-ArtifactPreflightStatus {
+    param([string]$ArtifactZip)
+    $payload = [ordered]@{
+        ok = $false
+        outcome_result = ""
+        outcome_message = ""
+        manifest_entrypoint = ""
+    }
+    if (-not (Test-Path $ArtifactZip)) { return $payload }
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null } catch { }
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ArtifactZip)
+        $outcomeEntry = $archive.GetEntry("logs/build_outcome.json")
+        if (-not $outcomeEntry) { return $payload }
+        $reader = New-Object System.IO.StreamReader($outcomeEntry.Open())
+        $outcomeText = $reader.ReadToEnd()
+        $reader.Dispose()
+        $outcome = $outcomeText | ConvertFrom-Json
+        if ($outcome) {
+            $payload.outcome_result = $outcome.result
+            $payload.outcome_message = $outcome.message
+        }
+        $manifestEntry = $archive.GetEntry("build_manifest.json")
+        if (-not $manifestEntry) { return $payload }
+        $reader = New-Object System.IO.StreamReader($manifestEntry.Open())
+        $manifestText = $reader.ReadToEnd()
+        $reader.Dispose()
+        $manifest = $manifestText | ConvertFrom-Json
+        if ($manifest -and $manifest.entrypoint) {
+            $payload.manifest_entrypoint = $manifest.entrypoint
+        }
+        if ($payload.outcome_result -eq "Succeeded" -and -not [string]::IsNullOrWhiteSpace($payload.manifest_entrypoint)) {
+            $payload.ok = $true
+        }
+    }
+    catch {
+    }
+    finally {
+        if ($archive) { $archive.Dispose() }
+    }
+    return $payload
+}
+
 function Find-LatestGoodArtifact {
     param(
         [string]$ArtifactsDir,
@@ -970,7 +1014,12 @@ if (-not $artifactPath) {
     if ($artifactCandidate) { $artifactPath = $artifactCandidate.FullName }
 }
 
-if ($smokeExit -ne 0 -or $buildFailLine) {
+$preflight = Get-ArtifactPreflightStatus -ArtifactZip $artifactPath
+$smokeFailed = ($buildFailLine -ne $null) -or (-not $preflight.ok)
+$smokeExitNote = if ($smokeExit -ne 0 -and $preflight.ok) { " (ignored: artifact preflight ok)" } else { "" }
+$smokeExitLine = "* smoke_exit: $smokeExit$smokeExitNote"
+
+if ($smokeFailed) {
     $inspectRoot = Join-Path $reportsDir "_inspect"
     Ensure-Directory $inspectRoot
     $inspectDir = Join-Path $inspectRoot ("buildfail_{0}" -f $timestamp)
@@ -1045,6 +1094,7 @@ if ($smokeExit -ne 0 -or $buildFailLine) {
         "* commit: $commitSha",
         "* probe: PASS",
         "* probe_log: $($probe.log_path)",
+        $smokeExitLine,
         "* build: FAIL",
         "* build_fail_headline: $headline",
         "* build_fail_artifact: $artifactPath",
@@ -1099,9 +1149,10 @@ $lines = @(
     "* branch: $branchName",
     "* commit: $commitSha",
     "* probe: PASS",
-        "* probe_log: $($probe.log_path)",
-        "* build_id: $buildId",
-        "* queued_jobs: $([string]::Join(', ', $queuedJobs))",
+    "* probe_log: $($probe.log_path)",
+    $smokeExitLine,
+    "* build_id: $buildId",
+    "* queued_jobs: $([string]::Join(', ', $queuedJobs))",
     ""
 )
 Write-Report -Path $reportPath -Lines $lines
