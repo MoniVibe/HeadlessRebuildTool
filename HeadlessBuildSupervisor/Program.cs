@@ -44,7 +44,8 @@ internal static class Program
         var logger = new Logger(supervisorLog);
         logger.Info($"start build_id={options.BuildId} commit={options.Commit} staging={stagingDir}");
 
-        var unityLog = Path.Combine(logsDir, "unity_build.log");
+        var unityLog = Path.Combine(logsDir, $"unity_full_{options.BuildId}.log");
+        var unityLogLegacy = Path.Combine(logsDir, "unity_build.log");
         var reportJsonPath = Path.Combine(logsDir, BuildReportJsonName);
         var reportTextPath = Path.Combine(logsDir, BuildReportTextName);
         var outcomePath = Path.Combine(logsDir, BuildOutcomeName);
@@ -67,6 +68,10 @@ internal static class Program
 
             logger.Info($"attempt {attempt}/{attempts}");
             runResult = RunUnity(options, stagingDir, unityLog, logger);
+            if (File.Exists(unityLog))
+            {
+                TryCopyFileWithRetries(unityLog, unityLogLegacy, logger);
+            }
 
             var outcomeResult = TryReadOutcomeResult(outcomePath);
             var hasOutcome = !string.IsNullOrWhiteSpace(outcomeResult);
@@ -91,7 +96,7 @@ internal static class Program
                     : $"Unity exit={runResult.ExitCode} outcome=missing";
             }
 
-            CaptureEditorLogs(logsDir, logger);
+            CaptureEditorLogs(logsDir, options.BuildId, logger);
 
             if (attempt < attempts && ShouldRetry(failureSignature, runResult))
             {
@@ -297,12 +302,13 @@ internal static class Program
         return new UnityRunResult(process.ExitCode, timedOut);
     }
 
-    private static void CaptureEditorLogs(string logsDir, Logger logger)
+    private static void CaptureEditorLogs(string logsDir, string buildId, Logger logger)
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var editorDir = Path.Combine(localAppData, "Unity", "Editor");
         var editorLog = Path.Combine(editorDir, "Editor.log");
         var editorPrev = Path.Combine(editorDir, "Editor-prev.log");
+        var upmLog = Path.Combine(editorDir, "upm.log");
         var missingPath = string.Empty;
 
         if (File.Exists(editorLog))
@@ -311,6 +317,8 @@ internal static class Program
             {
                 logger.Info($"editor_log_captured src={editorLog}");
             }
+
+            TryCopyFileWithRetries(editorLog, Path.Combine(logsDir, $"Editor_global_{buildId}.log"), logger);
         }
         else
         {
@@ -327,6 +335,11 @@ internal static class Program
         else if (string.IsNullOrWhiteSpace(missingPath))
         {
             missingPath = editorPrev;
+        }
+
+        if (File.Exists(upmLog))
+        {
+            TryCopyFileWithRetries(upmLog, Path.Combine(logsDir, $"upm_global_{buildId}.log"), logger);
         }
 
         if (!string.IsNullOrWhiteSpace(missingPath))
