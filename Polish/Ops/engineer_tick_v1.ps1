@@ -602,7 +602,7 @@ function Insert-AfterPattern {
         $line = $lines[$i]
         $output.Add($line)
         if (-not $inserted -and $line -match $Pattern) {
-            $indent = $line -replace '^(\\s*).*$', '$1'
+            $indent = $line -replace '^(\s*).*$', '$1'
             $insertLine = $indent + $InsertText
             if (-not ($lines -contains $insertLine)) {
                 $output.Add($insertLine)
@@ -631,7 +631,7 @@ function Insert-AfterPatternMulti {
         $line = $lines[$i]
         $output.Add($line)
         if (-not $inserted -and $line -match $Pattern) {
-            $indent = $line -replace '^(\\s*).*$', '$1'
+            $indent = $line -replace '^(\s*).*$', '$1'
             foreach ($insertLine in $InsertLines) {
                 $fullLine = $indent + $insertLine
                 if (-not ($lines -contains $fullLine)) {
