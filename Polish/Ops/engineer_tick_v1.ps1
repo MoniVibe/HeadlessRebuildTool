@@ -55,10 +55,42 @@ function Reset-HeadlessManifests {
 
 function Remove-UnityLockfile {
     param([string]$RepoPath)
-    $lockPath = Join-Path $RepoPath "Temp\\UnityLockfile"
-    if (Test-Path $lockPath) {
-        Remove-Item -Force $lockPath
+    $lockPaths = @(
+        (Join-Path $RepoPath "Temp\\UnityLockfile"),
+        (Join-Path $RepoPath "Library\\UnityLockfile")
+    )
+    foreach ($lockPath in $lockPaths) {
+        if (Test-Path $lockPath) {
+            Remove-Item -Force $lockPath
+        }
     }
+}
+
+function Stop-UnityForProject {
+    param([string]$ProjectPath)
+    if ([string]::IsNullOrWhiteSpace($ProjectPath)) { return @() }
+    $full = [System.IO.Path]::GetFullPath($ProjectPath)
+    $normalized = $full.ToLowerInvariant().Replace('\\', '/')
+    $alt = $normalized.Replace('/', '\\')
+    $killed = New-Object System.Collections.Generic.List[int]
+    $procs = Get-CimInstance Win32_Process -Filter "Name='Unity.exe' OR Name='Unity'"
+    foreach ($proc in $procs) {
+        $cmd = $proc.CommandLine
+        if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
+        $cmdLower = $cmd.ToLowerInvariant()
+        if (-not ($cmdLower.Contains("-projectpath"))) { continue }
+        if (-not ($cmdLower.Contains($normalized) -or $cmdLower.Contains($alt))) { continue }
+        try {
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+            $killed.Add([int]$proc.ProcessId)
+        }
+        catch {
+        }
+    }
+    if ($killed.Count -gt 0) {
+        Start-Sleep -Seconds 2
+    }
+    return $killed
 }
 
 function Convert-ToWslPath {
@@ -466,6 +498,7 @@ if ([string]::IsNullOrWhiteSpace($goalIdSafe)) {
 }
 $branchName = "wild/engv1_{0}_{1}" -f $timestamp, $goalIdSafe
 $worktreePath = Join-Path $worktreeRoot $timestamp
+$killedPids = @()
 
 if ($effectiveBaseRef) {
     & git -C $repoPath worktree add -b $branchName $worktreePath $effectiveBaseRef
@@ -481,6 +514,7 @@ try {
     $puredotsPackage = Ensure-PureDotsLink -RepoName $repoName -WorktreePath $worktreePath -Root $Root
     Reset-HeadlessManifests -RepoPath $worktreePath
     Remove-UnityLockfile -RepoPath $worktreePath
+    $killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 }
 catch {
     $lines = @(
@@ -522,6 +556,7 @@ if ($preProbeStatus) {
 $shortTag = Apply-GoalPatch -Task $goal.task -RepoPath $worktreePath
 
 $unityPath = Resolve-UnityExe -Preferred $UnityExe
+$killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 $probe = Invoke-UnityProbe -UnityExePath $unityPath -ProjectPath $worktreePath -ReportsDir $reportsDir -Timestamp $timestamp
 if (-not $probe.success) {
     $lines = @(
@@ -583,6 +618,7 @@ $seedA = if ($repoName -eq "godgame") { 42 } else { 7 }
 $seedB = if ($repoName -eq "godgame") { 43 } else { 11 }
 
 $buildStartUtc = (Get-Date).ToUniversalTime()
+$killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 $smokeOutput = & $pipelineSmoke `
     -Title $repoName `
     -UnityExe $unityPath `
