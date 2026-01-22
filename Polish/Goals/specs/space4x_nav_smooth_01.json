@@ -1,0 +1,20 @@
+﻿{
+  "goal_id": "space4x_nav_smooth_01",
+  "goal_version": "v0",
+  "description": "Navigation heading oscillation stays below threshold.",
+  "proof": {
+    "metric_keys": [
+      "s4x.heading_oscillation_score"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "metric"
+    ]
+  },
+  "thresholds": {
+    "metric_max": {
+      "s4x.heading_oscillation_score": 1.0
+    }
+  }
+}

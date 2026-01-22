@@ -39,11 +39,20 @@ def read_tail(path, max_bytes=5 * 1024 * 1024):
         return ""
 
 
-def collect_event_counts(telemetry_path):
+def to_float(value):
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def collect_telemetry_signals(telemetry_path):
     counts = {}
+    metric_last = {}
+    metric_samples = {}
     total = 0
     if not telemetry_path or not os.path.isfile(telemetry_path):
-        return total, counts
+        return total, counts, metric_last, metric_samples
     try:
         with open(telemetry_path, "r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
@@ -63,9 +72,15 @@ def collect_event_counts(telemetry_path):
                     event_type = "unknown"
                 event_type = str(event_type)
                 counts[event_type] = counts.get(event_type, 0) + 1
+                if isinstance(obj, dict) and event_type.lower() == "metric":
+                    metric_name = obj.get("metric") or obj.get("name")
+                    if metric_name and "value" in obj:
+                        metric_key = str(metric_name)
+                        metric_last[metric_key] = obj.get("value")
+                        metric_samples.setdefault(metric_key, []).append(obj.get("value"))
     except Exception:
-        return total, counts
-    return total, counts
+        return total, counts, metric_last, metric_samples
+    return total, counts, metric_last, metric_samples
 
 
 def match_prefixes(counts, prefixes):
@@ -78,6 +93,20 @@ def match_prefixes(counts, prefixes):
         for prefix in lowered:
             if key.startswith(prefix):
                 matches.append({"event_type": event_type, "prefix": prefix, "count": count})
+                break
+    return matches
+
+
+def match_metric_prefixes(metric_last, prefixes):
+    matches = []
+    if not prefixes:
+        return matches
+    lowered = [(p or "").lower() for p in prefixes if p]
+    for metric_name, value in metric_last.items():
+        key = metric_name.lower()
+        for prefix in lowered:
+            if key.startswith(prefix):
+                matches.append({"metric": metric_name, "prefix": prefix, "value": value})
                 break
     return matches
 
@@ -189,10 +218,27 @@ def build_goal_report(result_root, goal_spec_path, goal_spec, run_summary, meta)
     operator_question_ids = proof_spec.get("operator_question_ids") if isinstance(proof_spec, dict) else None
 
     telemetry_path = os.path.join(out_dir, "telemetry.ndjson")
-    _, telemetry_counts = collect_event_counts(telemetry_path)
+    _, telemetry_counts, metric_last, metric_samples = collect_telemetry_signals(telemetry_path)
     telemetry_matches = match_prefixes(telemetry_counts, telemetry_prefixes)
     for match in telemetry_matches:
         proof.append({"type": "telemetry", **match})
+
+    metric_keys = proof_spec.get("metric_keys") if isinstance(proof_spec, dict) else None
+    metric_prefixes = proof_spec.get("metric_prefixes") if isinstance(proof_spec, dict) else None
+    metric_matches = []
+    seen_metrics = set()
+    if metric_keys:
+        for metric_name in metric_keys:
+            if metric_name in metric_last:
+                metric_matches.append({"metric": metric_name, "value": metric_last.get(metric_name)})
+                seen_metrics.add(metric_name)
+    for match in match_metric_prefixes(metric_last, metric_prefixes):
+        metric_name = match.get("metric")
+        if metric_name and metric_name not in seen_metrics:
+            metric_matches.append({"metric": metric_name, "value": match.get("value"), "prefix": match.get("prefix")})
+            seen_metrics.add(metric_name)
+    for match in metric_matches:
+        proof.append({"type": "metric", "metric": match.get("metric"), "value": match.get("value"), "ok": True})
 
     log_paths = [
         os.path.join(out_dir, "player.log"),
@@ -208,7 +254,7 @@ def build_goal_report(result_root, goal_spec_path, goal_spec, run_summary, meta)
     for match in operator_matches:
         proof.append({"type": "operator", **match})
 
-    has_proof_signal = bool(telemetry_matches or log_matches or operator_matches)
+    has_proof_signal = bool(telemetry_matches or log_matches or operator_matches or metric_matches)
     if score >= 2 and has_proof_signal:
         score = 3
     elif score >= 2:
@@ -219,7 +265,46 @@ def build_goal_report(result_root, goal_spec_path, goal_spec, run_summary, meta)
         "telemetry": bool(telemetry_matches),
         "log": bool(log_matches),
         "operator": bool(operator_matches),
+        "metric": bool(metric_matches),
     }
+
+    thresholds_spec = goal_spec.get("thresholds") if isinstance(goal_spec, dict) else {}
+    thresholds_ok = True
+    if isinstance(thresholds_spec, dict):
+        metric_max = thresholds_spec.get("metric_max")
+        metric_min = thresholds_spec.get("metric_min")
+        if isinstance(metric_max, dict):
+            for metric_name, limit in metric_max.items():
+                value = metric_last.get(metric_name)
+                value_num = to_float(value)
+                limit_num = to_float(limit)
+                ok = value_num is not None and limit_num is not None and value_num <= limit_num
+                thresholds_ok = thresholds_ok and ok
+                proof.append(
+                    {
+                        "type": "metric",
+                        "metric": metric_name,
+                        "value": value,
+                        "max": limit,
+                        "ok": ok,
+                    }
+                )
+        if isinstance(metric_min, dict):
+            for metric_name, limit in metric_min.items():
+                value = metric_last.get(metric_name)
+                value_num = to_float(value)
+                limit_num = to_float(limit)
+                ok = value_num is not None and limit_num is not None and value_num >= limit_num
+                thresholds_ok = thresholds_ok and ok
+                proof.append(
+                    {
+                        "type": "metric",
+                        "metric": metric_name,
+                        "value": value,
+                        "min": limit,
+                        "ok": ok,
+                    }
+                )
 
     required_met = False
     if isinstance(required_spec, dict) and required_spec.get("all_of"):
@@ -228,6 +313,11 @@ def build_goal_report(result_root, goal_spec_path, goal_spec, run_summary, meta)
         required_met = any(proof_flags.get(item, False) for item in required_spec.get("any_of", []))
     else:
         required_met = has_proof_signal
+
+    if required_met and not thresholds_ok:
+        notes.append("thresholds not met")
+
+    required_met = required_met and thresholds_ok
 
     if score >= 3 and required_met:
         score = 4

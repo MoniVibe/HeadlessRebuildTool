@@ -1,0 +1,20 @@
+﻿{
+  "goal_id": "space4x_collision_zero_01",
+  "goal_version": "v0",
+  "description": "Collision damage events remain zero.",
+  "proof": {
+    "metric_keys": [
+      "move.collision_damage_events"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "metric"
+    ]
+  },
+  "thresholds": {
+    "metric_max": {
+      "move.collision_damage_events": 0
+    }
+  }
+}
