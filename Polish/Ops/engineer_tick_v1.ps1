@@ -697,18 +697,19 @@ function Apply-FtlProofPatch {
     if (-not (Test-Path $target)) {
         throw "Patch target not found: $target"
     }
+    if (Select-String -Path $target -Pattern "\\[Anviloop\\]\\[FTL\\] FTL_JUMP" -SimpleMatch -Quiet) {
+        return
+    }
 
     Insert-AfterPattern -Path $target -Pattern '^using Space4x\\.Scenario;' -InsertText 'using Space4X.Registry;'
     Insert-AfterPattern -Path $target -Pattern '^using Unity\\.Entities;' -InsertText 'using Unity.Mathematics;'
     Insert-AfterPattern -Path $target -Pattern '^using Unity\\.Mathematics;' -InsertText 'using Unity.Transforms;'
 
-    $fieldLines = @(
-        "private Entity _ftlTarget;",
-        "private byte _ftlState;",
-        "private uint _ftlSpoolStartTick;",
-        "private float3 _ftlStartPos;"
-    )
-    $fieldsApplied = Insert-AfterPatternMulti -Path $target -Pattern 'private byte _exitHandled;' -InsertLines $fieldLines
+    $fieldsApplied = $true
+    $fieldsApplied = $fieldsApplied -and (Insert-AfterPattern -Path $target -Pattern 'private byte _exitHandled;' -InsertText 'private Entity _ftlTarget;')
+    $fieldsApplied = $fieldsApplied -and (Insert-AfterPattern -Path $target -Pattern 'private byte _exitHandled;' -InsertText 'private byte _ftlState;')
+    $fieldsApplied = $fieldsApplied -and (Insert-AfterPattern -Path $target -Pattern 'private byte _exitHandled;' -InsertText 'private uint _ftlSpoolStartTick;')
+    $fieldsApplied = $fieldsApplied -and (Insert-AfterPattern -Path $target -Pattern 'private byte _exitHandled;' -InsertText 'private float3 _ftlStartPos;')
     if (-not $fieldsApplied) {
         throw "Failed to add FTL fields in diagnostics system."
     }
@@ -750,7 +751,10 @@ function Apply-FtlProofPatch {
         "    }",
         "}"
     )
-    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'Space4XHeadlessDiagnostics\\.UpdateProgress\\(\"complete\", \"end\", tick\\);' -InsertLines $proofLines
+    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\\(\"complete\", \"end\", tick\\)' -InsertLines $proofLines
+    if (-not $proofApplied) {
+        $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\\(\"run\", \"start\", tick\\)' -InsertLines $proofLines
+    }
     if (-not $proofApplied) {
         throw "Failed to insert FTL proof markers."
     }
