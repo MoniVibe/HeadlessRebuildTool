@@ -784,7 +784,11 @@ if ($FactoryHost) {
 }
 $killedPids += Stop-UnityForProject -ProjectPath $worktreePath
 $hangKillLine = "* hang_kill: none"
-$smokeLog = Join-Path $reportsDir ("engineer_tick_v1_smoke_{0}.log" -f $timestamp)
+$smokeStdout = Join-Path $reportsDir ("engineer_tick_v1_smoke_{0}.out.log" -f $timestamp)
+$smokeStderr = Join-Path $reportsDir ("engineer_tick_v1_smoke_{0}.err.log" -f $timestamp)
+if ($smokeStdout -ieq $smokeStderr) {
+    throw "Smoke log paths must differ (stdout/stderr)."
+}
 $smokeArgs = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
@@ -799,7 +803,7 @@ $smokeArgs = @(
     "-GoalId", $goalId,
     "-GoalSpec", $goalSpecJob
 )
-$smokeProc = Start-Process -FilePath "powershell" -ArgumentList $smokeArgs -RedirectStandardOutput $smokeLog -RedirectStandardError $smokeLog -PassThru
+$smokeProc = Start-Process -FilePath "powershell" -ArgumentList $smokeArgs -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
 $monitorStart = Get-Date
 $lastActive = $monitorStart
 $hardTimeoutMinutes = 45
@@ -882,7 +886,9 @@ if (-not $smokeProc.HasExited) {
 }
 
 $smokeExit = $smokeProc.ExitCode
-$smokeOutput = if (Test-Path $smokeLog) { Get-Content -Path $smokeLog } else { @() }
+$smokeOutput = @()
+if (Test-Path $smokeStdout) { $smokeOutput += Get-Content -Path $smokeStdout }
+if (Test-Path $smokeStderr) { $smokeOutput += Get-Content -Path $smokeStderr }
 $buildFailLine = $smokeOutput | Where-Object { $_ -like "BUILD_FAIL*" } | Select-Object -First 1
 $artifactPath = ""
 $artifactLine = $smokeOutput | Where-Object { $_ -like "artifact=*" } | Select-Object -Last 1
