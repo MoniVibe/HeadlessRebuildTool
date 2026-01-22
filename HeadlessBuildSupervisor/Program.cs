@@ -265,11 +265,18 @@ internal static class Program
             args.Add(options.Notes);
         }
 
+        var logsDir = Path.GetDirectoryName(unityLog) ?? artifactRoot;
+        var stdoutPath = Path.Combine(logsDir, $"unity_stdout_{options.BuildId}.log");
+        var stderrPath = Path.Combine(logsDir, $"unity_stderr_{options.BuildId}.log");
         var psi = new ProcessStartInfo
         {
             FileName = options.UnityExe,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
 
         foreach (var arg in args)
@@ -278,12 +285,45 @@ internal static class Program
         }
 
         logger.Info($"unity_start exe={options.UnityExe}");
+        logger.Info($"unity_args {FormatArgsForLog(args)}");
+        logger.Info($"unity_stdout path={stdoutPath}");
+        logger.Info($"unity_stderr path={stderrPath}");
         using var job = new JobObject();
         using var process = Process.Start(psi);
         if (process == null)
         {
             throw new InvalidOperationException("Failed to start Unity process.");
         }
+        using var stdoutWriter = new StreamWriter(stdoutPath, false, Encoding.UTF8) { AutoFlush = true };
+        using var stderrWriter = new StreamWriter(stderrPath, false, Encoding.UTF8) { AutoFlush = true };
+        var stdoutLock = new object();
+        var stderrLock = new object();
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data == null)
+            {
+                return;
+            }
+
+            lock (stdoutLock)
+            {
+                stdoutWriter.WriteLine(e.Data);
+            }
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data == null)
+            {
+                return;
+            }
+
+            lock (stderrLock)
+            {
+                stderrWriter.WriteLine(e.Data);
+            }
+        };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
 
         job.Assign(process);
         var timedOut = !process.WaitForExit((int)options.Timeout.TotalMilliseconds);
@@ -300,6 +340,33 @@ internal static class Program
         process.WaitForExit();
         logger.Info($"unity_exit pid={process.Id} exit={process.ExitCode}");
         return new UnityRunResult(process.ExitCode, timedOut);
+    }
+
+    private static string FormatArgsForLog(IReadOnlyList<string> args)
+    {
+        var sb = new StringBuilder();
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            var needsQuote = arg.IndexOfAny(new[] { ' ', '\t', '"' }) >= 0;
+            if (needsQuote)
+            {
+                sb.Append('"');
+                sb.Append(arg.Replace("\"", "\\\""));
+                sb.Append('"');
+            }
+            else
+            {
+                sb.Append(arg);
+            }
+
+            if (i < args.Count - 1)
+            {
+                sb.Append(' ');
+            }
+        }
+
+        return sb.ToString();
     }
 
     private static void CaptureEditorLogs(string logsDir, string buildId, Logger logger)
