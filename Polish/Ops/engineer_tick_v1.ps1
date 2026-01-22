@@ -626,18 +626,13 @@ function Insert-AfterPatternMulti {
     $lines = Get-Content -Path $Path
     $output = New-Object System.Collections.Generic.List[string]
     $inserted = $false
-    $anyInserted = $false
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
         $output.Add($line)
         if (-not $inserted -and $line -match $Pattern) {
             $indent = $line -replace '^(\s*).*$', '$1'
             foreach ($insertLine in $InsertLines) {
-                $fullLine = $indent + $insertLine
-                if (-not ($lines -contains $fullLine)) {
-                    $output.Add($fullLine)
-                    $anyInserted = $true
-                }
+                $output.Add($indent + $insertLine)
             }
             $inserted = $true
         }
@@ -645,9 +640,7 @@ function Insert-AfterPatternMulti {
     if (-not $inserted) {
         return $false
     }
-    if ($anyInserted) {
-        Set-Content -Path $Path -Value $output -Encoding ascii
-    }
+    Set-Content -Path $Path -Value $output -Encoding ascii
     return $true
 }
 
