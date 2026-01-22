@@ -720,7 +720,7 @@ function Apply-FtlProofPatch {
         "    if (_ftlState == 0)",
         "    {",
         "        foreach (var (transform, entity) in SystemAPI.Query<RefRW<LocalTransform>>()",
-        "            .WithAll<CapitalShipTag>()",
+        "            .WithAny<CapitalShipTag, CarrierTag, Carrier>()",
         "            .WithEntityAccess())",
         "        {",
         "            _ftlTarget = entity;",
