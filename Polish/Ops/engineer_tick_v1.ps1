@@ -726,14 +726,10 @@ function Apply-FtlProofPatch {
         "        _ftlSpoolStartTick = tick;",
         "        _ftlState = 1;",
         '        UnityEngine.Debug.Log($"[Anviloop][FTL] FTL_ENGAGE entity={entity.Index} tick={tick}");',
+        "        _ftlState = 2;",
+        '        UnityEngine.Debug.Log($"[Anviloop][FTL] FTL_COMPLETE entity={entity.Index} tick={tick}");',
         "        break;",
         "    }",
-        "}",
-        "",
-        "if (_ftlState == 1 && tick >= _ftlSpoolStartTick + 5)",
-        "{",
-        "    _ftlState = 2;",
-        '    UnityEngine.Debug.Log($"[Anviloop][FTL] FTL_COMPLETE entity={_ftlTarget.Index} tick={tick}");',
         "}",
         "",
         "if (_ftlState == 2)",
@@ -748,9 +744,9 @@ function Apply-FtlProofPatch {
         "    }",
         "}"
     )
-    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\("complete", "end", tick\)' -InsertLines $proofLines
+    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\(ref state, tick\);' -InsertLines $proofLines
     if (-not $proofApplied) {
-        $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\("run", "start", tick\)' -InsertLines $proofLines
+        $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\(ref state, tick\)' -InsertLines $proofLines
     }
     if (-not $proofApplied) {
         throw "Failed to insert FTL proof markers."
