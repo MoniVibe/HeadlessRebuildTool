@@ -178,3 +178,16 @@ Assets\Scripts\Space4x\Headless\Space4XHeadlessDiagnosticsSystem.cs(70,36): erro
 - Prevention: TBD
 - Verification: TBD
 - Commit: TBD
+
+ERR-20260122_215913
+- FirstSeen: 
+2026-01-22
+- Symptom: 
+[Licensing::Module] Error: Access token is unavailable; failed to update
+- Signature: 
+[Licensing::Module] Error: Access token is unavailable; failed to update
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD

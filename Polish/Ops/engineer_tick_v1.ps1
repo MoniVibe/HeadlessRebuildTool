@@ -757,6 +757,15 @@ function Find-FirstCompileError {
     return $null
 }
 
+function Invoke-GitCmd {
+    param([string]$Command)
+    $output = cmd /c "$Command 2>&1"
+    return [pscustomobject]@{
+        exit_code = $LASTEXITCODE
+        output = $output
+    }
+}
+
 function Invoke-UnityProbe {
     param(
         [string]$UnityExePath,
@@ -898,13 +907,15 @@ $worktreeCleanup = @()
 $cleanupLine = "* worktree_cleanup: skipped"
 
 if ($effectiveBaseRef) {
-    & git -C $repoPath worktree add -b $branchName $worktreePath $effectiveBaseRef
+    $gitCmd = "git -C `"$repoPath`" worktree add -b $branchName `"$worktreePath`" $effectiveBaseRef"
 }
 else {
-    & git -C $repoPath worktree add -b $branchName $worktreePath
+    $gitCmd = "git -C `"$repoPath`" worktree add -b $branchName `"$worktreePath`""
 }
-if ($LASTEXITCODE -ne 0) {
-    throw "git worktree add failed for $worktreePath"
+$gitResult = Invoke-GitCmd -Command $gitCmd
+if ($gitResult.exit_code -ne 0) {
+    $detail = if ($gitResult.output) { ($gitResult.output -join [Environment]::NewLine) } else { "" }
+    throw "git worktree add failed for $worktreePath`n$detail"
 }
 
 try {
