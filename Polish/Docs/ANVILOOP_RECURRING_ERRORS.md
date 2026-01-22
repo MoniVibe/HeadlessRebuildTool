@@ -86,3 +86,15 @@ ERR-20260122-007
 - Prevention: TBD
 - Verification: TBD
 - Commit: TBD
+
+ERR-20260122-008
+- FirstSeen: 2026-01-22
+- Stage: RUNNER
+- Symptom: TEST_FAIL space4x_collision_micro seed=7 exit_code=10 runtime_sec=7.0 telemetry_bytes=0 telemetry_summary=missing
+- Signature: 9af157abb7a115bb738f99c20bffe635c0fa6bf1bf9a7c21b745b4096e5f6377
+- RawSignature: TEST_FAIL|space4x_collision_micro|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
