@@ -1,0 +1,6 @@
+- Disk gate + cleanup: `pwsh -NoProfile -Command "'C_free_GB=' + [math]::Round((Get-PSDrive C).Free/1GB,1)"`; if <40 GB stop; then `cleanup_queue.ps1 -RetentionDays 7 -KeepLastPerScenario 3 -Apply`; keep `staging_*` last 5; keep `_inspect` last 10; keep Space4X worktrees last 2.
+- Nightly preflight: repo on `wild/engineer_tick_v1_20260121` and clean; WSL runner up with `./Polish/WSL/wsl_runner.sh --queue /mnt/c/polish/queue --daemon --print-summary --status-interval 60`; prune `/home/oni/polish/runs` >2 days.
+- Sentinel goal (pipeline alive): run EngineerTick once for FTL; proof in `out/player.log` contains `[Anviloop][FTL] FTL_JUMP` with tick >= 30; if not, patch proof to delay/log real tick and rerun once.
+- Concept goal rule: exactly one concept goal per night (default ARC); no scenario + code changes in same cycle; code-only first.
+- Stop/switch rules: if same signature repeats twice, stop and consult ledger; if disk < gate, switch to analysis/doc only; treat OK_WITH_WARNINGS as PASS for pipeline health but record counts.
+- Reporting: write `C:\polish\queue\reports\nightly_cycle_<utc>_<cycle>.json` and append `nightly_timeline.log` key=value line with goal_id, build_id, artifact, job_id(s), result zip, proof snippet, exit_reason, failure_signature, disk before/after, cleanup counts, ledger action.

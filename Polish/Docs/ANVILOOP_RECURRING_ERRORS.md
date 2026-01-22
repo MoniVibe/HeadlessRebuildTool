@@ -152,3 +152,29 @@ ERR-20260122-010
 - Prevention: EngineerTick base ref auto-heal.
 - Verification: TBD
 - Commit: TBD
+
+ERR-20260122_171250
+- FirstSeen: 
+2026-01-22
+- Symptom: 
+Assets\Scripts\Space4x\Headless\Space4XHeadlessDiagnosticsSystem.cs(23,17): error CS0246: The type or namespace name 'float3' could not be found (are you missing a using directive or an assembly reference?)
+- Signature: 
+Assets\Scripts\Space4x\Headless\Space4XHeadlessDiagnosticsSystem.cs(23,17): error CS0246: The type or namespace name 'float3' could not be found (are you missing a using directive or an assembly reference?)
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD
+
+ERR-20260122_183250
+- FirstSeen: 
+2026-01-22
+- Symptom: 
+Assets\Scripts\Space4x\Headless\Space4XHeadlessDiagnosticsSystem.cs(70,36): error CS0103: The name 'transform' does not exist in the current context
+- Signature: 
+Assets\Scripts\Space4x\Headless\Space4XHeadlessDiagnosticsSystem.cs(70,36): error CS0103: The name 'transform' does not exist in the current context
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD
