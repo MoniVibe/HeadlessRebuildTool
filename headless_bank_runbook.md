@@ -1,3 +1,7 @@
+> STATUS: LEGACY REFERENCE. Nightly is EngineerTick + queue + runner + ML analyzer.
+> See: `Polish/Docs/HEADLESS_DOCS_INDEX.md`
+> Still useful for: bank channel concepts + tiered validation guidance.
+
 # Headless Runbook - Build Channels + Test Bank (TRI)
 
 Purpose: keep headless agents productive without rebuild churn and protect a pinned current build by enforcing:

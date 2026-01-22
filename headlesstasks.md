@@ -1,7 +1,19 @@
+> STATUS: LEGACY REFERENCE (task bank). Nightly is EngineerTick + queue + runner + ML analyzer.
+> See: `Polish/Docs/HEADLESS_DOCS_INDEX.md`
+> Still useful for: long-form task bank + cycle log.
+
 # Headless Tasks
 
 Mini goals for headless agents to pursue during unattended runs.
 Scope: logic-only changes (no `Assets/` or `.meta` edits). Update status as goals are achieved.
+
+## Nightly Goals (CURRENT)
+- Sentinel: `space4x.ftl.01` proof markers in `out/player.log`:
+  - `[Anviloop][FTL] FTL_ENGAGE` / `FTL_COMPLETE` / `FTL_JUMP` with `tick >= 30`.
+- Concept: `space4x.arc.01` proof marker in `out/player.log`:
+  - `[Anviloop] ARC_START_STUB`.
+- Goal rotation: use the nightly plan/cursor (`C:\polish\queue\reports\nightly_plan.json` + cursor file).
+- Stop conditions: if the same failure signature repeats twice, stop and consult the ledger.
 
 ## Rules
 - Use WSL clone `/home/oni/Tri` for logic changes; avoid `/mnt/c` for active WSL work.
