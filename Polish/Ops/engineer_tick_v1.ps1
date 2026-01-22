@@ -226,6 +226,70 @@ function Quote-IfNeeded {
     return $Value
 }
 
+function Ensure-RecurringErrorsLedger {
+    param([string]$LedgerPath)
+    if (Test-Path $LedgerPath) { return }
+    $dir = Split-Path $LedgerPath -Parent
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $header = @(
+        "# Anviloop Recurring Errors",
+        "",
+        "## Entries (ERR-*)",
+        ""
+    )
+    Set-Content -Path $LedgerPath -Value $header -Encoding ascii
+}
+
+function Append-RecurringErrorEntry {
+    param(
+        [string]$LedgerPath,
+        [string]$Headline,
+        [string]$Signature
+    )
+    $errId = "ERR-" + (Get-Date).ToUniversalTime().ToString("yyyyMMdd_HHmmss")
+    $lines = @(
+        "",
+        $errId,
+        "- FirstSeen: " + (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd"),
+        "- Symptom: " + $Headline,
+        "- Signature: " + $Signature,
+        "- RootCause: TBD",
+        "- Fix: TBD",
+        "- Prevention: TBD",
+        "- Verification: TBD",
+        "- Commit: TBD"
+    )
+    Add-Content -Path $LedgerPath -Value $lines -Encoding ascii
+    return $errId
+}
+
+function Invoke-RecurringErrorLookup {
+    param(
+        [string]$Headline,
+        [string]$Signature
+    )
+    $ledgerPath = Join-Path $PSScriptRoot "..\\Docs\\ANVILOOP_RECURRING_ERRORS.md"
+    $ledgerPath = [System.IO.Path]::GetFullPath($ledgerPath)
+    Ensure-RecurringErrorsLedger -LedgerPath $ledgerPath
+    $lookupScript = Join-Path $PSScriptRoot "lookup_recurring_error.ps1"
+    $lookupScript = [System.IO.Path]::GetFullPath($lookupScript)
+    $result = $null
+    if (Test-Path $lookupScript) {
+        try {
+            $json = & $lookupScript -LedgerPath $ledgerPath -Headline $Headline -Signature $Signature
+            $result = $json | ConvertFrom-Json
+        }
+        catch {
+            $result = $null
+        }
+    }
+    if (-not $result -or -not $result.found) {
+        $newId = Append-RecurringErrorEntry -LedgerPath $ledgerPath -Headline $Headline -Signature $Signature
+        return [ordered]@{ found = $false; id = $newId }
+    }
+    return $result
+}
+
 function Test-BeeTundraActivity {
     $procs = Get-CimInstance Win32_Process
     foreach ($proc in $procs) {
@@ -916,6 +980,7 @@ if ($smokeExit -ne 0 -or $buildFailLine) {
     $headline = if ($buildFailLine) { $buildFailLine } else { "BUILD_FAIL" }
     $logPath = ""
     $outcomeSummary = ""
+    $signatureLine = $headline
 
     if ($artifactPath -and (Test-Path $artifactPath)) {
         Expand-Archive -Path $artifactPath -DestinationPath $inspectDir -Force
@@ -939,10 +1004,14 @@ if ($smokeExit -ne 0 -or $buildFailLine) {
             $tailLines = Read-LogTail -Path $logPath -TailLines 240
             $primaryLine = Find-PrimaryErrorLine -Lines $tailLines
             if ($primaryLine) { $headline = $primaryLine }
+            if ($primaryLine) { $signatureLine = $primaryLine }
         }
     }
+    if (-not $signatureLine) { $signatureLine = $headline }
+    $recurring = Invoke-RecurringErrorLookup -Headline $headline -Signature $signatureLine
     $primaryLines = @(
         "headline=$headline",
+        "signature=$signatureLine",
         "artifact_path=$artifactPath",
         "inspect_dir=$inspectDir",
         "log_path=$logPath",
