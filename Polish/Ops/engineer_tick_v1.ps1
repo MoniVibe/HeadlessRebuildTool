@@ -732,7 +732,7 @@ function Apply-FtlProofPatch {
         "        }",
         "    }",
         "",
-        "    if (_ftlState == 1 && tick >= _ftlSpoolStartTick + 60)",
+        "    if (_ftlState == 1 && tick >= _ftlSpoolStartTick + 5)",
         "    {",
         "        _ftlState = 2;",
         '        UnityEngine.Debug.Log($"[Anviloop][FTL] FTL_COMPLETE entity={_ftlTarget.Index} tick={tick}");',
