@@ -155,6 +155,82 @@ function Stop-UnityForProject {
     return $killed
 }
 
+function Get-UnityProcessForProject {
+    param([string]$ProjectPath)
+    if ([string]::IsNullOrWhiteSpace($ProjectPath)) { return $null }
+    $full = [System.IO.Path]::GetFullPath($ProjectPath)
+    $normalized = $full.ToLowerInvariant().Replace('\\', '/')
+    $alt = $normalized.Replace('/', '\\')
+    $procs = Get-CimInstance Win32_Process -Filter "Name='Unity.exe' OR Name='Unity'"
+    foreach ($proc in $procs) {
+        $cmd = $proc.CommandLine
+        if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
+        $cmdLower = $cmd.ToLowerInvariant()
+        if (-not ($cmdLower.Contains("-projectpath"))) { continue }
+        if ($cmdLower.Contains($normalized) -or $cmdLower.Contains($alt)) {
+            return $proc
+        }
+    }
+    return $null
+}
+
+function Get-LogDirSnapshot {
+    param([string]$LogsDir)
+    $snapshot = @{}
+    if (-not (Test-Path $LogsDir)) { return $snapshot }
+    Get-ChildItem -Path $LogsDir -File | ForEach-Object {
+        $snapshot[$_.Name] = [ordered]@{
+            length = $_.Length
+            mtime_utc = $_.LastWriteTimeUtc
+        }
+    }
+    return $snapshot
+}
+
+function Test-LogDirChanged {
+    param(
+        [hashtable]$Previous,
+        [hashtable]$Current
+    )
+    if (-not $Previous -or $Previous.Count -eq 0) { return $true }
+    foreach ($key in $Current.Keys) {
+        if (-not $Previous.ContainsKey($key)) { return $true }
+        $prev = $Previous[$key]
+        $cur = $Current[$key]
+        if ($prev.length -ne $cur.length -or $prev.mtime_utc -ne $cur.mtime_utc) {
+            return $true
+        }
+    }
+    foreach ($key in $Previous.Keys) {
+        if (-not $Current.ContainsKey($key)) { return $true }
+    }
+    return $false
+}
+
+function Find-RecentStagingDir {
+    param(
+        [string]$ArtifactsDir,
+        [DateTime]$StartUtc
+    )
+    if (-not (Test-Path $ArtifactsDir)) { return $null }
+    return Get-ChildItem -Path $ArtifactsDir -Directory -Filter "staging_*" |
+        Where-Object { $_.LastWriteTimeUtc -ge $StartUtc } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+}
+
+function Test-BeeTundraActivity {
+    $procs = Get-CimInstance Win32_Process
+    foreach ($proc in $procs) {
+        $name = [string]$proc.Name
+        $cmd = [string]$proc.CommandLine
+        if ($name -match '(?i)bee_backend|tundra' -or $cmd -match '(?i)bee_backend|tundra') {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -707,18 +783,106 @@ if ($FactoryHost) {
     Remove-UnityLockfile -RepoPath $worktreePath
 }
 $killedPids += Stop-UnityForProject -ProjectPath $worktreePath
-$smokeOutput = & $pipelineSmoke `
-    -Title $repoName `
-    -UnityExe $unityPath `
-    -ProjectPathOverride $worktreePath `
-    -QueueRoot $QueueRoot `
-    -ScenarioId $goal.scenario_id `
-    -ScenarioRel $goal.scenario_rel `
-    -Seed $seedA `
-    -GoalId $goalId `
-    -GoalSpec $goalSpecJob 2>&1
+$hangKillLine = "* hang_kill: none"
+$smokeLog = Join-Path $reportsDir ("engineer_tick_v1_smoke_{0}.log" -f $timestamp)
+$smokeArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $pipelineSmoke,
+    "-Title", $repoName,
+    "-UnityExe", $unityPath,
+    "-ProjectPathOverride", $worktreePath,
+    "-QueueRoot", $QueueRoot,
+    "-ScenarioId", $goal.scenario_id,
+    "-ScenarioRel", $goal.scenario_rel,
+    "-Seed", $seedA,
+    "-GoalId", $goalId,
+    "-GoalSpec", $goalSpecJob
+)
+$smokeProc = Start-Process -FilePath "powershell" -ArgumentList $smokeArgs -RedirectStandardOutput $smokeLog -RedirectStandardError $smokeLog -PassThru
+$monitorStart = Get-Date
+$lastActive = $monitorStart
+$hardTimeoutMinutes = 45
+$checkIntervalSeconds = 60
+$stagingDir = $null
+$logsDir = $null
+$prevLogSnapshot = $null
+$prevCpu = $null
+while (-not $smokeProc.HasExited) {
+    if (-not $stagingDir) {
+        $stagingDir = Find-RecentStagingDir -ArtifactsDir (Join-Path $QueueRoot "artifacts") -StartUtc $buildStartUtc
+        if ($stagingDir) {
+            $logsDir = Join-Path $stagingDir.FullName "logs"
+        }
+    }
 
-$smokeExit = $LASTEXITCODE
+    $unityProc = Get-UnityProcessForProject -ProjectPath $worktreePath
+    $unityPid = $null
+    $cpuIncreased = $false
+    if ($unityProc) {
+        $unityPid = [int]$unityProc.ProcessId
+        $procInfo = Get-Process -Id $unityPid -ErrorAction SilentlyContinue
+        if ($procInfo) {
+            $cpuNow = $procInfo.CPU
+            if ($prevCpu -ne $null -and $cpuNow -ne $null -and $cpuNow -gt $prevCpu) {
+                $cpuIncreased = $true
+            }
+            if ($cpuNow -ne $null) {
+                $prevCpu = $cpuNow
+            }
+        }
+    }
+
+    $logsChanged = $false
+    if ($logsDir -and (Test-Path $logsDir)) {
+        $snapshot = Get-LogDirSnapshot -LogsDir $logsDir
+        $logsChanged = Test-LogDirChanged -Previous $prevLogSnapshot -Current $snapshot
+        $prevLogSnapshot = $snapshot
+    }
+    else {
+        $logsChanged = $true
+    }
+
+    $beeActive = Test-BeeTundraActivity
+    $activityDetected = $logsChanged -or $cpuIncreased -or $beeActive -or (-not $unityPid)
+    if ($activityDetected) {
+        $lastActive = Get-Date
+    }
+
+    $idleMinutes = (New-TimeSpan -Start $lastActive -End (Get-Date)).TotalMinutes
+    $idleExceeded = $idleMinutes -ge 8
+    if ($unityPid -and $idleExceeded -and -not $cpuIncreased -and -not $logsChanged -and -not $beeActive) {
+        Stop-Process -Id $unityPid -Force -ErrorAction SilentlyContinue
+        $hangKillLine = "* hang_kill: killed Unity PID $unityPid after {0:N1}m idle (no CPU/log/bee activity)" -f $idleMinutes
+        break
+    }
+
+    if ((Get-Date) -gt $monitorStart.AddMinutes($hardTimeoutMinutes)) {
+        if ($unityPid) {
+            Stop-Process -Id $unityPid -Force -ErrorAction SilentlyContinue
+            $hangKillLine = "* hang_kill: killed Unity PID $unityPid after hard timeout ({0}m)" -f $hardTimeoutMinutes
+        }
+        else {
+            $hangKillLine = "* hang_kill: hard timeout reached (Unity not running)"
+        }
+        break
+    }
+
+    Start-Sleep -Seconds $checkIntervalSeconds
+    $smokeProc.Refresh()
+}
+
+if (-not $smokeProc.HasExited) {
+    Wait-Process -Id $smokeProc.Id -Timeout 600 -ErrorAction SilentlyContinue | Out-Null
+    $smokeProc.Refresh()
+}
+
+if (-not $smokeProc.HasExited) {
+    Stop-Process -Id $smokeProc.Id -Force -ErrorAction SilentlyContinue
+}
+
+$smokeExit = $smokeProc.ExitCode
+$smokeOutput = if (Test-Path $smokeLog) { Get-Content -Path $smokeLog } else { @() }
 $buildFailLine = $smokeOutput | Where-Object { $_ -like "BUILD_FAIL*" } | Select-Object -First 1
 $artifactPath = ""
 $artifactLine = $smokeOutput | Where-Object { $_ -like "artifact=*" } | Select-Object -Last 1
@@ -793,6 +957,7 @@ if ($smokeExit -ne 0 -or $buildFailLine) {
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
         $cleanupLine,
+        $hangKillLine,
         "* branch: $branchName",
         "* commit: $commitSha",
         "* probe: PASS",
@@ -843,13 +1008,14 @@ $lines = @(
     "# EngineerTick v1",
     "",
     "* goal_id: $goalId",
-        "* repo: $repoName",
-        "* task: $($goal.task)",
-        "* base_ref: $effectiveBaseRef",
-        $cleanupLine,
-        "* branch: $branchName",
-        "* commit: $commitSha",
-        "* probe: PASS",
+    "* repo: $repoName",
+    "* task: $($goal.task)",
+    "* base_ref: $effectiveBaseRef",
+    $cleanupLine,
+    $hangKillLine,
+    "* branch: $branchName",
+    "* commit: $commitSha",
+    "* probe: PASS",
         "* probe_log: $($probe.log_path)",
         "* build_id: $buildId",
         "* queued_jobs: $([string]::Join(', ', $queuedJobs))",
