@@ -715,7 +715,7 @@ function Apply-FtlProofPatch {
     }
 
     $proofLines = @(
-        "if (_runStarted == 1)",
+        "if (_runtimeSeen == 1)",
         "{",
         "    if (_ftlState == 0)",
         "    {",
