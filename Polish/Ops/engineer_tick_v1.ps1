@@ -67,6 +67,35 @@ function Remove-UnityLockfile {
     }
 }
 
+function Clear-WorktreeBuildCache {
+    param([string]$RepoPath)
+    $deleted = New-Object System.Collections.Generic.List[string]
+    $folders = @(
+        "Library\\Bee",
+        "Library\\ScriptAssemblies",
+        "Temp\\BeeArtifacts"
+    )
+    foreach ($relPath in $folders) {
+        $fullPath = Join-Path $RepoPath $relPath
+        if (Test-Path $fullPath) {
+            Remove-Item -Recurse -Force $fullPath
+            $deleted.Add($relPath)
+        }
+    }
+    $lockPaths = @(
+        "Temp\\UnityLockfile",
+        "Library\\UnityLockfile"
+    )
+    foreach ($relPath in $lockPaths) {
+        $fullPath = Join-Path $RepoPath $relPath
+        if (Test-Path $fullPath) {
+            Remove-Item -Force $fullPath
+            $deleted.Add($relPath)
+        }
+    }
+    return $deleted
+}
+
 function Stop-UnityEditorsForFactory {
     param([int]$MinAgeMinutes = 2)
     $cutoff = (Get-Date).AddMinutes(-$MinAgeMinutes)
@@ -533,6 +562,8 @@ $branchName = "wild/engv1_{0}_{1}" -f $timestamp, $goalIdSafe
 $worktreePath = Join-Path $worktreeRoot $timestamp
 $killedPids = @()
 $factoryKilledPids = @()
+$worktreeCleanup = @()
+$cleanupLine = "* worktree_cleanup: skipped"
 
 if ($effectiveBaseRef) {
     & git -C $repoPath worktree add -b $branchName $worktreePath $effectiveBaseRef
@@ -547,7 +578,13 @@ if ($LASTEXITCODE -ne 0) {
 try {
     $puredotsPackage = Ensure-PureDotsLink -RepoName $repoName -WorktreePath $worktreePath -Root $Root
     Reset-HeadlessManifests -RepoPath $worktreePath
-    Remove-UnityLockfile -RepoPath $worktreePath
+    $worktreeCleanup = Clear-WorktreeBuildCache -RepoPath $worktreePath
+    if ($worktreeCleanup.Count -gt 0) {
+        $cleanupLine = "* worktree_cleanup: " + ($worktreeCleanup -join ", ")
+    }
+    else {
+        $cleanupLine = "* worktree_cleanup: none"
+    }
     if ($FactoryHost) {
         $factoryKilledPids += Stop-UnityEditorsForFactory
         Remove-UnityLockfile -RepoPath $worktreePath
@@ -562,6 +599,7 @@ catch {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* bootstrap: FAIL",
         "* bootstrap_error: $($_.Exception.Message)",
@@ -580,6 +618,7 @@ if ($preProbeStatus) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* bootstrap: FAIL",
         "* bootstrap_error: worktree dirty before probe",
@@ -608,6 +647,7 @@ if (-not $probe.success) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* probe: FAIL",
         "* probe_log: $($probe.log_path)",
@@ -627,6 +667,7 @@ if (-not $gitStatus) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $cleanupLine,
         "* branch: $branchName (not pushed)",
         "* probe: PASS",
         "* note: no changes detected",
@@ -750,6 +791,7 @@ if ($smokeExit -ne 0 -or $buildFailLine) {
         "* repo: $repoName",
         "* task: $($goal.task)",
         "* base_ref: $effectiveBaseRef",
+        $cleanupLine,
         "* branch: $branchName",
         "* commit: $commitSha",
         "* probe: PASS",
@@ -800,15 +842,16 @@ $lines = @(
     "# EngineerTick v1",
     "",
     "* goal_id: $goalId",
-    "* repo: $repoName",
-    "* task: $($goal.task)",
-    "* base_ref: $effectiveBaseRef",
-    "* branch: $branchName",
-    "* commit: $commitSha",
-    "* probe: PASS",
-    "* probe_log: $($probe.log_path)",
-    "* build_id: $buildId",
-    "* queued_jobs: $([string]::Join(', ', $queuedJobs))",
+        "* repo: $repoName",
+        "* task: $($goal.task)",
+        "* base_ref: $effectiveBaseRef",
+        $cleanupLine,
+        "* branch: $branchName",
+        "* commit: $commitSha",
+        "* probe: PASS",
+        "* probe_log: $($probe.log_path)",
+        "* build_id: $buildId",
+        "* queued_jobs: $([string]::Join(', ', $queuedJobs))",
     ""
 )
 Write-Report -Path $reportPath -Lines $lines
