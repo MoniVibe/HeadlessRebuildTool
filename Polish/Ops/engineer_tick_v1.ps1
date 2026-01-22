@@ -701,9 +701,9 @@ function Apply-FtlProofPatch {
         return
     }
 
-    Insert-AfterPattern -Path $target -Pattern '^using Space4x\\.Scenario;' -InsertText 'using Space4X.Registry;'
-    Insert-AfterPattern -Path $target -Pattern '^using Unity\\.Entities;' -InsertText 'using Unity.Mathematics;'
-    Insert-AfterPattern -Path $target -Pattern '^using Unity\\.Mathematics;' -InsertText 'using Unity.Transforms;'
+    Insert-AfterPattern -Path $target -Pattern '^using Space4x\.Scenario;' -InsertText 'using Space4X.Registry;'
+    Insert-AfterPattern -Path $target -Pattern '^using Unity\.Entities;' -InsertText 'using Unity.Mathematics;'
+    Insert-AfterPattern -Path $target -Pattern '^using Unity\.Mathematics;' -InsertText 'using Unity.Transforms;'
 
     $fieldsApplied = $true
     $fieldsApplied = $fieldsApplied -and (Insert-AfterPattern -Path $target -Pattern 'private byte _exitHandled;' -InsertText 'private Entity _ftlTarget;')
