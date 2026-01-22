@@ -219,6 +219,13 @@ function Find-RecentStagingDir {
         Select-Object -First 1
 }
 
+function Quote-IfNeeded {
+    param([string]$Value)
+    if ($null -eq $Value) { return '""' }
+    if ($Value -match '\s') { return '"' + $Value + '"' }
+    return $Value
+}
+
 function Test-BeeTundraActivity {
     $procs = Get-CimInstance Win32_Process
     foreach ($proc in $procs) {
@@ -803,7 +810,8 @@ $smokeArgs = @(
     "-GoalId", $goalId,
     "-GoalSpec", $goalSpecJob
 )
-$smokeProc = Start-Process -FilePath "powershell" -ArgumentList $smokeArgs -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
+$smokeArgsQuoted = $smokeArgs | ForEach-Object { Quote-IfNeeded $_ }
+$smokeProc = Start-Process -FilePath "powershell" -ArgumentList $smokeArgsQuoted -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
 $monitorStart = Get-Date
 $lastActive = $monitorStart
 $hardTimeoutMinutes = 45

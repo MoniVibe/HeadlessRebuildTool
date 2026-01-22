@@ -11,3 +11,6 @@
   - Bee "Require frontend run" / BeeDriver interrupted build cache.
   - Stale Editor.log vs per-run -logFile (must capture per-run logs).
   - Start-Process argument quoting: -ArgumentList without quoting paths causes UnityExe to bind to wrong parameter (TimeoutSec).
+    - Root cause: Start-Process tokenization without quoting whitespace arguments.
+    - Fix: quote args before Start-Process (stdout/stderr split).
+    - Verification: EngineerTick rerun produced artifact zip `C:\polish\queue\artifacts\artifact_20260122_075109_330_ae9de3ca.zip` (build started).
