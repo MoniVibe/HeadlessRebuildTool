@@ -751,9 +751,9 @@ function Apply-FtlProofPatch {
         "    }",
         "}"
     )
-    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\\(\"complete\", \"end\", tick\\)' -InsertLines $proofLines
+    $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\("complete", "end", tick\)' -InsertLines $proofLines
     if (-not $proofApplied) {
-        $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\\(\"run\", \"start\", tick\\)' -InsertLines $proofLines
+        $proofApplied = Insert-AfterPatternMulti -Path $target -Pattern 'UpdateProgress\("run", "start", tick\)' -InsertLines $proofLines
     }
     if (-not $proofApplied) {
         throw "Failed to insert FTL proof markers."
