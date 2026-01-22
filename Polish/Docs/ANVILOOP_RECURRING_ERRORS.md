@@ -10,3 +10,4 @@
   - Missing local PureDOTS package path in worktree (junction not created or stale).
   - Bee "Require frontend run" / BeeDriver interrupted build cache.
   - Stale Editor.log vs per-run -logFile (must capture per-run logs).
+  - Start-Process argument quoting: -ArgumentList without quoting paths causes UnityExe to bind to wrong parameter (TimeoutSec).
