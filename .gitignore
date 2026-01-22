@@ -3,6 +3,7 @@ nightly_artifacts/
 nightly_summary.json
 *.log
 *.tmp
+.venv/
 .DS_Store
 
 # HeadlessBuildSupervisor build outputs
