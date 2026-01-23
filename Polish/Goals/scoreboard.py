@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 def load_json_from_zip(zip_path, name):
@@ -88,11 +88,27 @@ def reason_counts(items, key):
     )
 
 
+def parse_utc(value):
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def next_action(entry):
     validity = entry.get("validity_status")
     reason = entry.get("validity_reason")
     goal_id = entry.get("goal_id") or "unknown_goal"
     score = entry.get("goal_score")
+    if validity == "PENDING":
+        return "NEXT: wait for runner backlog (pending)"
     if validity and validity != "VALID":
         detail = reason or "invalid_evidence"
         return f"NEXT: fix infra/instrumentation ({detail})"
@@ -108,6 +124,7 @@ def main():
     parser.add_argument("--intel-dir", default=r"C:\polish\queue\reports\intel")
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--goal-specs-dir", default=None)
+    parser.add_argument("--pending-grace-sec", type=int, default=600)
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -230,11 +247,26 @@ def main():
 
     expected_jobs = load_expected_jobs(args.reports_dir)
     if expected_jobs:
+        now = datetime.now(timezone.utc)
         existing_ids = {entry.get("job_id") for entry in entries if entry.get("job_id")}
+        existing_prefixes = set()
+        for zip_path in zips:
+            name = os.path.basename(zip_path)
+            if name.startswith("result_") and name.endswith(".zip"):
+                existing_prefixes.add(name[:-4])
         for item in expected_jobs:
             job_id = item.get("job_id")
             if not job_id or job_id in existing_ids:
                 continue
+            expected_prefix = item.get("expected_result_prefix")
+            if expected_prefix and expected_prefix in existing_prefixes:
+                continue
+            created_at = parse_utc(item.get("created_utc"))
+            age_ok = False
+            if created_at:
+                age_ok = (now - created_at) < timedelta(seconds=args.pending_grace_sec)
+            validity_status = "PENDING" if age_ok else "INVALID"
+            validity_reason = "result_pending" if age_ok else "result_missing"
             entry = {
                 "result_zip": None,
                 "job_id": job_id,
@@ -249,23 +281,24 @@ def main():
                 "goal_score": 0,
                 "goal_spec": item.get("goal_spec"),
                 "telemetry_event_total": None,
-                "validity_status": "INVALID",
-                "validity_reason": "result_missing",
+                "validity_status": validity_status,
+                "validity_reason": validity_reason,
                 "explain_path": None,
                 "question_summary": None,
                 "utc": item.get("created_utc"),
             }
             entries.append(entry)
-            invalid_reasons.append({"reason": "result_missing"})
-            triage.append(
-                {
-                    "goal_id": entry.get("goal_id") or "unknown_goal",
-                    "status": "INVALID",
-                    "score": 0,
-                    "result_zip": "(missing)",
-                    "note": "result_missing",
-                }
-            )
+            if not age_ok:
+                invalid_reasons.append({"reason": "result_missing"})
+                triage.append(
+                    {
+                        "goal_id": entry.get("goal_id") or "unknown_goal",
+                        "status": "INVALID",
+                        "score": 0,
+                        "result_zip": "(missing)",
+                        "note": "result_missing",
+                    }
+                )
 
     top_invalid = reason_counts(invalid_reasons, "reason")[:5]
     top_failed_questions = sorted(
