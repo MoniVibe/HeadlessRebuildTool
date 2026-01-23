@@ -484,6 +484,609 @@
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     },
+    "P1.SPACE4X_PERF_ENTITIES_A": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_entities_a.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 90,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_ENTITIES_B": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_entities_b.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 91,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_ENTITIES_C": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_entities_c.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 92,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_PATH_A": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_path_a.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 93,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_PATH_B": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_path_b.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 94,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_PATH_C": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_path_c.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 95,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_PROJECTILES_A": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_projectiles_a.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 96,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_PROJECTILES_B": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_projectiles_b.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 97,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "P1.SPACE4X_PERF_PROJECTILES_C": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_perf_projectiles_c.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "ai_polish",
+      "default_seeds": [
+        1337,
+        1337,
+        2048
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "perf",
+        "stress"
+      ],
+      "nightly_order": 98,
+      "required_bank": "",
+      "metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "perf.entities.total",
+        "perf.chunks.total",
+        "perf.structural.change_delta",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "perf.timing.total_ms",
+        "perf.memory.reserved.bytes",
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "perf.timing.total_ms": {
+          "min": 0
+        },
+        "perf.memory.reserved.bytes": {
+          "min": 0
+        },
+        "perf.entities.total": {
+          "min": 1
+        },
+        "perf.chunks.total": {
+          "min": 1
+        },
+        "perf.structural.change_delta": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
     "S0.SPACE4X_SMOKE": {
       "project": "space4x",
       "runner": "space4x_loader",
