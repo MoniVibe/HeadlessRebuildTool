@@ -176,6 +176,124 @@ def read_zip_tail_text(zf, member, max_bytes=65536):
         return ""
 
 
+def zip_has_entry(zf, member):
+    try:
+        zf.getinfo(member)
+        return True
+    except KeyError:
+        return False
+
+
+def normalize_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "t")
+    return False
+
+
+def read_zip_json_any(zf, members):
+    for member in members:
+        payload = read_zip_json(zf, member)
+        if payload is not None:
+            return payload
+    return None
+
+
+def summarize_operator_report(report):
+    if not isinstance(report, dict):
+        return None
+
+    summary = {
+        "required": {"pass": 0, "fail": 0, "unknown": 0, "total": 0},
+        "optional": {"pass": 0, "fail": 0, "unknown": 0, "total": 0},
+        "unknown_reasons": [],
+        "failing_required_ids": [],
+        "unknown_required_ids": [],
+        "source": "operator_report",
+    }
+
+    def normalize_status(value):
+        text = str(value or "").strip().lower()
+        if text in ("pass", "passed", "ok", "success", "true"):
+            return "pass"
+        if text in ("fail", "failed", "error", "false"):
+            return "fail"
+        if text in ("unknown", "missing", "unanswered", "unresolved", "pending", "n/a", "na"):
+            return "unknown"
+        return "unknown"
+
+    def push_reason(bucket, reason):
+        if not reason:
+            return
+        bucket[reason] = bucket.get(reason, 0) + 1
+
+    questions = report.get("questions")
+    if not isinstance(questions, list):
+        questions = report.get("required_questions")
+    if not isinstance(questions, list):
+        questions = report.get("question_statuses")
+
+    unknown_reason_counts = {}
+    failing_required_ids = []
+    unknown_required_ids = []
+
+    if isinstance(questions, list):
+        for item in questions:
+            if not isinstance(item, dict):
+                continue
+            required = bool(item.get("required", False))
+            status = normalize_status(item.get("status"))
+            reason = (
+                item.get("unknown_reason")
+                or item.get("reason")
+                or item.get("message")
+                or ""
+            )
+            qid = item.get("id") or item.get("question_id") or item.get("key")
+            bucket = summary["required"] if required else summary["optional"]
+            bucket["total"] += 1
+            bucket[status] += 1
+            if status == "unknown":
+                push_reason(unknown_reason_counts, str(reason))
+                if required and qid:
+                    unknown_required_ids.append(str(qid))
+            if status == "fail" and required and qid:
+                failing_required_ids.append(str(qid))
+    else:
+        summary["source"] = "operator_report_missing_questions"
+
+    if not isinstance(questions, list):
+        unknown_flags = []
+        for key in (
+            "required_questions_unknown",
+            "unknown_required_questions",
+            "required_questions_missing",
+            "required_questions_unanswered",
+            "required_questions_unresolved",
+        ):
+            value = report.get(key)
+            if value:
+                unknown_flags.append(key)
+        if unknown_flags:
+            summary["required"]["unknown"] += len(unknown_flags)
+            summary["required"]["total"] += len(unknown_flags)
+            for key in unknown_flags:
+                push_reason(unknown_reason_counts, key)
+
+    summary["unknown_reasons"] = [
+        {"reason": reason, "count": count}
+        for reason, count in sorted(unknown_reason_counts.items(), key=lambda item: (-item[1], item[0]))
+        if reason
+    ][:5]
+    summary["failing_required_ids"] = failing_required_ids[:5]
+    summary["unknown_required_ids"] = unknown_required_ids[:5]
+
+    return summary
+
+
 def extract_proof_lines(text, max_lines=10):
     proof = []
     for line in split_lines(text, max_lines=200):
@@ -377,6 +495,106 @@ def build_record_from_zip(result_zip):
         watchdog = read_zip_json(zf, "out/watchdog.json") or {}
         run_summary = read_zip_json(zf, "out/run_summary.json") or {}
         score = read_zip_json(zf, "out/polish_score_v0.json") or {}
+        operator_report = read_zip_json_any(
+            zf, ["out/operator_report.json", "operator_report.json"]
+        )
+        questions_summary = summarize_operator_report(operator_report)
+
+        artifact_paths = (
+            meta.get("artifact_paths") if isinstance(meta.get("artifact_paths"), dict) else {}
+        )
+        has_watchdog = bool(watchdog)
+        has_run_summary = isinstance(run_summary, dict) and bool(run_summary)
+        has_goal_report = zip_has_entry(zf, "out/goal_report.json")
+
+        telemetry_summary = (
+            run_summary.get("telemetry_summary") if isinstance(run_summary, dict) else None
+        )
+        telemetry_events = (
+            telemetry_summary.get("event_total")
+            if isinstance(telemetry_summary, dict)
+            else None
+        )
+        telemetry_bytes = None
+        telemetry_files = None
+        if isinstance(run_summary, dict):
+            telemetry = run_summary.get("telemetry")
+            if isinstance(telemetry, dict):
+                telemetry_bytes = telemetry.get("bytes_total")
+                telemetry_files = telemetry.get("files")
+
+        invalid_reasons = []
+        if not meta:
+            invalid_reasons.append("meta_missing")
+        if not has_watchdog:
+            invalid_reasons.append("watchdog_missing")
+        if not has_run_summary:
+            invalid_reasons.append("run_summary_missing")
+        if telemetry_summary is None:
+            invalid_reasons.append("telemetry_summary_missing")
+        elif telemetry_events in (None, 0):
+            invalid_reasons.append("telemetry_event_total_missing_or_zero")
+
+        invariants_present = (
+            "invariants_json" in artifact_paths
+            or zip_has_entry(zf, "out/invariants.json")
+        )
+        if not invariants_present:
+            invalid_reasons.append("invariants_missing")
+
+        if normalize_bool(meta.get("repo_dirty_post")):
+            invalid_reasons.append("repo_dirty_post")
+        manifest_drift = meta.get("manifest_drift")
+        if isinstance(manifest_drift, dict) and manifest_drift.get("detected"):
+            invalid_reasons.append("manifest_drift")
+
+        if meta.get("goal_id") and not meta.get("base_ref"):
+            invalid_reasons.append("base_ref_missing")
+        if not meta.get("scenario_id") and not meta.get("scenario_rel"):
+            invalid_reasons.append("scenario_missing")
+
+        if (
+            meta.get("exit_reason") == "OK_WITH_WARNINGS"
+            and meta.get("original_exit_reason") == "TEST_FAIL"
+        ):
+            if "required_questions_unknown" not in invalid_reasons:
+                invalid_reasons.append("required_questions_unknown")
+        if questions_summary and questions_summary["required"]["unknown"] > 0:
+            if "required_questions_unknown" not in invalid_reasons:
+                invalid_reasons.append("required_questions_unknown")
+
+        validity_status = (
+            "INVALID"
+            if invalid_reasons
+            else "OK_WITH_WARNINGS"
+            if meta.get("exit_reason") == "OK_WITH_WARNINGS"
+            else "VALID"
+        )
+        validity = {
+            "status": validity_status,
+            "invalid_reasons": invalid_reasons,
+            "comparability": {
+                "scenario_id": meta.get("scenario_id") or None,
+                "scenario_rel": meta.get("scenario_rel") or None,
+                "seed": meta.get("seed"),
+                "build_id": meta.get("build_id"),
+                "commit": meta.get("commit"),
+                "base_ref": meta.get("base_ref") or None,
+                "goal_id": meta.get("goal_id") or None,
+                "goal_spec": meta.get("goal_spec") or None,
+            },
+            "evidence": {
+                "artifact_paths": sorted(list(artifact_paths.keys())),
+                "telemetry_bytes": telemetry_bytes,
+                "telemetry_events": telemetry_events,
+                "telemetry_files": telemetry_files,
+                "has_watchdog": has_watchdog,
+                "has_run_summary": has_run_summary,
+                "has_goal_report": has_goal_report,
+                "repo_status_pre": meta.get("repo_status_pre"),
+                "repo_status_post": meta.get("repo_status_post"),
+            },
+        }
 
         stdout_tail = watchdog.get("stdout_tail", "")
         stderr_tail = watchdog.get("stderr_tail", "")
@@ -430,6 +648,14 @@ def build_record_from_zip(result_zip):
             "failure_signature": meta.get("failure_signature"),
             "goal_id": meta.get("goal_id"),
             "goal_spec": meta.get("goal_spec"),
+            "base_ref": meta.get("base_ref"),
+            "repo_dirty_post": meta.get("repo_dirty_post"),
+            "manifest_drift": meta.get("manifest_drift"),
+            "repo_status_pre": meta.get("repo_status_pre"),
+            "repo_status_post": meta.get("repo_status_post"),
+            "original_exit_reason": meta.get("original_exit_reason"),
+            "original_exit_code": meta.get("original_exit_code"),
+            "artifact_paths": artifact_paths,
         },
         "headline": headline,
         "raw_signature_string": raw_signature,
@@ -446,6 +672,8 @@ def build_record_from_zip(result_zip):
             "grade": score.get("grade"),
             "total_loss": score.get("total_loss"),
         },
+        "validity": validity,
+        "questions": questions_summary,
         "embed_text": embed_text,
     }
     return record
@@ -584,11 +812,38 @@ def build_explain(record):
         "suggested_prevention": suggested_prevention,
     }
 
+    validity = record.get("validity")
+    if isinstance(validity, dict):
+        explain["validity"] = validity
+        invalid_reasons = validity.get("invalid_reasons") or []
+        missing_evidence = {
+            "meta_missing",
+            "watchdog_missing",
+            "run_summary_missing",
+            "telemetry_summary_missing",
+            "telemetry_event_total_missing_or_zero",
+            "invariants_missing",
+        }
+        primary_issue = None
+        for reason in invalid_reasons:
+            if reason in missing_evidence:
+                primary_issue = reason
+                break
+        if primary_issue:
+            explain["primary_evidence_issue"] = primary_issue
+            explain["headline"] = f"EVIDENCE_INVALID:{primary_issue}"
+    questions = record.get("questions")
+    if isinstance(questions, dict):
+        explain["questions"] = questions
+
     reports_dir = Path("/mnt/c/polish/queue/reports/intel")
     reports_dir.mkdir(parents=True, exist_ok=True)
     job_id = record.get("meta", {}).get("job_id") or record.get("record_id")
     explain_path = reports_dir / f"explain_{job_id}.json"
     write_json(explain_path, explain)
+    if isinstance(questions, dict):
+        questions_path = reports_dir / f"questions_{job_id}.json"
+        write_json(questions_path, questions)
     return explain_path
 
 
