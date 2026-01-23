@@ -1527,7 +1527,10 @@ run_job() {
 
   if [ -z "$error_context" ] && [ -n "$scenario_id" ] && [ -z "$scenario_rel" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
     if ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
-      error_context="scenario_not_supported:${scenario_id}"
+      local scenario_prefix="${scenario_id%%_*}"
+      if [ -z "$scenario_prefix" ] || ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_prefix"; then
+        error_context="scenario_not_supported:${scenario_id}"
+      fi
     fi
   fi
 
