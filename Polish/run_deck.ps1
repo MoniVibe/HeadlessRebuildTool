@@ -66,6 +66,17 @@ function Normalize-GoalSpecPath {
     return $normalized.TrimStart("./")
 }
 
+function Get-OptionalValue {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+    if ($null -eq $Object) { return $null }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $null }
+    return $prop.Value
+}
+
 function Load-Deck {
     param([string]$Path)
     if (-not (Test-Path $Path)) { throw "Deck not found: $Path" }
@@ -153,12 +164,20 @@ function Build-Artifact {
     $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
     $buildId = "${timestamp}_$commitShort"
 
-    $syncScript = Join-Path $RepoRoot "Tools\\sync_headless_manifest.ps1"
-    $swapScript = Join-Path $RepoRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"
+    $toolsRoot = $null
+    foreach ($candidateRoot in @((Join-Path $RepoRoot "Tools"), (Join-Path $WorkspaceRoot "Tools"))) {
+        if (Test-Path (Join-Path $candidateRoot "sync_headless_manifest.ps1")) {
+            $toolsRoot = $candidateRoot
+            break
+        }
+    }
+    if (-not $toolsRoot) { $toolsRoot = Join-Path $RepoRoot "Tools" }
+    $syncScript = Join-Path $toolsRoot "sync_headless_manifest.ps1"
+    $swapScript = Join-Path $toolsRoot "Tools\\use_headless_manifest_windows.ps1"
     if (-not (Test-Path $syncScript)) { throw "Missing headless manifest sync script: $syncScript" }
     if (-not (Test-Path $swapScript)) { throw "Missing headless manifest swap script: $swapScript" }
 
-    $supervisorProject = Join-Path $RepoRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
+    $supervisorProject = Join-Path $toolsRoot "HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
     if (-not (Test-Path $supervisorProject)) {
         throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
     }
@@ -178,14 +197,14 @@ function Build-Artifact {
     $manifestPre = Get-ManifestSnapshot -ProjectPath $ProjectPath
     $swapApplied = $false
     try {
-        & $syncScript -ProjectPath $ProjectPath
-        & $swapScript -ProjectPath $ProjectPath
+        & $syncScript -ProjectPath $ProjectPath | Out-Null
+        & $swapScript -ProjectPath $ProjectPath | Out-Null
         $swapApplied = $true
-        & dotnet @supervisorArgs
+        & dotnet @supervisorArgs | Out-Null
     }
     finally {
         if ($swapApplied) {
-            & $swapScript -ProjectPath $ProjectPath -Restore
+            & $swapScript -ProjectPath $ProjectPath -Restore | Out-Null
         }
     }
     $repoStatusPost = Get-RepoStatus -ProjectPath $ProjectPath
@@ -195,7 +214,7 @@ function Build-Artifact {
     $artifactZip = Join-Path $ArtifactsDir ("artifact_{0}.zip" -f $buildId)
     if (-not (Test-Path $artifactZip)) { throw "Artifact zip not found: $artifactZip" }
 
-    return [ordered]@{
+    return [pscustomobject]@{
         build_id = $buildId
         commit = $commitFull.Trim()
         artifact_zip = $artifactZip
@@ -253,13 +272,19 @@ function Invoke-Headline {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
+$workspaceRoot = Split-Path -Parent $repoRoot
 $defaults = Load-PipelineDefaults -ScriptRoot $scriptRoot
 $deck = Load-Deck -Path $DeckPath
 
-$queueRootValue = if ($QueueRoot) { $QueueRoot } elseif ($deck.queue_root) { $deck.queue_root } else { "C:\\polish\\queue" }
-$pollSecValue = if ($PollSec -gt 0) { $PollSec } elseif ($deck.poll_sec) { [int]$deck.poll_sec } else { 60 }
-$pendingGraceValue = if ($PendingGraceSec -gt 0) { $PendingGraceSec } elseif ($deck.pending_grace_sec) { [int]$deck.pending_grace_sec } else { 600 }
-$maxMinutesValue = if ($MaxMinutes -gt 0) { $MaxMinutes } elseif ($deck.max_minutes) { [int]$deck.max_minutes } else { 720 }
+$deckQueueRoot = Get-OptionalValue $deck "queue_root"
+$deckPollSec = Get-OptionalValue $deck "poll_sec"
+$deckPendingGrace = Get-OptionalValue $deck "pending_grace_sec"
+$deckMaxMinutes = Get-OptionalValue $deck "max_minutes"
+
+$queueRootValue = if ($QueueRoot) { $QueueRoot } elseif ($deckQueueRoot) { [string]$deckQueueRoot } else { "C:\\polish\\queue" }
+$pollSecValue = if ($PollSec -gt 0) { $PollSec } elseif ($deckPollSec) { [int]$deckPollSec } else { 60 }
+$pendingGraceValue = if ($PendingGraceSec -gt 0) { $PendingGraceSec } elseif ($deckPendingGrace) { [int]$deckPendingGrace } else { 600 }
+$maxMinutesValue = if ($MaxMinutes -gt 0) { $MaxMinutes } elseif ($deckMaxMinutes) { [int]$deckMaxMinutes } else { 720 }
 $wslRepoRoot = Convert-ToWslPath $repoRoot
 
 $artifactsDir = Join-Path $queueRootValue "artifacts"
@@ -273,18 +298,28 @@ Ensure-Directory $resultsDir
 Ensure-Directory $reportsDir
 Ensure-Directory $intelDir
 
-if (-not $deck.jobs) { throw "Deck has no jobs." }
+$deckJobs = Get-OptionalValue $deck "jobs"
+if (-not $deckJobs) { throw "Deck has no jobs." }
 
 $buildCache = @{}
 $expectedJobs = New-Object System.Collections.Generic.List[object]
 
 if ($Mode -in @("run", "enqueue")) {
-    foreach ($job in $deck.jobs) {
-        $title = [string]$job.title
+    foreach ($job in $deckJobs) {
+        $titleValue = Get-OptionalValue $job "title"
+        $title = [string]$titleValue
         if ([string]::IsNullOrWhiteSpace($title)) { throw "Deck job missing title." }
         $titleKey = $title.ToLowerInvariant()
         $defaultsTitle = if ($defaults -and $defaults.titles) { $defaults.titles.$titleKey } else { $null }
-        $projectPath = if ($job.project_path_override) { $job.project_path_override } elseif ($defaultsTitle) { Join-Path $repoRoot $defaultsTitle.project_path } else { "" }
+        $projectPathOverride = Get-OptionalValue $job "project_path_override"
+        if ($projectPathOverride) {
+            $projectPath = [string]$projectPathOverride
+        } elseif ($defaultsTitle) {
+            $defaultPath = [string]$defaultsTitle.project_path
+            $projectPath = if ([System.IO.Path]::IsPathRooted($defaultPath)) { $defaultPath } else { Join-Path $workspaceRoot $defaultPath }
+        } else {
+            $projectPath = ""
+        }
         if ([string]::IsNullOrWhiteSpace($projectPath)) { throw "Project path missing for $title." }
         $projectPath = [System.IO.Path]::GetFullPath($projectPath)
 
@@ -293,18 +328,27 @@ if ($Mode -in @("run", "enqueue")) {
         }
         $build = $buildCache[$projectPath]
 
-        $scenarioId = [string]$job.scenario_id
-        $scenarioRel = if ($job.scenario_rel) { Normalize-ScenarioRel $job.scenario_rel } else { "" }
-        $seed = if ($job.seed -ne $null) { [int]$job.seed } elseif ($defaultsTitle) { [int]$defaultsTitle.seed } else { 0 }
-        $timeoutSec = if ($job.timeout_sec -ne $null) { [int]$job.timeout_sec } elseif ($defaultsTitle) { [int]$defaultsTitle.timeout_sec } else { 120 }
-        $repeatCount = if ($job.repeat -ne $null) { [int]$job.repeat } else { 1 }
-        $argsValue = if ($job.args) { @($job.args) } elseif ($defaultsTitle -and $defaultsTitle.args) { @($defaultsTitle.args) } else { @() }
+        $scenarioIdValue = Get-OptionalValue $job "scenario_id"
+        $scenarioId = [string]$scenarioIdValue
+        $scenarioRelValue = Get-OptionalValue $job "scenario_rel"
+        $scenarioRel = if ($scenarioRelValue) { Normalize-ScenarioRel $scenarioRelValue } else { "" }
+        $seedValue = Get-OptionalValue $job "seed"
+        $timeoutValue = Get-OptionalValue $job "timeout_sec"
+        $repeatValue = Get-OptionalValue $job "repeat"
+        $argsRaw = Get-OptionalValue $job "args"
+        $seed = if ($seedValue -ne $null) { [int]$seedValue } elseif ($defaultsTitle) { [int]$defaultsTitle.seed } else { 0 }
+        $timeoutSec = if ($timeoutValue -ne $null) { [int]$timeoutValue } elseif ($defaultsTitle) { [int]$defaultsTitle.timeout_sec } else { 120 }
+        $repeatCount = if ($repeatValue -ne $null) { [int]$repeatValue } else { 1 }
+        $argsValue = if ($argsRaw) { @($argsRaw) } elseif ($defaultsTitle -and $defaultsTitle.args) { @($defaultsTitle.args) } else { @() }
 
         $artifactUri = Convert-ToWslPath $build.artifact_zip
         $repoRootWsl = Convert-ToWslPath $projectPath
-        $goalSpecValue = if ($job.goal_spec) { Normalize-GoalSpecPath -GoalSpecPath $job.goal_spec -RepoRoot $repoRoot } else { "" }
-        $goalIdValue = if ($job.goal_id) { [string]$job.goal_id } else { "" }
-        $baseRefValue = if ($job.base_ref) { [string]$job.base_ref } else { "" }
+        $goalSpecRaw = Get-OptionalValue $job "goal_spec"
+        $goalIdRaw = Get-OptionalValue $job "goal_id"
+        $baseRefRaw = Get-OptionalValue $job "base_ref"
+        $goalSpecValue = if ($goalSpecRaw) { Normalize-GoalSpecPath -GoalSpecPath $goalSpecRaw -RepoRoot $repoRoot } else { "" }
+        $goalIdValue = if ($goalIdRaw) { [string]$goalIdRaw } else { "" }
+        $baseRefValue = if ($baseRefRaw) { [string]$baseRefRaw } else { "" }
 
         for ($i = 1; $i -le $repeatCount; $i++) {
             $suffix = ""
