@@ -207,6 +207,31 @@ def zip_has_entry(zf, member):
         return False
 
 
+def parse_telemetry_tail_metrics(zf):
+    metrics = {}
+    text = read_zip_tail_text(zf, "out/telemetry.ndjson", max_bytes=262144)
+    if not text:
+        text = read_zip_tail_text(zf, "telemetry.ndjson", max_bytes=262144)
+    if not text:
+        return metrics
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[-200:]:
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("metric") or payload.get("key")
+        if not name:
+            continue
+        value = payload.get("value")
+        if value is None:
+            continue
+        metrics[name] = value
+    return metrics
+
+
 def normalize_bool(value):
     if isinstance(value, bool):
         return value
@@ -546,6 +571,20 @@ def build_record_from_zip(result_zip):
                 telemetry_bytes = telemetry.get("bytes_total")
                 telemetry_files = telemetry.get("files")
 
+        telemetry_metrics = parse_telemetry_tail_metrics(zf)
+        telemetry_truncated = telemetry_metrics.get("telemetry.truncated")
+        if telemetry_truncated is None and isinstance(run_summary, dict):
+            telemetry = run_summary.get("telemetry")
+            if isinstance(telemetry, dict):
+                telemetry_truncated = telemetry.get("truncated")
+            if telemetry_truncated is None:
+                telemetry_truncated = run_summary.get("telemetry_truncated")
+
+        oracle_heartbeat_present = any(
+            telemetry_metrics.get(key) not in (None, 0, False)
+            for key in ("telemetry.heartbeat", "telemetry.oracle.heartbeat")
+        )
+
         invalid_reasons = []
         if not meta:
             invalid_reasons.append("meta_missing")
@@ -557,6 +596,10 @@ def build_record_from_zip(result_zip):
             invalid_reasons.append("telemetry_summary_missing")
         elif telemetry_events in (None, 0):
             invalid_reasons.append("telemetry_event_total_missing_or_zero")
+        if normalize_bool(telemetry_truncated):
+            invalid_reasons.append("telemetry_truncated")
+        if not oracle_heartbeat_present:
+            invalid_reasons.append("telemetry_oracle_heartbeat_missing")
 
         invariants_present = (
             "invariants_json" in artifact_paths
@@ -621,6 +664,8 @@ def build_record_from_zip(result_zip):
             "telemetry_bytes": telemetry_bytes,
             "telemetry_events": telemetry_events,
             "telemetry_files": telemetry_files,
+            "telemetry_truncated": telemetry_truncated,
+            "oracle_heartbeat_present": oracle_heartbeat_present,
             "has_watchdog": has_watchdog,
             "has_run_summary": has_run_summary,
             "has_goal_report": has_goal_report,
