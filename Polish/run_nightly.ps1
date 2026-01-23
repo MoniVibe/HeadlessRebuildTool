@@ -621,6 +621,7 @@ foreach ($title in $titles) {
                 seed = $seedValue
                 title = $run.title
                 created_utc = $nowUtc
+                expected_result_prefix = ("result_{0}" -f $jobId)
             }
         }
         Write-ExpectedJobsLedger -ReportsDir $reportsDir -ExpectedJobs $expected
