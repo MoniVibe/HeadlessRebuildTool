@@ -59,6 +59,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scoreboard for last N runs.")
     parser.add_argument("--results-dir", default=r"C:\polish\queue\results")
     parser.add_argument("--reports-dir", default=r"C:\polish\queue\reports")
+    parser.add_argument("--intel-dir", default=r"C:\polish\queue\reports\intel")
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--goal-specs-dir", default=None)
     args = parser.parse_args()
@@ -85,6 +86,21 @@ def main():
         run_summary = load_json_from_zip(zip_path, "out/run_summary.json") or {}
         goal_spec_value = meta.get("goal_spec") or run_summary.get("goal_spec")
         goal_id = meta.get("goal_id") or run_summary.get("goal_id")
+        job_id = meta.get("job_id")
+
+        explain = None
+        explain_path = None
+        explain_missing = False
+        if job_id:
+            explain_path = os.path.join(args.intel_dir, f"explain_{job_id}.json")
+            if os.path.isfile(explain_path):
+                try:
+                    with open(explain_path, "r", encoding="utf-8") as handle:
+                        explain = json.load(handle)
+                except Exception:
+                    explain = None
+            else:
+                explain_missing = True
 
         goal_spec_path = resolve_goal_spec_path(goal_spec_value, goal_id, specs_dir, repo_root)
         goal_report = None
@@ -103,9 +119,23 @@ def main():
             score = goal_report.get("goal_score") or 0
             goal_id = goal_report.get("goal_id") or goal_id
 
+        validity_status = None
+        validity_reason = None
+        if explain_missing:
+            validity_status = "MISSING_EXPLAIN"
+            validity_reason = "missing_explain"
+        elif isinstance(explain, dict):
+            validity = explain.get("validity") if isinstance(explain.get("validity"), dict) else {}
+            validity_status = validity.get("status")
+            invalid_reasons = validity.get("invalid_reasons") if isinstance(validity, dict) else None
+            if isinstance(invalid_reasons, list) and invalid_reasons:
+                validity_reason = invalid_reasons[0]
+            if isinstance(explain.get("primary_evidence_issue"), str):
+                validity_reason = explain.get("primary_evidence_issue")
+
         entry = {
             "result_zip": zip_path,
-            "job_id": meta.get("job_id"),
+            "job_id": job_id,
             "build_id": meta.get("build_id"),
             "commit": meta.get("commit"),
             "scenario_id": meta.get("scenario_id"),
@@ -117,18 +147,24 @@ def main():
             "goal_score": score,
             "goal_spec": goal_spec_path,
             "telemetry_event_total": (run_summary.get("telemetry_summary") or {}).get("event_total"),
+            "validity_status": validity_status,
+            "validity_reason": validity_reason,
+            "explain_path": explain_path if explain_path and os.path.isfile(explain_path) else None,
             "utc": meta.get("end_utc") or meta.get("start_utc"),
         }
         entries.append(entry)
 
-        if status not in ("PASS", "SKIPPED"):
+        invalid_evidence = validity_status in ("INVALID", "MISSING_EXPLAIN")
+        if status not in ("PASS", "SKIPPED") or invalid_evidence:
             note = ""
             if goal_report and goal_report.get("notes"):
                 note = goal_report["notes"][0]
+            if invalid_evidence and validity_reason:
+                note = validity_reason
             triage.append(
                 {
                     "goal_id": goal_id,
-                    "status": status,
+                    "status": "INVALID" if invalid_evidence else status,
                     "score": score,
                     "result_zip": zip_path,
                     "note": note or entry.get("exit_reason"),

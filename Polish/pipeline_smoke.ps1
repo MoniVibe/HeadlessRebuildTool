@@ -6,6 +6,7 @@ param(
     [string]$UnityExe,
     [string]$ProjectPathOverride,
     [string]$QueueRoot = "C:\\polish\\queue",
+    [string]$BaseRef,
     [string]$ScenarioId,
     [string]$ScenarioRel,
     [string]$GoalId,
@@ -313,6 +314,69 @@ function Get-ArtifactPreflight {
     }
 }
 
+function Get-GitStatusText {
+    param([string]$RepoPath)
+    if ([string]::IsNullOrWhiteSpace($RepoPath)) { return "" }
+    try {
+        $lines = & git -C $RepoPath status --porcelain 2>$null
+        if ($LASTEXITCODE -ne 0) { return "" }
+        if ($lines) { return ($lines -join "`n").Trim() }
+    }
+    catch {
+        return ""
+    }
+    return ""
+}
+
+function Get-HeadlessManifestHash {
+    param([string]$ProjectPath)
+    $manifest = Join-Path $ProjectPath "Packages\\manifest.headless.json"
+    $lock = Join-Path $ProjectPath "Packages\\packages-lock.headless.json"
+    $result = [ordered]@{
+        manifest = $null
+        lock = $null
+    }
+    if (Test-Path $manifest) {
+        $result.manifest = (Get-FileHash -Path $manifest -Algorithm SHA256).Hash
+    }
+    if (Test-Path $lock) {
+        $result.lock = (Get-FileHash -Path $lock -Algorithm SHA256).Hash
+    }
+    return $result
+}
+
+function Get-HeadlessManifestDrift {
+    param(
+        [string]$ProjectPath,
+        [hashtable]$Pre,
+        [hashtable]$Post
+    )
+    $drift = [ordered]@{
+        detected = $false
+        files = @()
+        diff_head = ""
+    }
+    if ($Pre.manifest -and $Post.manifest -and $Pre.manifest -ne $Post.manifest) {
+        $drift.detected = $true
+        $drift.files += "Packages/manifest.headless.json"
+    }
+    if ($Pre.lock -and $Post.lock -and $Pre.lock -ne $Post.lock) {
+        $drift.detected = $true
+        $drift.files += "Packages/packages-lock.headless.json"
+    }
+    if ($drift.detected) {
+        try {
+            $diff = & git -C $ProjectPath diff -- Packages/manifest.headless.json Packages/packages-lock.headless.json 2>$null
+            if ($diff) {
+                $drift.diff_head = ($diff | Select-Object -First 40) -join "`n"
+            }
+        }
+        catch {
+        }
+    }
+    return $drift
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
@@ -339,6 +403,13 @@ if (-not (Test-Path $projectPath)) {
 if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
 }
+
+$repoStatusPre = Get-GitStatusText -RepoPath $projectPath
+$repoDirtyPre = -not [string]::IsNullOrWhiteSpace($repoStatusPre)
+$headlessHashPre = Get-HeadlessManifestHash -ProjectPath $projectPath
+$repoStatusPost = ""
+$repoDirtyPost = $false
+$manifestDrift = $null
 
 $syncScript = Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"
 $swapScript = Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"
@@ -418,6 +489,14 @@ finally {
         & $swapScript -ProjectPath $projectPath -Restore
     }
 }
+
+$repoStatusPost = Get-GitStatusText -RepoPath $projectPath
+$headlessHashPost = Get-HeadlessManifestHash -ProjectPath $projectPath
+$manifestDrift = Get-HeadlessManifestDrift -ProjectPath $projectPath -Pre $headlessHashPre -Post $headlessHashPost
+if ($manifestDrift -and $manifestDrift.detected) {
+    & git -C $projectPath checkout -- Packages/manifest.headless.json Packages/packages-lock.headless.json 2>$null
+}
+$repoDirtyPost = -not [string]::IsNullOrWhiteSpace($repoStatusPost) -or ($manifestDrift -and $manifestDrift.detected)
 $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
@@ -467,6 +546,10 @@ for ($i = 1; $i -le $Repeat; $i++) {
         artifact_uri = $artifactUri
         created_utc = $createdUtc
         repo_root = $repoRootWsl
+        repo_status_pre = $repoStatusPre
+        repo_status_post = $repoStatusPost
+        repo_dirty_pre = [bool]$repoDirtyPre
+        repo_dirty_post = [bool]$repoDirtyPost
     }
     if ($scenarioRelValue) {
         $job.scenario_rel = $scenarioRelValue
@@ -476,6 +559,12 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     if ($goalSpecValue) {
         $job.goal_spec = $goalSpecValue
+    }
+    if ($BaseRef) {
+        $job.base_ref = $BaseRef
+    }
+    if ($manifestDrift -and $manifestDrift.detected) {
+        $job.manifest_drift = $manifestDrift
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6

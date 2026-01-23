@@ -1071,6 +1071,7 @@ $smokeArgs = @(
     "-ScenarioId", $goal.scenario_id,
     "-ScenarioRel", $goal.scenario_rel,
     "-Seed", $seedA,
+    "-BaseRef", $effectiveBaseRef,
     "-GoalId", $goalId,
     "-GoalSpec", $goalSpecJob
 )
@@ -1251,7 +1252,8 @@ if ($smokeFailed) {
         "* commit: $commitSha",
         "* probe: PASS",
         "* probe_log: $($probe.log_path)",
-        $smokeExitLine,
+        $smokeExitLine
+    ) + $validityLines + @(
         "* build: FAIL",
         "* build_fail_headline: $headline",
         "* build_fail_artifact: $artifactPath",
@@ -1267,6 +1269,9 @@ if ($smokeFailed) {
 $jobPath = ""
 $jobFileName = ""
 $buildId = ""
+$validityLines = @()
+$repoDirtyPost = $false
+$manifestDriftDetected = $false
 $jobLine = $smokeOutput | Where-Object { $_ -like "job=*" } | Select-Object -Last 1
 if ($jobLine) {
     $jobPath = ($jobLine -replace '^job=', '').Trim()
@@ -1291,6 +1296,17 @@ if (-not [string]::IsNullOrWhiteSpace($jobPath) -and (Test-Path $jobPath)) {
         Set-Content -Path $snapshotPath -Value $jobJson -Encoding ascii
 
         $job = $jobJson | ConvertFrom-Json
+        if ($null -eq $job.base_ref -and $effectiveBaseRef) {
+            $job.base_ref = $effectiveBaseRef
+        }
+        if ($job.repo_dirty_post) {
+            $repoDirtyPost = $true
+            $validityLines += "* validity_preflight: INVALID repo_dirty_post"
+        }
+        if ($job.manifest_drift -and $job.manifest_drift.detected) {
+            $manifestDriftDetected = $true
+            $validityLines += "* validity_preflight: INVALID manifest_drift"
+        }
         $job.seed = [int]$seedB
         $job.job_id = "{0}_{1}_{2}" -f $job.build_id, $job.scenario_id, $seedB
         $job.created_utc = (Get-Date).ToUniversalTime().ToString("o")
@@ -1325,7 +1341,8 @@ $lines = @(
     "* commit: $commitSha",
     "* probe: PASS",
     "* probe_log: $($probe.log_path)",
-    $smokeExitLine,
+    $smokeExitLine
+) + $validityLines + @(
     "* build_id: $buildId",
     "* queued_jobs: $([string]::Join(', ', $queuedJobs))",
     ""

@@ -13,6 +13,18 @@
   - Only keep a commit if a headless proof exists (log or telemetry).
   - Chain-of-custody: commit in artifact manifest must match `meta.json` in the result zip.
   - If a run passes but proves nothing, do not keep changing code; move to the next goal.
+- Day vs Night responsibilities:
+  - Day mode: harden infra, validity gates, and summaries; avoid gameplay feature work.
+  - Night mode: run sentinel + one concept goal cycle; stop on repeated signatures.
+- VALID evidence checklist (mandatory gate):
+  - Repo clean post-run (`repo_dirty_post=false`).
+  - No headless manifest/lock drift after swap/restore.
+  - Result zip contains `meta.json`, `out/watchdog.json`, `out/run_summary.json`.
+  - `telemetry_summary.event_total > 0`.
+  - Scenario + seed + base_ref present for comparability.
+  - Missing evidence => classify INVALID (do not tune gameplay).
+- Dependency drift rule:
+  - If headless manifests or locks change during a run, mark INVALID and commit the change intentionally later. Never leave implicit drift.
 - Stop/switch rules:
   - If the same failure signature repeats twice, stop and consult the ledger.
   - If disk drops below the gate, switch to analysis/doc only (no builds).

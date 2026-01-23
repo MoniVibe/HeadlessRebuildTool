@@ -929,11 +929,17 @@ write_meta_json() {
   local original_exit_code="${17}"
   local goal_id="${18}"
   local goal_spec="${19}"
+  local base_ref="${20}"
+  local repo_status_pre="${21}"
+  local repo_status_post="${22}"
+  local repo_dirty_post="${23}"
+  local manifest_drift_json="${24}"
 
   "$PYTHON_BIN" - "$meta_path" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" <<'PY'
+    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$base_ref" \
+    "$repo_status_pre" "$repo_status_post" "$repo_dirty_post" "$manifest_drift_json" <<'PY'
 import json,sys
 meta_path=sys.argv[1]
 job_id=sys.argv[2]
@@ -954,6 +960,11 @@ original_exit_reason=sys.argv[16]
 original_exit_code=sys.argv[17]
 goal_id=sys.argv[18]
 goal_spec=sys.argv[19]
+base_ref=sys.argv[20]
+repo_status_pre=sys.argv[21]
+repo_status_post=sys.argv[22]
+repo_dirty_post=sys.argv[23]
+manifest_drift_json=sys.argv[24]
 
 try:
     seed_val=int(seed_raw)
@@ -975,6 +986,21 @@ try:
     artifact_paths=json.loads(artifact_paths_json) if artifact_paths_json else {}
 except Exception:
     artifact_paths={}
+try:
+    manifest_drift=json.loads(manifest_drift_json) if manifest_drift_json else None
+except Exception:
+    manifest_drift=None
+
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1","true","yes","y","t")
+    return False
+
+repo_dirty_val = parse_bool(repo_dirty_post)
 
 meta={
     "job_id": job_id,
@@ -1002,6 +1028,16 @@ if goal_id:
     meta["goal_id"] = goal_id
 if goal_spec:
     meta["goal_spec"] = goal_spec
+if base_ref:
+    meta["base_ref"] = base_ref
+if repo_status_pre:
+    meta["repo_status_pre"] = repo_status_pre
+if repo_status_post:
+    meta["repo_status_post"] = repo_status_post
+if repo_dirty_post:
+    meta["repo_dirty_post"] = repo_dirty_val
+if isinstance(manifest_drift, dict) and manifest_drift:
+    meta["manifest_drift"] = manifest_drift
 
 with open(meta_path,"w",encoding="utf-8") as handle:
     json.dump(meta, handle, indent=2, sort_keys=True)
@@ -1399,6 +1435,11 @@ run_job() {
   local artifact_uri=""
   local goal_id=""
   local goal_spec=""
+  local base_ref=""
+  local repo_status_pre=""
+  local repo_status_post=""
+  local repo_dirty_post=""
+  local manifest_drift_json=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
 
@@ -1421,6 +1462,11 @@ run_job() {
     artifact_uri="$(json_get_string "$lease_path" "artifact_uri")"
     goal_id="$(json_get_string "$lease_path" "goal_id")"
     goal_spec="$(json_get_string "$lease_path" "goal_spec")"
+    base_ref="$(json_get_string "$lease_path" "base_ref")"
+    repo_status_pre="$(json_get_string "$lease_path" "repo_status_pre")"
+    repo_status_post="$(json_get_string "$lease_path" "repo_status_post")"
+    repo_dirty_post="$(json_get_string "$lease_path" "repo_dirty_post")"
+    manifest_drift_json="$(json_get_object_sorted "$lease_path" "manifest_drift")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
   fi
@@ -1717,7 +1763,8 @@ run_job() {
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec"
+    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$base_ref" \
+    "$repo_status_pre" "$repo_status_post" "$repo_dirty_post" "$manifest_drift_json"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
