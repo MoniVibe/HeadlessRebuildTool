@@ -63,6 +63,18 @@ def read_json(path):
         return None
 
 
+def load_expected_jobs(reports_dir):
+    path = os.path.join(reports_dir, "expected_jobs.json")
+    data = read_json(path)
+    if not data:
+        return []
+    if isinstance(data, dict):
+        data = data.get("jobs", [])
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
 def reason_counts(items, key):
     counts = {}
     for item in items:
@@ -216,6 +228,45 @@ def main():
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    expected_jobs = load_expected_jobs(args.reports_dir)
+    if expected_jobs:
+        existing_ids = {entry.get("job_id") for entry in entries if entry.get("job_id")}
+        for item in expected_jobs:
+            job_id = item.get("job_id")
+            if not job_id or job_id in existing_ids:
+                continue
+            entry = {
+                "result_zip": None,
+                "job_id": job_id,
+                "build_id": item.get("build_id"),
+                "commit": item.get("commit"),
+                "scenario_id": item.get("scenario_id"),
+                "seed": item.get("seed"),
+                "exit_reason": "RESULT_MISSING",
+                "exit_code": None,
+                "goal_id": item.get("goal_id"),
+                "goal_status": "SKIPPED",
+                "goal_score": 0,
+                "goal_spec": item.get("goal_spec"),
+                "telemetry_event_total": None,
+                "validity_status": "INVALID",
+                "validity_reason": "result_missing",
+                "explain_path": None,
+                "question_summary": None,
+                "utc": item.get("created_utc"),
+            }
+            entries.append(entry)
+            invalid_reasons.append({"reason": "result_missing"})
+            triage.append(
+                {
+                    "goal_id": entry.get("goal_id") or "unknown_goal",
+                    "status": "INVALID",
+                    "score": 0,
+                    "result_zip": "(missing)",
+                    "note": "result_missing",
+                }
+            )
+
     top_invalid = reason_counts(invalid_reasons, "reason")[:5]
     top_failed_questions = sorted(
         [{"question_id": key, "count": count} for key, count in required_fail_counts.items()],
@@ -287,7 +338,8 @@ def main():
             handle.write(f"- oracle: {req_line}; {opt_line}\n")
             handle.write(f"- score={entry.get('goal_score')} status={entry.get('goal_status')}\n")
             handle.write(f"- next: {next_action(entry)}\n")
-            handle.write(f"- result={entry.get('result_zip')}\n")
+            result_value = entry.get("result_zip") or "(missing)"
+            handle.write(f"- result={result_value}\n")
             if entry.get("explain_path"):
                 handle.write(f"- explain={entry.get('explain_path')}\n")
 
