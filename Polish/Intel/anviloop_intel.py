@@ -570,6 +570,20 @@ def build_record_from_zip(result_zip):
             if meta.get("exit_reason") == "OK_WITH_WARNINGS"
             else "VALID"
         )
+        evidence = {
+            "artifact_paths": sorted(list(artifact_paths.keys())),
+            "telemetry_bytes": telemetry_bytes,
+            "telemetry_events": telemetry_events,
+            "telemetry_files": telemetry_files,
+            "has_watchdog": has_watchdog,
+            "has_run_summary": has_run_summary,
+            "has_goal_report": has_goal_report,
+            "repo_status_pre": meta.get("repo_status_pre"),
+            "repo_status_post": meta.get("repo_status_post"),
+        }
+        if isinstance(manifest_drift, dict):
+            evidence["manifest_drift"] = manifest_drift
+
         validity = {
             "status": validity_status,
             "invalid_reasons": invalid_reasons,
@@ -583,17 +597,7 @@ def build_record_from_zip(result_zip):
                 "goal_id": meta.get("goal_id") or None,
                 "goal_spec": meta.get("goal_spec") or None,
             },
-            "evidence": {
-                "artifact_paths": sorted(list(artifact_paths.keys())),
-                "telemetry_bytes": telemetry_bytes,
-                "telemetry_events": telemetry_events,
-                "telemetry_files": telemetry_files,
-                "has_watchdog": has_watchdog,
-                "has_run_summary": has_run_summary,
-                "has_goal_report": has_goal_report,
-                "repo_status_pre": meta.get("repo_status_pre"),
-                "repo_status_post": meta.get("repo_status_post"),
-            },
+            "evidence": evidence,
         }
 
         stdout_tail = watchdog.get("stdout_tail", "")

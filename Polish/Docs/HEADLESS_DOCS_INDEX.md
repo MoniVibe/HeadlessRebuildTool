@@ -24,5 +24,6 @@
 ## Links
 - `Polish/Docs/NIGHTLY_PROTOCOL.md`
 - `Polish/Docs/MORNING_VIEW.md`
+- `Polish/Docs/DEPENDENCY_POLICY.md`
 - `Polish/Docs/ANVILOOP_RECURRING_ERRORS.md`
 - `Polish/ML/analyze_run.py`
