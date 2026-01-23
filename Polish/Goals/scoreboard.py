@@ -159,9 +159,9 @@ def main():
         elif isinstance(explain, dict):
             validity = explain.get("validity") if isinstance(explain.get("validity"), dict) else {}
             validity_status = validity.get("status")
-            invalid_reasons = validity.get("invalid_reasons") if isinstance(validity, dict) else None
-            if isinstance(invalid_reasons, list) and invalid_reasons:
-                validity_reason = invalid_reasons[0]
+            entry_invalid = validity.get("invalid_reasons") if isinstance(validity, dict) else None
+            if isinstance(entry_invalid, list) and entry_invalid:
+                validity_reason = entry_invalid[0]
             if isinstance(explain.get("primary_evidence_issue"), str):
                 validity_reason = explain.get("primary_evidence_issue")
 

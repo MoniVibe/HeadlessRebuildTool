@@ -557,9 +557,11 @@ def build_record_from_zip(result_zip):
             meta.get("exit_reason") == "OK_WITH_WARNINGS"
             and meta.get("original_exit_reason") == "TEST_FAIL"
         ):
-            invalid_reasons.append("required_questions_unknown")
+            if "required_questions_unknown" not in invalid_reasons:
+                invalid_reasons.append("required_questions_unknown")
         if questions_summary and questions_summary["required"]["unknown"] > 0:
-            invalid_reasons.append("required_questions_unknown")
+            if "required_questions_unknown" not in invalid_reasons:
+                invalid_reasons.append("required_questions_unknown")
 
         validity_status = (
             "INVALID"
