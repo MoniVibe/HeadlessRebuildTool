@@ -929,11 +929,12 @@ write_meta_json() {
   local original_exit_code="${17}"
   local goal_id="${18}"
   local goal_spec="${19}"
+  local required_bank="${20}"
 
   "$PYTHON_BIN" - "$meta_path" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" <<'PY'
+    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank" <<'PY'
 import json,sys
 meta_path=sys.argv[1]
 job_id=sys.argv[2]
@@ -954,6 +955,7 @@ original_exit_reason=sys.argv[16]
 original_exit_code=sys.argv[17]
 goal_id=sys.argv[18]
 goal_spec=sys.argv[19]
+required_bank=sys.argv[20]
 
 try:
     seed_val=int(seed_raw)
@@ -1002,6 +1004,8 @@ if goal_id:
     meta["goal_id"] = goal_id
 if goal_spec:
     meta["goal_spec"] = goal_spec
+if required_bank:
+    meta["required_bank"] = required_bank
 
 with open(meta_path,"w",encoding="utf-8") as handle:
     json.dump(meta, handle, indent=2, sort_keys=True)
@@ -1399,6 +1403,7 @@ run_job() {
   local artifact_uri=""
   local goal_id=""
   local goal_spec=""
+  local required_bank=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
 
@@ -1421,6 +1426,7 @@ run_job() {
     artifact_uri="$(json_get_string "$lease_path" "artifact_uri")"
     goal_id="$(json_get_string "$lease_path" "goal_id")"
     goal_spec="$(json_get_string "$lease_path" "goal_spec")"
+    required_bank="$(json_get_string "$lease_path" "required_bank")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
   fi
@@ -1717,7 +1723,7 @@ run_job() {
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec"
+    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 

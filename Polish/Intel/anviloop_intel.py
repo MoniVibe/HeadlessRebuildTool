@@ -146,6 +146,29 @@ def split_lines(text, max_lines=80):
     return lines[-max_lines:]
 
 
+BANK_RE = re.compile(r"\bBANK:(?P<test_id>[^:]+):(?P<status>PASS|FAIL)\b(?P<rest>.*)", re.IGNORECASE)
+
+
+def extract_bank_signal(text):
+    if not text:
+        return {"found": False, "status": "MISSING", "test_id": None, "line": None}
+    for line in text.splitlines():
+        if "BANK:" not in line:
+            continue
+        match = BANK_RE.search(line)
+        if not match:
+            continue
+        test_id = (match.group("test_id") or "").strip()
+        status = (match.group("status") or "").upper()
+        return {
+            "found": True,
+            "status": status or "UNKNOWN",
+            "test_id": test_id or None,
+            "line": line.strip(),
+        }
+    return {"found": False, "status": "MISSING", "test_id": None, "line": None}
+
+
 def read_zip_json(zf, member):
     try:
         with zf.open(member) as handle:
@@ -563,6 +586,29 @@ def build_record_from_zip(result_zip):
             if "required_questions_unknown" not in invalid_reasons:
                 invalid_reasons.append("required_questions_unknown")
 
+        stdout_tail = watchdog.get("stdout_tail", "")
+        stderr_tail = watchdog.get("stderr_tail", "")
+        if isinstance(stdout_tail, list):
+            stdout_tail = "\n".join(stdout_tail)
+        if isinstance(stderr_tail, list):
+            stderr_tail = "\n".join(stderr_tail)
+        stdout_tail = normalize_text(stdout_tail)
+        stderr_tail = normalize_text(stderr_tail)
+
+        player_tail = read_zip_tail_text(zf, "out/player.log", max_bytes=65536)
+        if not player_tail:
+            player_tail = read_zip_tail_text(zf, "player.log", max_bytes=65536)
+
+        required_bank = meta.get("required_bank") or run_summary.get("required_bank")
+        bank_info = extract_bank_signal(player_tail)
+        if required_bank:
+            if not bank_info.get("found"):
+                invalid_reasons.append("bank_missing")
+            elif bank_info.get("status") != "PASS":
+                invalid_reasons.append("bank_fail")
+            elif bank_info.get("test_id") and bank_info.get("test_id") != required_bank:
+                invalid_reasons.append("bank_wrong_test")
+
         validity_status = (
             "INVALID"
             if invalid_reasons
@@ -599,19 +645,6 @@ def build_record_from_zip(result_zip):
             },
             "evidence": evidence,
         }
-
-        stdout_tail = watchdog.get("stdout_tail", "")
-        stderr_tail = watchdog.get("stderr_tail", "")
-        if isinstance(stdout_tail, list):
-            stdout_tail = "\n".join(stdout_tail)
-        if isinstance(stderr_tail, list):
-            stderr_tail = "\n".join(stderr_tail)
-        stdout_tail = normalize_text(stdout_tail)
-        stderr_tail = normalize_text(stderr_tail)
-
-        player_tail = read_zip_tail_text(zf, "out/player.log", max_bytes=65536)
-        if not player_tail:
-            player_tail = read_zip_tail_text(zf, "player.log", max_bytes=65536)
 
     stderr_lines = split_lines(stderr_tail, max_lines=80)
     stdout_lines = split_lines(stdout_tail, max_lines=80)
@@ -653,6 +686,7 @@ def build_record_from_zip(result_zip):
             "goal_id": meta.get("goal_id"),
             "goal_spec": meta.get("goal_spec"),
             "base_ref": meta.get("base_ref"),
+            "required_bank": meta.get("required_bank"),
             "repo_dirty_post": meta.get("repo_dirty_post"),
             "manifest_drift": meta.get("manifest_drift"),
             "repo_status_pre": meta.get("repo_status_pre"),
@@ -678,6 +712,7 @@ def build_record_from_zip(result_zip):
         },
         "validity": validity,
         "questions": questions_summary,
+        "bank": bank_info,
         "embed_text": embed_text,
     }
     return record
@@ -839,6 +874,9 @@ def build_explain(record):
     questions = record.get("questions")
     if isinstance(questions, dict):
         explain["questions"] = questions
+    bank = record.get("bank")
+    if isinstance(bank, dict):
+        explain["bank"] = bank
 
     reports_dir = Path("/mnt/c/polish/queue/reports/intel")
     reports_dir.mkdir(parents=True, exist_ok=True)

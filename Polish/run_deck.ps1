@@ -346,9 +346,11 @@ if ($Mode -in @("run", "enqueue")) {
         $goalSpecRaw = Get-OptionalValue $job "goal_spec"
         $goalIdRaw = Get-OptionalValue $job "goal_id"
         $baseRefRaw = Get-OptionalValue $job "base_ref"
+        $requiredBankRaw = Get-OptionalValue $job "required_bank"
         $goalSpecValue = if ($goalSpecRaw) { Normalize-GoalSpecPath -GoalSpecPath $goalSpecRaw -RepoRoot $repoRoot } else { "" }
         $goalIdValue = if ($goalIdRaw) { [string]$goalIdRaw } else { "" }
         $baseRefValue = if ($baseRefRaw) { [string]$baseRefRaw } else { "" }
+        $requiredBankValue = if ($requiredBankRaw) { [string]$requiredBankRaw } else { "" }
 
         for ($i = 1; $i -le $repeatCount; $i++) {
             $suffix = ""
@@ -377,6 +379,7 @@ if ($Mode -in @("run", "enqueue")) {
             if ($goalIdValue) { $jobRecord.goal_id = $goalIdValue }
             if ($goalSpecValue) { $jobRecord.goal_spec = $goalSpecValue }
             if ($baseRefValue) { $jobRecord.base_ref = $baseRefValue }
+            if ($requiredBankValue) { $jobRecord.required_bank = $requiredBankValue }
 
             $jobJson = $jobRecord | ConvertTo-Json -Depth 8
             $jobTempPath = Join-Path $jobsDir (".tmp_{0}.json" -f $jobId)
@@ -397,6 +400,7 @@ if ($Mode -in @("run", "enqueue")) {
                 goal_spec = $goalSpecValue
                 commit = $build.commit
                 base_ref = $baseRefValue
+                required_bank = $requiredBankValue
             })
         }
     }
@@ -412,10 +416,12 @@ if ($Mode -eq "enqueue") {
 $expectedFile = Join-Path $reportsDir "expected_jobs.json"
 if (-not (Test-Path $expectedFile)) { throw "expected_jobs.json missing: $expectedFile" }
 $expectedData = Get-Content -Raw -Path $expectedFile | ConvertFrom-Json
-$expectedList = if ($expectedData.jobs) { @($expectedData.jobs) } else { @() }
-if ($expectedList.Count -eq 0) { throw "expected_jobs.json has no jobs." }
+$expectedList = @()
+if ($expectedData -and $expectedData.jobs) { $expectedList = @($expectedData.jobs) }
+if (-not $expectedList -or $expectedList.Length -eq 0) { throw "expected_jobs.json has no jobs." }
+$expectedCount = $expectedList.Length
 
-$limitValue = [Math]::Max($expectedList.Count + 50, 25)
+$limitValue = [Math]::Max($expectedCount + 50, 25)
 $startUtc = Get-Date
 
 while ($true) {
@@ -437,7 +443,7 @@ while ($true) {
 
     Invoke-Headline -ResultsDir $resultsDir -ReportsDir $reportsDir -IntelDir $intelDir -Limit $limitValue -GraceSec $pendingGraceValue -Distro $WslDistro -RepoRootWsl $wslRepoRoot | Out-Null
 
-    if ($completed -ge $expectedList.Count) {
+    if ($completed -ge $expectedCount) {
         Write-Host "deck_complete=true"
         break
     }

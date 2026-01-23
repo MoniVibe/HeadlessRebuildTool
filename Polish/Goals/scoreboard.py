@@ -107,11 +107,17 @@ def next_action(entry):
     reason = entry.get("validity_reason")
     goal_id = entry.get("goal_id") or "unknown_goal"
     score = entry.get("goal_score")
+    bank_status = entry.get("bank_status")
+    bank_test_id = entry.get("bank_test_id")
     if validity == "PENDING":
         return "NEXT: wait for runner backlog (pending)"
     if validity and validity != "VALID":
         detail = reason or "invalid_evidence"
         return f"NEXT: fix infra/instrumentation ({detail})"
+    if bank_status in ("FAIL", "MISSING"):
+        suffix = f" ({bank_test_id})" if bank_test_id else ""
+        action = "fix bank failure" if bank_status == "FAIL" else "add bank proof"
+        return f"NEXT: {action}{suffix}"
     if score:
         return f"NEXT: tune behavior for {goal_id} (score={score})"
     return f"NEXT: tune behavior for {goal_id}"
@@ -197,6 +203,11 @@ def main():
         question_summary = None
         if isinstance(explain, dict) and isinstance(explain.get("questions"), dict):
             question_summary = explain.get("questions")
+        bank_status = None
+        bank_test_id = None
+        if isinstance(explain, dict) and isinstance(explain.get("bank"), dict):
+            bank_status = explain.get("bank", {}).get("status")
+            bank_test_id = explain.get("bank", {}).get("test_id")
         if question_summary:
             for qid in question_summary.get("failing_required_ids", []) or []:
                 required_fail_counts[qid] = required_fail_counts.get(qid, 0) + 1
@@ -221,6 +232,8 @@ def main():
             "validity_reason": validity_reason,
             "explain_path": explain_path if explain_path and os.path.isfile(explain_path) else None,
             "question_summary": question_summary,
+            "bank_status": bank_status,
+            "bank_test_id": bank_test_id,
             "utc": meta.get("end_utc") or meta.get("start_utc"),
         }
         entries.append(entry)
@@ -285,6 +298,8 @@ def main():
                 "validity_reason": validity_reason,
                 "explain_path": None,
                 "question_summary": None,
+                "bank_status": "PENDING" if age_ok else "MISSING",
+                "bank_test_id": None,
                 "utc": item.get("created_utc"),
             }
             entries.append(entry)
@@ -364,11 +379,17 @@ def main():
             opt = question_summary.get("optional") or {}
             req_line = f"req pass={req.get('pass',0)} fail={req.get('fail',0)} unknown={req.get('unknown',0)}"
             opt_line = f"opt pass={opt.get('pass',0)} fail={opt.get('fail',0)} unknown={opt.get('unknown',0)}"
+            bank_status = entry.get("bank_status") or "UNKNOWN"
+            bank_test_id = entry.get("bank_test_id")
+            bank_line = f"bank={bank_status}"
+            if bank_test_id:
+                bank_line = f"{bank_line} test_id={bank_test_id}"
             handle.write("\n")
             handle.write(f"### {entry.get('job_id')}\n")
             handle.write(f"- goal={entry.get('goal_id')} scenario={entry.get('scenario_id')} seed={entry.get('seed')}\n")
             handle.write(f"- validity={validity} {reason}\n")
             handle.write(f"- oracle: {req_line}; {opt_line}\n")
+            handle.write(f"- {bank_line}\n")
             handle.write(f"- score={entry.get('goal_score')} status={entry.get('goal_status')}\n")
             handle.write(f"- next: {next_action(entry)}\n")
             result_value = entry.get("result_zip") or "(missing)"
