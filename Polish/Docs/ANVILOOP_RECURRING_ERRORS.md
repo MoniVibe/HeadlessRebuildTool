@@ -191,3 +191,16 @@ ERR-20260122_215913
 - Prevention: TBD
 - Verification: TBD
 - Commit: TBD
+
+ERR-20260123_095023
+- FirstSeen: 
+2026-01-23
+- Symptom: 
+Library\PackageCache\com.unity.test-framework@0b7a23ab2e1d\UnityEngine.TestRunner\NUnitExtensions\Commands\EnumerableMaxTimeCommand.cs(11,47): error CS0246: The type or namespace name 'DelegatingTestCommand' could not be found (are you missing a using directive or an assembly reference?)
+- Signature: 
+Library\PackageCache\com.unity.test-framework@0b7a23ab2e1d\UnityEngine.TestRunner\NUnitExtensions\Commands\EnumerableMaxTimeCommand.cs(11,47): error CS0246: The type or namespace name 'DelegatingTestCommand' could not be found (are you missing a using directive or an assembly reference?)
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Commit: TBD
