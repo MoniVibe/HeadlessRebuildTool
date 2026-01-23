@@ -20,6 +20,78 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Load-PipelineDefaults {
+    $defaultsPath = Join-Path $PSScriptRoot "pipeline_defaults.json"
+    if (-not (Test-Path $defaultsPath)) { return $null }
+    try {
+        return (Get-Content -Raw -Path $defaultsPath | ConvertFrom-Json)
+    }
+    catch {
+        return $null
+    }
+}
+
+function Parse-JobIdsFromOutput {
+    param([string[]]$Lines)
+    if (-not $Lines) { return @() }
+    $jobIds = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $Lines) {
+        if ($line -match '^job=(.+)$') {
+            $path = $Matches[1].Trim()
+            if ([string]::IsNullOrWhiteSpace($path)) { continue }
+            $jobIds.Add([System.IO.Path]::GetFileNameWithoutExtension($path))
+        }
+    }
+    return ,$jobIds.ToArray()
+}
+
+function Build-ExpectedJobIds {
+    param(
+        [string]$BuildId,
+        [string]$ScenarioId,
+        [int]$SeedValue,
+        [int]$RepeatCount
+    )
+    if ([string]::IsNullOrWhiteSpace($BuildId) -or [string]::IsNullOrWhiteSpace($ScenarioId)) {
+        return @()
+    }
+    $jobIds = New-Object System.Collections.Generic.List[string]
+    for ($i = 1; $i -le $RepeatCount; $i++) {
+        $suffix = ""
+        if ($RepeatCount -gt 1) {
+            $suffix = "_r{0:D2}" -f $i
+        }
+        $jobIds.Add(("{0}_{1}_{2}{3}" -f $BuildId, $ScenarioId, $SeedValue, $suffix))
+    }
+    return ,$jobIds.ToArray()
+}
+
+function Write-ExpectedJobsLedger {
+    param(
+        [string]$ReportsDir,
+        [object[]]$ExpectedJobs
+    )
+    if (-not $ExpectedJobs -or $ExpectedJobs.Count -eq 0) { return }
+    Ensure-Directory $ReportsDir
+    $path = Join-Path $ReportsDir "expected_jobs.json"
+    $existing = @()
+    if (Test-Path $path) {
+        try { $existing = Get-Content -Raw -Path $path | ConvertFrom-Json } catch { $existing = @() }
+    }
+    if ($existing -isnot [System.Collections.IEnumerable]) {
+        $existing = @()
+    }
+    $map = @{}
+    foreach ($entry in $existing) {
+        if ($entry -and $entry.job_id) { $map[$entry.job_id] = $entry }
+    }
+    foreach ($entry in $ExpectedJobs) {
+        if ($entry -and $entry.job_id) { $map[$entry.job_id] = $entry }
+    }
+    $merged = $map.Values | Sort-Object job_id
+    $merged | ConvertTo-Json -Depth 6 | Set-Content -Path $path -Encoding ascii
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
@@ -236,7 +308,9 @@ function Invoke-Smoke {
         [string]$UnityExePath,
         [string]$QueueRootPath,
         [int]$RepeatCount,
-        [int]$WaitTimeoutSec
+        [int]$WaitTimeoutSec,
+        [string]$ScenarioId,
+        [int]$SeedValue
     )
     $pipelineSmoke = Join-Path $PSScriptRoot "pipeline_smoke.ps1"
     if (-not (Test-Path $pipelineSmoke)) {
@@ -269,6 +343,10 @@ function Invoke-Smoke {
     $artifact = Get-ArtifactZip -ArtifactsDir $artifactsDir -SinceUtc $startUtc
     $artifactPath = if ($artifact) { $artifact.FullName } else { $null }
     $buildId = Parse-BuildIdFromArtifact -ArtifactPath $artifactPath
+    $jobIds = Parse-JobIdsFromOutput -Lines $output
+    if ($jobIds.Count -eq 0 -and $buildId -and $ScenarioId) {
+        $jobIds = Build-ExpectedJobIds -BuildId $buildId -ScenarioId $ScenarioId -SeedValue $SeedValue -RepeatCount $RepeatCount
+    }
 
         return [pscustomobject][ordered]@{
             title = $Title
@@ -278,6 +356,7 @@ function Invoke-Smoke {
             error = $errorText
             start_utc = $startUtc.ToString("o")
             end_utc = $endUtc.ToString("o")
+            job_ids = $jobIds
         }
 }
 
@@ -423,6 +502,7 @@ function Summarize-Results {
 
 $UnityExe = Resolve-UnityExe -ExePath $UnityExe
 $dateStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+$pipelineDefaults = Load-PipelineDefaults
 
 function Get-ToolsSha {
     $toolsRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -448,12 +528,18 @@ switch ($titleValue) {
 
 $hasErrors = $false
 foreach ($title in $titles) {
+    $titleDefaults = $null
+    if ($pipelineDefaults -and $pipelineDefaults.titles) {
+        $titleDefaults = $pipelineDefaults.titles.$title
+    }
+    $scenarioId = if ($titleDefaults -and $titleDefaults.scenario_id) { [string]$titleDefaults.scenario_id } else { "" }
+    $seedValue = if ($titleDefaults -and $titleDefaults.seed -ne $null) { [int]$titleDefaults.seed } else { 0 }
     $queueRoot = if ($title -eq "space4x") { $QueueRootSpace4x } else { $QueueRootGodgame }
     $reportsDir = Join-Path $queueRoot "reports"
     Ensure-Directory $reportsDir
 
     try {
-        $run = Invoke-Smoke -Title $title -UnityExePath $UnityExe -QueueRootPath $queueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec
+        $run = Invoke-Smoke -Title $title -UnityExePath $UnityExe -QueueRootPath $queueRoot -RepeatCount $Repeat -WaitTimeoutSec $WaitTimeoutSec -ScenarioId $scenarioId -SeedValue $seedValue
     }
     catch {
         $run = [pscustomobject][ordered]@{
@@ -524,12 +610,28 @@ foreach ($title in $titles) {
         }
     }
     $summary.runs[$run.title] = $entry
+    if ($run.job_ids -and $run.job_ids.Count -gt 0) {
+        $expected = @()
+        $nowUtc = (Get-Date).ToUniversalTime().ToString("o")
+        foreach ($jobId in $run.job_ids) {
+            $expected += [ordered]@{
+                job_id = $jobId
+                build_id = $run.build_id
+                scenario_id = $scenarioId
+                seed = $seedValue
+                title = $run.title
+                created_utc = $nowUtc
+            }
+        }
+        Write-ExpectedJobsLedger -ReportsDir $reportsDir -ExpectedJobs $expected
+    }
 
     $intelNotes = New-Object System.Collections.Generic.List[string]
     $runZips = @()
     if (-not [string]::IsNullOrWhiteSpace($buildIdValue)) {
         $resultsDir = Join-Path $queueRoot "results"
-        $pattern = "result_{0}_{1}_*.zip" -f $buildIdValue, $run.title
+        $patternKey = if ([string]::IsNullOrWhiteSpace($scenarioId)) { $run.title } else { $scenarioId }
+        $pattern = "result_{0}_{1}_*.zip" -f $buildIdValue, $patternKey
         if (Test-Path $resultsDir) {
             $runZips = @(Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name)
         }
