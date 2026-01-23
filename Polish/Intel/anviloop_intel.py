@@ -199,6 +199,17 @@ def read_zip_tail_text(zf, member, max_bytes=65536):
         return ""
 
 
+def read_zip_head_text(zf, member, max_bytes=65536):
+    try:
+        with zf.open(member) as handle:
+            data = handle.read(max_bytes)
+    except KeyError:
+        return ""
+    except Exception:
+        return ""
+    return data.decode("utf-8", errors="replace")
+
+
 def zip_has_entry(zf, member):
     try:
         zf.getinfo(member)
@@ -230,6 +241,17 @@ def parse_telemetry_tail_metrics(zf):
             continue
         metrics[name] = value
     return metrics
+
+
+def telemetry_contains_key(zf, key, max_bytes=1048576):
+    for member in ("out/telemetry.ndjson", "telemetry.ndjson"):
+        text = read_zip_head_text(zf, member, max_bytes=max_bytes)
+        if text and key in text:
+            return True
+        text = read_zip_tail_text(zf, member, max_bytes=max_bytes)
+        if text and key in text:
+            return True
+    return False
 
 
 def normalize_bool(value):
@@ -584,6 +606,10 @@ def build_record_from_zip(result_zip):
             telemetry_metrics.get(key) not in (None, 0, False)
             for key in ("telemetry.heartbeat", "telemetry.oracle.heartbeat")
         )
+        if not oracle_heartbeat_present:
+            oracle_heartbeat_present = telemetry_contains_key(
+                zf, "telemetry.heartbeat"
+            ) or telemetry_contains_key(zf, "telemetry.oracle.heartbeat")
 
         invalid_reasons = []
         if not meta:
