@@ -6,7 +6,9 @@ param(
     [string]$QueueRootSpace4x = "C:\\polish\\anviloop\\space4x\\queue",
     [string]$QueueRootGodgame = "C:\\polish\\anviloop\\godgame\\queue",
     [int]$Repeat = 10,
-    [int]$WaitTimeoutSec = 1800
+    [int]$WaitTimeoutSec = 1800,
+    [string]$WslDistro = "Ubuntu",
+    [string]$WslRepoRoot = "/home/oni/headless/HeadlessRebuildTool"
 )
 
 Set-StrictMode -Version Latest
@@ -16,6 +18,63 @@ function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Convert-ToWslPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
+    if ($match.Success) {
+        $drive = $match.Groups[1].Value.ToLowerInvariant()
+        $rest = $match.Groups[2].Value -replace '\\', '/'
+        return "/mnt/$drive/$rest"
+    }
+    return ($full -replace '\\', '/')
+}
+
+function Invoke-IntelIngest {
+    param(
+        [string]$ResultZipPath,
+        [string]$Distro,
+        [string]$RepoRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($ResultZipPath) -or -not (Test-Path $ResultZipPath)) {
+        return [pscustomobject]@{ ok = $false; output = "result_zip_missing" }
+    }
+    $wslZip = Convert-ToWslPath $ResultZipPath
+    if (-not $wslZip) {
+        return [pscustomobject]@{ ok = $false; output = "wsl_path_missing" }
+    }
+    $cmd = "python3 $RepoRoot/Polish/Intel/anviloop_intel.py ingest-result-zip --result-zip $wslZip"
+    $output = & wsl.exe -d $Distro -- bash -lc $cmd 2>&1
+    return [pscustomobject]@{
+        ok = ($LASTEXITCODE -eq 0)
+        output = ($output | ForEach-Object { $_.ToString() })
+    }
+}
+
+function Invoke-Headline {
+    param(
+        [string]$ResultsDir,
+        [string]$ReportsDir,
+        [string]$IntelDir,
+        [string]$Distro,
+        [string]$RepoRoot,
+        [int]$Limit = 25
+    )
+    $wslResults = Convert-ToWslPath $ResultsDir
+    $wslReports = Convert-ToWslPath $ReportsDir
+    $wslIntel = Convert-ToWslPath $IntelDir
+    if (-not $wslResults -or -not $wslReports -or -not $wslIntel) {
+        return [pscustomobject]@{ ok = $false; output = "wsl_paths_missing" }
+    }
+    $cmd = "python3 $RepoRoot/Polish/Goals/scoreboard.py --results-dir $wslResults --reports-dir $wslReports --intel-dir $wslIntel --limit $Limit"
+    $output = & wsl.exe -d $Distro -- bash -lc $cmd 2>&1
+    return [pscustomobject]@{
+        ok = ($LASTEXITCODE -eq 0)
+        output = ($output | ForEach-Object { $_.ToString() })
+    }
 }
 
 function Resolve-UnityExe {
@@ -465,6 +524,39 @@ foreach ($title in $titles) {
         }
     }
     $summary.runs[$run.title] = $entry
+
+    $intelNotes = New-Object System.Collections.Generic.List[string]
+    $runZips = @()
+    if (-not [string]::IsNullOrWhiteSpace($buildIdValue)) {
+        $resultsDir = Join-Path $queueRoot "results"
+        $pattern = "result_{0}_{1}_*.zip" -f $buildIdValue, $run.title
+        if (Test-Path $resultsDir) {
+            $runZips = @(Get-ChildItem -Path $resultsDir -Filter $pattern -File | Sort-Object Name)
+        }
+    }
+    if ($runZips.Count -gt 0) {
+        $failedIngest = 0
+        foreach ($zip in $runZips) {
+            $ingest = Invoke-IntelIngest -ResultZipPath $zip.FullName -Distro $WslDistro -RepoRoot $WslRepoRoot
+            if (-not $ingest.ok) {
+                $failedIngest++
+                Write-Warning ("intel_ingest_failed zip={0}" -f $zip.FullName)
+                if ($ingest.output) { Write-Warning ([string]::Join([Environment]::NewLine, $ingest.output)) }
+            }
+        }
+        $intelNotes.Add(("intel_ingest_count={0} failed={1}" -f $runZips.Count, $failedIngest))
+        $intelDir = Join-Path $reportsDir "intel"
+        Ensure-Directory $intelDir
+        $headline = Invoke-Headline -ResultsDir (Join-Path $queueRoot "results") -ReportsDir $reportsDir -IntelDir $intelDir -Distro $WslDistro -RepoRoot $WslRepoRoot
+        if (-not $headline.ok) {
+            $intelNotes.Add("headline_failed=true")
+            Write-Warning "nightly_headline generation failed"
+            if ($headline.output) { Write-Warning ([string]::Join([Environment]::NewLine, $headline.output)) }
+        }
+    }
+    if ($intelNotes.Count -gt 0) {
+        $entry.notes += $intelNotes
+    }
 
     $summaryPath = Join-Path $reportsDir ("nightly_{0}_{1}.json" -f $dateStamp, $title)
     $summaryJson = $summary | ConvertTo-Json -Depth 6
