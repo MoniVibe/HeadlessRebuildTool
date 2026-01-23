@@ -13,6 +13,8 @@
   - Only keep a commit if a headless proof exists (log or telemetry).
   - Chain-of-custody: commit in artifact manifest must match `meta.json` in the result zip.
   - If a run passes but proves nothing, do not keep changing code; move to the next goal.
+  - Branch naming: `nightly/dev_<goal>_<YYYYMMDD_HHMM>`.
+  - Commit message must include `scenario_id` and `goal_id`.
 - Stop/switch rules:
   - If the same failure signature repeats twice, stop and consult the ledger.
   - If disk drops below the gate, switch to analysis/doc only (no builds).
