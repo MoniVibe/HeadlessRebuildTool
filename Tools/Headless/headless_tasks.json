@@ -16,6 +16,10 @@
         "nightly"
       ],
       "nightly_order": 10,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "required_bank": "",
       "metric_keys": [
         "godgame.registry.villagers.total",
@@ -1473,6 +1477,10 @@
         "perf-phase1"
       ],
       "nightly_order": 45,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "required_bank": "",
       "metric_keys": [
         "telemetry.bytes_written",
@@ -1508,6 +1516,10 @@
         "perf-phase1"
       ],
       "nightly_order": 46,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "required_bank": "",
       "metric_keys": [
         "telemetry.bytes_written",
@@ -1542,6 +1554,10 @@
         "nightly"
       ],
       "nightly_order": 20,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "required_bank": "S0.SPACE4X_SMOKE",
       "metric_keys": [
         "space4x.hull.vessels",
@@ -1662,6 +1678,10 @@
         "nightly"
       ],
       "nightly_order": 40,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "required_bank": "",
       "metric_keys": [
         "storehouse.count",

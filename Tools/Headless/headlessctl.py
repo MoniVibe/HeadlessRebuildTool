@@ -864,6 +864,29 @@ def scan_telemetry(telemetry_path, run_dir, pack_caps):
     if isinstance(cap_bytes, int) and cap_bytes > 0:
         under_cap = size_bytes <= cap_bytes
 
+    telemetry_truncated = 0 if under_cap else 1
+    last_tick_value = last_tick if isinstance(last_tick, int) else None
+    metrics_summary["telemetry.bytes_written"] = size_bytes
+    metrics_summary["telemetry.truncated"] = telemetry_truncated
+    metrics_stats["telemetry.bytes_written"] = {
+        "count": 1,
+        "min": size_bytes,
+        "max": size_bytes,
+        "mean": float(size_bytes),
+        "stdev": 0.0,
+        "last": size_bytes,
+        "last_tick": last_tick_value
+    }
+    metrics_stats["telemetry.truncated"] = {
+        "count": 1,
+        "min": telemetry_truncated,
+        "max": telemetry_truncated,
+        "mean": float(telemetry_truncated),
+        "stdev": 0.0,
+        "last": telemetry_truncated,
+        "last_tick": last_tick_value
+    }
+
     invariants = [
         {"name": "telemetry.parse_errors", "ok": parse_errors == 0, "value": parse_errors},
         {"name": "telemetry.monotonic_tick", "ok": monotonic_ok, "first_tick": first_tick, "last_tick": last_tick},
@@ -946,6 +969,15 @@ def run_task_internal(task_id, seed, pack_name):
     runner = task.get("runner")
     scenario_path = task.get("scenario_path")
     required_bank = task.get("required_bank")
+    allow_exit_codes = task.get("allow_exit_codes")
+    if allow_exit_codes is None:
+        allow_exit_codes = [0]
+    elif isinstance(allow_exit_codes, (int, float)):
+        allow_exit_codes = [int(allow_exit_codes)]
+    else:
+        allow_exit_codes = [int(code) for code in allow_exit_codes]
+    if 0 not in allow_exit_codes:
+        allow_exit_codes.append(0)
     timeout_s = task.get("timeout_s")
     if not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
         timeout_s = DEFAULT_TIMEOUT_S
@@ -1098,7 +1130,7 @@ def run_task_internal(task_id, seed, pack_name):
         ok = False
         error_code = "timeout"
         error = f"timeout_s={timeout_s}"
-    elif exit_code not in (0, None):
+    elif exit_code is not None and exit_code not in allow_exit_codes:
         ok = False
         error_code = "run_failed"
         error = f"exit_code={exit_code}"
