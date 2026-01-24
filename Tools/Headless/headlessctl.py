@@ -7,6 +7,7 @@ import os
 import re
 import selectors
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -16,6 +17,7 @@ import uuid
 TOOL_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_S = 600
+DEFAULT_SESSION_LOCK_TTL_SEC = 90 * 60
 
 
 def eprint(msg):
@@ -107,6 +109,10 @@ def get_build_state_path(state_dir):
     return os.path.join(state_dir, "ops", "locks", "build.state.json")
 
 
+def get_session_lock_path(state_dir):
+    return os.path.join(state_dir, "ops", "locks", "nightly_session.lock")
+
+
 def check_build_lock(state_dir):
     if os.environ.get("HEADLESSCTL_IGNORE_LOCK") == "1":
         return None
@@ -131,6 +137,103 @@ def check_build_lock(state_dir):
 def load_json(path):
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def parse_utc(value):
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        return datetime.datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
+def is_session_lock_stale(lock_path, data, ttl_sec):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    started = parse_utc(data.get("started_utc") if data else None)
+    if started:
+        if (now - started).total_seconds() > ttl_sec:
+            return True
+    try:
+        mtime = os.path.getmtime(lock_path)
+        mtime_dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
+        if (now - mtime_dt).total_seconds() > ttl_sec:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def read_session_lock(lock_path):
+    try:
+        return load_json(lock_path)
+    except Exception:
+        return None
+
+
+def claim_session_lock(state_dir, ttl_sec, purpose):
+    lock_path = get_session_lock_path(state_dir)
+    ensure_dir(os.path.dirname(lock_path))
+    now = utc_now()
+    host = socket.gethostname()
+    run_id = str(uuid.uuid4())
+    payload = {
+        "run_id": run_id,
+        "pid": os.getpid(),
+        "host": host,
+        "started_utc": now,
+        "purpose": purpose
+    }
+
+    while True:
+        if os.path.exists(lock_path):
+            data = read_session_lock(lock_path)
+            if is_session_lock_stale(lock_path, data or {}, ttl_sec):
+                stale_suffix = now.replace(":", "").replace("Z", "")
+                stale_path = f"{lock_path}.stale.{stale_suffix}"
+                try:
+                    os.replace(lock_path, stale_path)
+                except Exception:
+                    pass
+                continue
+            return {
+                "acquired": False,
+                "lock_path": lock_path,
+                "lock": data
+            }
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+        return {
+            "acquired": True,
+            "lock_path": lock_path,
+            "lock": payload
+        }
+
+
+def release_session_lock(state_dir, run_id=None):
+    lock_path = get_session_lock_path(state_dir)
+    if not os.path.exists(lock_path):
+        return {"released": False, "lock_path": lock_path, "lock": None}
+    data = read_session_lock(lock_path)
+    if run_id and data and data.get("run_id") and data.get("run_id") != run_id:
+        return {"released": False, "lock_path": lock_path, "lock": data}
+    try:
+        os.remove(lock_path)
+        return {"released": True, "lock_path": lock_path, "lock": data}
+    except Exception:
+        return {"released": False, "lock_path": lock_path, "lock": data}
+
+
+def show_session_lock(state_dir):
+    lock_path = get_session_lock_path(state_dir)
+    data = read_session_lock(lock_path) if os.path.exists(lock_path) else None
+    return {"lock_path": lock_path, "lock": data}
 
 
 def ensure_dir(path):
@@ -163,6 +266,32 @@ def resolve_pointer_binary(state_dir, project):
         eprint(f"HEADLESSCTL: using current build pointer for {project}: {executable}")
         return executable
     return None
+
+
+def parse_session_lock_args(args):
+    ttl = DEFAULT_SESSION_LOCK_TTL_SEC
+    purpose = "nightly"
+    run_id = None
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token == "--ttl" and idx + 1 < len(args):
+            try:
+                ttl = int(args[idx + 1])
+            except Exception:
+                pass
+            idx += 2
+            continue
+        if token == "--purpose" and idx + 1 < len(args):
+            purpose = args[idx + 1]
+            idx += 2
+            continue
+        if token == "--run-id" and idx + 1 < len(args):
+            run_id = args[idx + 1]
+            idx += 2
+            continue
+        idx += 1
+    return ttl, purpose, run_id
 
 
 def find_binary(tri_root, state_dir, project):
@@ -1515,6 +1644,53 @@ def main():
 
     if cmd == "validate":
         validate()
+
+    if cmd == "claim_session_lock":
+        tri_root = resolve_tri_root()
+        state_dir = resolve_state_dir(tri_root)
+        ttl, purpose, _ = parse_session_lock_args(args)
+        result = claim_session_lock(state_dir, ttl, purpose)
+        acquired = result.get("acquired", False)
+        lock = result.get("lock")
+        emit_result({
+            "ok": acquired,
+            "error_code": "none" if acquired else "locked",
+            "error": None if acquired else "session lock already held",
+            "run_id": lock.get("run_id") if lock else None,
+            "acquired": acquired,
+            "lock_path": result.get("lock_path"),
+            "lock": lock,
+            "ttl_sec": ttl
+        }, 0 if acquired else 3)
+
+    if cmd == "release_session_lock":
+        tri_root = resolve_tri_root()
+        state_dir = resolve_state_dir(tri_root)
+        _, _, run_id = parse_session_lock_args(args)
+        result = release_session_lock(state_dir, run_id)
+        emit_result({
+            "ok": True,
+            "error_code": "none",
+            "error": None,
+            "run_id": result.get("lock", {}).get("run_id") if result.get("lock") else None,
+            "released": result.get("released"),
+            "lock_path": result.get("lock_path"),
+            "lock": result.get("lock")
+        }, 0)
+
+    if cmd == "show_session_lock":
+        tri_root = resolve_tri_root()
+        state_dir = resolve_state_dir(tri_root)
+        result = show_session_lock(state_dir)
+        lock = result.get("lock")
+        emit_result({
+            "ok": lock is None,
+            "error_code": "none" if lock is None else "locked",
+            "error": None if lock is None else "session lock present",
+            "run_id": lock.get("run_id") if lock else None,
+            "lock_path": result.get("lock_path"),
+            "lock": lock
+        }, 0)
 
     emit_result({
         "ok": False,
