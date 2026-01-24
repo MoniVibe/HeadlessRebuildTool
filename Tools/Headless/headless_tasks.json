@@ -858,6 +858,64 @@
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     },
+    "S4.SPACE4X_FTL_MICRO": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_ftl_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        1101
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 39,
+      "required_bank": "S4.SPACE4X_FTL_MICRO",
+      "metric_keys": [
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "space4x.ftl.intent_count",
+        "space4x.ftl.jump_completed_count",
+        "space4x.ftl.time_to_jump_s",
+        "space4x.ftl.exit_distance_to_target"
+      ],
+      "validate_metric_keys": [
+        "telemetry.truncated",
+        "space4x.ftl.jump_completed_count"
+      ],
+      "thresholds": {
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "space4x.ftl.jump_completed_count": {
+          "min": 1
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_FTL_PROOF": "1",
+        "SPACE4X_HEADLESS_FTL_PROOF_EXIT": "1",
+        "SPACE4X_HEADLESS_ARC_PROOF": "0",
+        "SPACE4X_HEADLESS_ARC_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_COLLISION_PROOF": "0",
+        "SPACE4X_HEADLESS_COLLISION_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_CREW_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_BEHAVIOR_PROOF": "0",
+        "SPACE4X_HEADLESS_BEHAVIOR_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
     "P1.SPACE4X_PERF_ENTITIES_A": {
       "project": "space4x",
       "runner": "space4x_loader",
