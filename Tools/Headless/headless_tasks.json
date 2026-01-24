@@ -733,6 +733,125 @@
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     },
+    "S3.SPACE4X_CREW_ENTITY_TRANSFER_MICRO": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_crew_transfer_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        1101
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 38,
+      "required_bank": "S3.SPACE4X_CREW_ENTITY_TRANSFER_MICRO",
+      "metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "ai.idle_with_work_ratio",
+        "ai.task_latency_ticks.mean",
+        "ai.task_latency_ticks.p95",
+        "ai.decision_churn_per_min",
+        "ai.intent_flip_count",
+        "move.stuck_ticks",
+        "move.mode_flip_count",
+        "move.collision_near_miss_count",
+        "move.collision_damage_events",
+        "power.deficit_time_s",
+        "power.battery_min_soc",
+        "module.spool_transitions",
+        "module.not_ready_time_s",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "space4x.ledger.transfer_tick",
+        "space4x.ledger.transfer_last_seen"
+      ],
+      "validate_metric_keys": [
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "space4x.hull.vessels": {
+          "min": 1
+        },
+        "space4x.departments.carriers": {
+          "min": 0
+        },
+        "ai.idle_with_work_ratio": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.mean": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.p95": {
+          "min": 0
+        },
+        "ai.decision_churn_per_min": {
+          "min": 0
+        },
+        "ai.intent_flip_count": {
+          "min": 0
+        },
+        "move.stuck_ticks": {
+          "min": 0
+        },
+        "move.mode_flip_count": {
+          "min": 0
+        },
+        "move.collision_near_miss_count": {
+          "min": 0
+        },
+        "move.collision_damage_events": {
+          "min": 0
+        },
+        "power.deficit_time_s": {
+          "min": 0
+        },
+        "power.battery_min_soc": {
+          "min": 0
+        },
+        "module.spool_transitions": {
+          "min": 0
+        },
+        "module.not_ready_time_s": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        },
+        "space4x.ledger.transfer_tick": {
+          "min": 0
+        },
+        "space4x.ledger.transfer_last_seen": {
+          "min": 0
+        }
+      },
+      "variance_band": {
+        "space4x.hull.vessels": 1000,
+        "space4x.departments.carriers": 1000
+      },
+      "env": {
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF": "1",
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF_EXIT": "1",
+        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_PROOF": "0",
+        "SPACE4X_HEADLESS_ARC_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
     "P1.SPACE4X_PERF_ENTITIES_A": {
       "project": "space4x",
       "runner": "space4x_loader",
