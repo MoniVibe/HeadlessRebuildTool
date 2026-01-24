@@ -89,3 +89,60 @@ Scenarios should reference templates + overrides, not full entities.
 - One variable per iteration (code OR scenario).
 - No Assets/.meta edits at night; queue asset requests only.
 - Do not tune behavior on INVALID evidence.
+
+## Template Schema Sketch (v0 JSON)
+Entity template (file: `Assets/Scenarios/Templates/entity.*.json`):
+```json
+{
+  "templateId": "entity.baseline.v0",
+  "statsPreset": "baseline",
+  "skills": {
+    "command": 60,
+    "tactics": 60,
+    "logistics": 60,
+    "diplomacy": 55,
+    "engineering": 55,
+    "resolve": 60
+  },
+  "behaviorProfileId": "baseline",
+  "anatomyPreset": "baseline",
+  "conditions": ["one_eye_missing"]
+}
+```
+
+Crew template (file: `Assets/Scenarios/Templates/crew.*.json`):
+```json
+{
+  "templateId": "crew.sensors.v0",
+  "namedCrew": [
+    {
+      "name": "SENS-BASELINE",
+      "seatRole": "ship.sensors_officer",
+      "statsPreset": "rookie",
+      "entityTemplateId": "entity.baseline.v0"
+    }
+  ]
+}
+```
+
+Ship template (file: `Assets/Scenarios/Templates/ship.*.json`):
+```json
+{
+  "templateId": "ship.capitalship.v0",
+  "governanceMode": "crewed",
+  "stationRequirements": [
+    { "seatRole": "ship.sensors_officer", "minCount": 1 }
+  ]
+}
+```
+
+Scenario reference (2-line crew setup):
+```json
+{
+  "scenarioConfig": {
+    "crewTemplates": [
+      { "carrierId": "carrier-1", "crewTemplateId": "crew.sensors.v0" }
+    ]
+  }
+}
+```
