@@ -105,6 +105,38 @@ swap_headless_manifest() {
     cp -f "$LOCK_HEADLESS" "$LOCK_FILE"
     echo "Headless lock swapped: $LOCK_HEADLESS -> $LOCK_FILE"
   fi
+
+  if [ -f "$LOCK_FILE" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$LOCK_FILE" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+deps = data.get("dependencies", {})
+remove = [
+    "com.unity.visualscripting",
+    "com.unity.visualscripting.entities",
+    "com.unity.test-framework",
+    "com.unity.ide.visualstudio",
+    "com.unity.ide.rider",
+    "com.unity.collab-proxy",
+    "com.coplaydev.coplay",
+]
+
+changed = False
+for pkg in remove:
+    if pkg in deps:
+        deps.pop(pkg, None)
+        changed = True
+
+if changed:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+PY
+  fi
 }
 
 if [ "$FORCE_LINUX_UNITY" = "1" ]; then
