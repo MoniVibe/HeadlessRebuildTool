@@ -1,4 +1,4 @@
-> STATUS: LEGACY REFERENCE. Nightly is EngineerTick + queue + runner + ML analyzer.
+> STATUS: LEGACY REFERENCE. Nightly is EngineerTick + queue + runner + intel/scoreboard.
 > See: `Polish/Docs/HEADLESS_DOCS_INDEX.md`
 > Still useful for: bank channel concepts + tiered validation guidance.
 
@@ -22,6 +22,7 @@ This runbook splits headless validation into two agents with per-project banks.
 - If telemetry already exposes the metric, compute it and update `headlesstasks.md` (status, baseline/threshold, notes).
 - If the metric is missing, add minimal telemetry in logic repos (PureDOTS) and rebuild; if it requires `Assets/` or `.meta` edits, log the requirement and switch to another task.
 - Do not end a cycle with only bank runs; the bank is gating, not sufficient.
+- Mechanic proofs must be real: require BANK PASS or validate_metric_keys + thresholds; smoke-only passes are not progress.
 
 ## Compile-error remediation (non-negotiable)
 - If a rebuild fails with compiler errors, attempt a minimal, logic-only fix, rebuild scratch, then rerun Tier 0.
@@ -77,6 +78,7 @@ Rules:
   - Report/telemetry output paths
 - If a proof is incompatible with a scenario, disable it for that scenario and document the reason in the headless proof system.
 - Space4X proof toggles are scenario-specific: set `SPACE4X_HEADLESS_MINING_PROOF=1` for S0/S1/S2 mining scenarios, unset/0 for S0 collision, and set `SPACE4X_HEADLESS_BEHAVIOR_PROOF=1` for S5.
+- Do not substitute weighted formulas for proofs: primary metrics must be emergent from the sim; factor metrics are diagnostic only.
 
 Telemetry defaults (use unless debugging):
 - PUREDOTS_TELEMETRY_LEVEL=summary

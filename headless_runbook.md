@@ -1,4 +1,4 @@
-> STATUS: LEGACY REFERENCE. Nightly is EngineerTick + queue + runner + ML analyzer.
+> STATUS: LEGACY REFERENCE. Nightly is EngineerTick + queue + runner + intel/scoreboard.
 > See: `Polish/Docs/HEADLESS_DOCS_INDEX.md`
 > Still useful for: WSL run commands + asset escalation notes.
 
