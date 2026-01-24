@@ -7,6 +7,10 @@
   - Intel sidecar ingest: `Polish/Intel/anviloop_intel.py` (ingests result zips, writes `reports/intel/explain_*.json` and `questions_*.json`).
   - Scoreboard/headline: `Polish/Goals/scoreboard.py` (writes `nightly_headline_YYYYMMDD.md`).
   - Reward logging: uses `out/polish_score_v0.json` produced by the analyzer.
+- Session lock:
+  - Lock file: `$TRI_STATE_DIR/ops/locks/nightly_session.lock`.
+  - Claim is atomic with ownership metadata (run_id/pid/host/started_utc).
+  - TTL reclaim defaults to 90 minutes; stale locks are renamed to `*.stale.<timestamp>` before claiming.
 - Nightly structure:
   - Cycle 0 sentinel: EngineerTick FTL once; proof in `out/player.log` contains `[Anviloop][FTL] FTL_JUMP` with `tick >= 30`.
   - Concept goal: exactly one per night (default ARC); no scenario + code changes in the same cycle; code-only first.
