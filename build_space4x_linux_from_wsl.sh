@@ -226,16 +226,29 @@ if [ "$SPACE4X_HASH" != "unknown" ] && [ "$PUREDOTS_HASH" != "unknown" ] && [ -f
   fi
 fi
 
+UNITY_EXIT=0
+set +e
 if [ "$UNITY_MODE" = "windows" ]; then
   "$UNITY_PATH" -batchmode -quit -nographics \
     -projectPath "$PROJECT_DIR_WIN" \
     -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless \
     -logFile "$LOG_PATH_WIN"
+  UNITY_EXIT=$?
 else
   "$UNITY_PATH" -batchmode -quit -nographics \
     -projectPath "$PROJECT_DIR" \
     -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless \
     -logFile "$LOG_PATH"
+  UNITY_EXIT=$?
+fi
+set -e
+
+if [ "$UNITY_EXIT" -ne 0 ]; then
+  if [ -f "$BUILD_SRC/Space4X_Headless.x86_64" ] && [ -f "$LOG_PATH" ] && grep -q "Build Finished, Result: Success." "$LOG_PATH"; then
+    echo "Unity exited with code ${UNITY_EXIT} but build output exists and report indicates success. Continuing."
+  else
+    exit "$UNITY_EXIT"
+  fi
 fi
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
