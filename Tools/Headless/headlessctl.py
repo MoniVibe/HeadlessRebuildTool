@@ -113,6 +113,18 @@ def get_session_lock_path(state_dir):
     return os.path.join(state_dir, "ops", "locks", "nightly_session.lock")
 
 
+def get_legacy_session_lock_paths():
+    paths = []
+    queue_root = os.environ.get("POLISH_QUEUE_ROOT") or os.environ.get("POLISH_QUEUE")
+    if queue_root:
+        paths.append(os.path.join(queue_root, "reports", "nightly_session.lock"))
+    if os.name == "nt":
+        paths.append(r"C:\polish\queue\reports\nightly_session.lock")
+    else:
+        paths.append("/mnt/c/polish/queue/reports/nightly_session.lock")
+    return [path for path in dict.fromkeys(paths) if path]
+
+
 def check_build_lock(state_dir):
     if os.environ.get("HEADLESSCTL_IGNORE_LOCK") == "1":
         return None
@@ -173,6 +185,35 @@ def read_session_lock(lock_path):
         return None
 
 
+def reclaim_legacy_lock(path, ttl_sec):
+    if not os.path.exists(path):
+        return {"found": False}
+    data = read_session_lock(path)
+    if not is_session_lock_stale(path, data or {}, ttl_sec):
+        return {"found": True, "stale": False, "path": path, "lock": data}
+    stamp = utc_now().replace(":", "").replace("Z", "")
+    stale_path = f"{path}.stale.{stamp}"
+    try:
+        os.replace(path, stale_path)
+    except Exception:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+    return {"found": True, "stale": True, "path": path, "stale_path": stale_path, "lock": data}
+
+
+def check_legacy_locks(ttl_sec):
+    for path in get_legacy_session_lock_paths():
+        outcome = reclaim_legacy_lock(path, ttl_sec)
+        if not outcome.get("found"):
+            continue
+        if outcome.get("stale"):
+            return {"reclaimed": True, "path": path, "stale_path": outcome.get("stale_path")}
+        return {"locked": True, "path": path, "lock": outcome.get("lock")}
+    return {"reclaimed": False}
+
+
 def claim_session_lock(state_dir, ttl_sec, purpose):
     lock_path = get_session_lock_path(state_dir)
     ensure_dir(os.path.dirname(lock_path))
@@ -186,6 +227,15 @@ def claim_session_lock(state_dir, ttl_sec, purpose):
         "started_utc": now,
         "purpose": purpose
     }
+
+    legacy = check_legacy_locks(ttl_sec)
+    if legacy.get("locked"):
+        return {
+            "acquired": False,
+            "lock_path": legacy.get("path"),
+            "lock": legacy.get("lock"),
+            "warning": "legacy_session_lock_present"
+        }
 
     while True:
         if os.path.exists(lock_path):
@@ -234,6 +284,30 @@ def show_session_lock(state_dir):
     lock_path = get_session_lock_path(state_dir)
     data = read_session_lock(lock_path) if os.path.exists(lock_path) else None
     return {"lock_path": lock_path, "lock": data}
+
+
+def cleanup_session_locks(state_dir, ttl_sec):
+    reclaimed = []
+    legacy = check_legacy_locks(ttl_sec)
+    if legacy.get("reclaimed"):
+        reclaimed.append(legacy.get("path"))
+
+    lock_path = get_session_lock_path(state_dir)
+    if os.path.exists(lock_path):
+        data = read_session_lock(lock_path)
+        if is_session_lock_stale(lock_path, data or {}, ttl_sec):
+            stamp = utc_now().replace(":", "").replace("Z", "")
+            stale_path = f"{lock_path}.stale.{stamp}"
+            try:
+                os.replace(lock_path, stale_path)
+                reclaimed.append(lock_path)
+            except Exception:
+                try:
+                    os.remove(lock_path)
+                    reclaimed.append(lock_path)
+                except Exception:
+                    pass
+    return reclaimed
 
 
 def ensure_dir(path):
@@ -292,6 +366,133 @@ def parse_session_lock_args(args):
             continue
         idx += 1
     return ttl, purpose, run_id
+
+
+def parse_cleanup_runs_args(args):
+    days = None
+    keep_per_task = None
+    max_bytes = None
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token == "--days" and idx + 1 < len(args):
+            try:
+                days = int(args[idx + 1])
+            except Exception:
+                pass
+            idx += 2
+            continue
+        if token == "--keep-per-task" and idx + 1 < len(args):
+            try:
+                keep_per_task = int(args[idx + 1])
+            except Exception:
+                pass
+            idx += 2
+            continue
+        if token == "--max-bytes" and idx + 1 < len(args):
+            try:
+                max_bytes = int(args[idx + 1])
+            except Exception:
+                pass
+            idx += 2
+            continue
+        idx += 1
+    return days, keep_per_task, max_bytes
+
+
+def iter_runs(state_dir):
+    runs_dir = os.path.join(state_dir, "runs")
+    if not os.path.isdir(runs_dir):
+        return []
+    entries = []
+    for name in os.listdir(runs_dir):
+        run_path = os.path.join(runs_dir, name)
+        if not os.path.isdir(run_path):
+            continue
+        result_path = os.path.join(run_path, "result.json")
+        result = None
+        ended_utc = None
+        task_id = None
+        if os.path.exists(result_path):
+            try:
+                result = load_json(result_path)
+                ended_utc = result.get("ended_utc") or result.get("started_utc")
+                task_id = result.get("task_id")
+            except Exception:
+                result = None
+        entries.append({
+            "run_id": name,
+            "path": run_path,
+            "result": result,
+            "ended_utc": ended_utc,
+            "task_id": task_id
+        })
+    return entries
+
+
+def run_dir_size(path):
+    total = 0
+    for root, _, files in os.walk(path):
+        for fname in files:
+            try:
+                total += os.path.getsize(os.path.join(root, fname))
+            except Exception:
+                pass
+    return total
+
+
+def cleanup_runs(state_dir, days, keep_per_task, max_bytes):
+    entries = iter_runs(state_dir)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    removed = []
+
+    if days is not None:
+        cutoff = now - datetime.timedelta(days=days)
+        kept = []
+        for entry in entries:
+            ended = parse_utc(entry.get("ended_utc"))
+            if ended and ended < cutoff:
+                removed.append(entry["run_id"])
+                shutil.rmtree(entry["path"], ignore_errors=True)
+            else:
+                kept.append(entry)
+        entries = kept
+
+    if keep_per_task is not None:
+        by_task = {}
+        for entry in entries:
+            task_id = entry.get("task_id") or "unknown"
+            by_task.setdefault(task_id, []).append(entry)
+        kept = []
+        for task_id, runs in by_task.items():
+            runs.sort(key=lambda item: parse_utc(item.get("ended_utc")) or now, reverse=True)
+            kept.extend(runs[:keep_per_task])
+            for entry in runs[keep_per_task:]:
+                removed.append(entry["run_id"])
+                shutil.rmtree(entry["path"], ignore_errors=True)
+        entries = kept
+
+    if max_bytes is not None:
+        entries.sort(key=lambda item: parse_utc(item.get("ended_utc")) or now, reverse=True)
+        total_bytes = 0
+        kept = []
+        sizes = {}
+        for entry in entries:
+            size = run_dir_size(entry["path"])
+            sizes[entry["run_id"]] = size
+            total_bytes += size
+            kept.append(entry)
+        if total_bytes > max_bytes:
+            for entry in reversed(kept):
+                if total_bytes <= max_bytes:
+                    break
+                run_id = entry["run_id"]
+                size = sizes.get(run_id, 0)
+                removed.append(run_id)
+                total_bytes -= size
+                shutil.rmtree(entry["path"], ignore_errors=True)
+
+    return removed
 
 
 def find_binary(tri_root, state_dir, project):
@@ -1660,6 +1861,7 @@ def main():
             "acquired": acquired,
             "lock_path": result.get("lock_path"),
             "lock": lock,
+            "warning": result.get("warning"),
             "ttl_sec": ttl
         }, 0 if acquired else 3)
 
@@ -1690,6 +1892,35 @@ def main():
             "run_id": lock.get("run_id") if lock else None,
             "lock_path": result.get("lock_path"),
             "lock": lock
+        }, 0)
+
+    if cmd == "cleanup_locks":
+        tri_root = resolve_tri_root()
+        state_dir = resolve_state_dir(tri_root)
+        ttl, _, _ = parse_session_lock_args(args)
+        reclaimed = cleanup_session_locks(state_dir, ttl)
+        emit_result({
+            "ok": True,
+            "error_code": "none",
+            "error": None,
+            "run_id": None,
+            "reclaimed": reclaimed
+        }, 0)
+
+    if cmd == "cleanup_runs":
+        tri_root = resolve_tri_root()
+        state_dir = resolve_state_dir(tri_root)
+        days, keep_per_task, max_bytes = parse_cleanup_runs_args(args)
+        removed = cleanup_runs(state_dir, days, keep_per_task, max_bytes)
+        emit_result({
+            "ok": True,
+            "error_code": "none",
+            "error": None,
+            "run_id": None,
+            "removed": removed,
+            "days": days,
+            "keep_per_task": keep_per_task,
+            "max_bytes": max_bytes
         }, 0)
 
     emit_result({

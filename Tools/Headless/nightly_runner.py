@@ -161,6 +161,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run nightly headless tasks.")
     parser.add_argument("--tag", default="nightly", help="Task tag to select.")
     parser.add_argument("--tasks", default="", help="Comma-separated task ids to run.")
+    parser.add_argument("--gate", action="store_true", help="Run S2/S3 gate tasks before other work.")
+    parser.add_argument("--gate-hours", type=int, default=24, help="Skip gate tasks if last green is newer than hours.")
     args = parser.parse_args()
 
     state_dir = resolve_state_dir()
@@ -215,7 +217,7 @@ def main():
                 json.dump(summary, handle, indent=2, sort_keys=True)
             sys.exit(1)
 
-        if not selected_tasks:
+        if not selected_tasks and not args.gate:
             summary = {
                 "ok": False,
                 "skipped": False,
@@ -236,9 +238,57 @@ def main():
             "skipped": False,
             "tag": args.tag,
             "tasks": selected_tasks,
-            "runs": []
+            "runs": [],
+            "gate_runs": []
         }
         overall_fail = False
+
+        gate_tasks = ["S2.SPACE4X_CREW_SENSORS_CAUSALITY_MICRO", "S3.SPACE4X_CREW_ENTITY_TRANSFER_MICRO"]
+        if args.gate:
+            selected_tasks = [task_id for task_id in selected_tasks if task_id not in gate_tasks]
+            summary["tasks"] = selected_tasks
+            gate_fail = False
+            for task_id in gate_tasks:
+                previous_run = find_previous_run(state_dir, task_id, None)
+                skip_gate = False
+                if previous_run:
+                    ended = previous_run.get("ended_utc")
+                    if ended:
+                        try:
+                            from datetime import datetime, timezone, timedelta
+                            if ended.endswith("Z"):
+                                ended = ended[:-1] + "+00:00"
+                            ended_dt = datetime.fromisoformat(ended)
+                            if datetime.now(timezone.utc) - ended_dt < timedelta(hours=args.gate_hours):
+                                if previous_run.get("exit_code") == 0:
+                                    bank_status = previous_run.get("bank_status") or {}
+                                    if bank_status.get("status") == "PASS":
+                                        skip_gate = True
+                        except Exception:
+                            pass
+                if skip_gate:
+                    summary["gate_runs"].append({
+                        "task_id": task_id,
+                        "skipped": True,
+                        "reason": "recent_green"
+                    })
+                    continue
+                run_result, _ = run_headlessctl(["run_task", task_id])
+                summary["gate_runs"].append({
+                    "task_id": task_id,
+                    "run_id": run_result.get("run_id"),
+                    "ok": run_result.get("ok", False),
+                    "exit_code": run_result.get("exit_code"),
+                    "bank": (run_result.get("bank_status") or {}).get("status")
+                })
+                if not run_result.get("ok", False):
+                    gate_fail = True
+            if gate_fail:
+                summary["ok"] = False
+                summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+                with open(summary_path, "w", encoding="utf-8") as handle:
+                    json.dump(summary, handle, indent=2, sort_keys=True)
+                sys.exit(1)
 
         for task_id in selected_tasks:
             run_result, _ = run_headlessctl(["run_task", task_id])

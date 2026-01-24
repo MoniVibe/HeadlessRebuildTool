@@ -11,9 +11,14 @@
   - Lock file: `$TRI_STATE_DIR/ops/locks/nightly_session.lock`.
   - Claim is atomic with ownership metadata (run_id/pid/host/started_utc).
   - TTL reclaim defaults to 90 minutes; stale locks are renamed to `*.stale.<timestamp>` before claiming.
+  - CLI helpers:
+    - Claim: `python3 Tools/Headless/headlessctl.py claim_session_lock --ttl 5400 --purpose nightly_runner`
+    - Show: `python3 Tools/Headless/headlessctl.py show_session_lock`
+    - Cleanup stale: `python3 Tools/Headless/headlessctl.py cleanup_locks --ttl 5400`
 - Nightly structure:
   - Cycle 0 sentinel: EngineerTick FTL once; proof in `out/player.log` contains `[Anviloop][FTL] FTL_JUMP` with `tick >= 30`.
   - Concept goal: exactly one per night (default ARC); no scenario + code changes in the same cycle; code-only first.
+  - Nightly gate: `nightly_runner.py --gate` runs S2/S3 first and skips them if last green < 24h.
 - Validity gate:
   - If telemetry is missing/truncated, invariants missing, or required oracle keys missing, mark INVALID and fix instrumentation/infra first.
 - Commit/proof policy:
@@ -36,6 +41,8 @@
 - Reporting:
   - Write `C:\polish\queue\reports\nightly_cycle_<utc>_<cycle>.json`.
   - Append `C:\polish\queue\reports\nightly_timeline.log` key=value line with goal_id, build_id, artifact, job_id(s), result zip, proof snippet, exit_reason, failure_signature, disk before/after, cleanup counts, ledger action.
+  - Cleanup runs in state dir if disk pressure rises:
+    - `python3 Tools/Headless/headlessctl.py cleanup_runs --days 7 --keep-per-task 5 --max-bytes 5000000000`
 
 - Scenario vs simulation principle:
   - Scenarios stay small/deterministic; the simulation inside them is real and dynamic.
