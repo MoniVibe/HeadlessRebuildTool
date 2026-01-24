@@ -14,7 +14,8 @@
       "default_pack": "nightly-default",
       "env": {
         "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF": "1",
-        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF_EXIT": "1"
+        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF_EXIT": "1",
+        "SPACE4X_SCENARIO_PATH": "space4x/Assets/Scenarios/space4x_crew_sensors_causality_micro.json"
       },
       "tags": [
         "nightly"
@@ -149,7 +150,8 @@
       "default_pack": "nightly-default",
       "env": {
         "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF": "1",
-        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF_EXIT": "1"
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF_EXIT": "1",
+        "SPACE4X_SCENARIO_PATH": "space4x/Assets/Scenarios/space4x_crew_transfer_micro.json"
       },
       "tags": [
         "nightly"
