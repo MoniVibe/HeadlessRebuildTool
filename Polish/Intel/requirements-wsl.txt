@@ -1,0 +1,4 @@
+drain3
+sentence-transformers
+faiss-cpu
+numpy

@@ -4,8 +4,12 @@ param(
     [string]$Title,
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
+    [string]$ProjectPathOverride,
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$ScenarioId,
+    [string]$ScenarioRel,
+    [string]$GoalId,
+    [string]$GoalSpec,
     [int]$Seed,
     [int]$TimeoutSec,
     [string[]]$Args,
@@ -33,6 +37,75 @@ function Convert-ToWslPath {
         return "/mnt/$drive/$rest"
     }
     return ($full -replace '\\', '/')
+}
+
+function Normalize-ScenarioRel {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+    $normalized = $Value -replace '\\', '/'
+    if ($normalized -match '^[A-Za-z]:/' -or $normalized.StartsWith('/')) {
+        $assetsIndex = $normalized.IndexOf('Assets/')
+        if ($assetsIndex -ge 0) {
+            return $normalized.Substring($assetsIndex)
+        }
+        throw "ScenarioRel must be relative or contain Assets/: $Value"
+    }
+    return $normalized.TrimStart("./")
+}
+
+function Normalize-GoalSpecPath {
+    param(
+        [string]$GoalSpecPath,
+        [string]$RepoRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($GoalSpecPath)) { return "" }
+    $normalized = $GoalSpecPath -replace '\\', '/'
+    if ($normalized -match '^[A-Za-z]:/' -or $normalized.StartsWith('/')) {
+        $root = ($RepoRoot -replace '\\', '/').TrimEnd('/')
+        if ($normalized.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $normalized.Substring($root.Length).TrimStart('/')
+        }
+        return $normalized
+    }
+    return $normalized.TrimStart("./")
+}
+
+function Get-ScenarioRelFromArgs {
+    param([string[]]$ArgsIn)
+    if (-not $ArgsIn) { return "" }
+    for ($i = 0; $i -lt $ArgsIn.Count; $i++) {
+        $token = $ArgsIn[$i]
+        if ($token -in @("--scenario", "-scenario")) {
+            if ($i + 1 -lt $ArgsIn.Count) {
+                return $ArgsIn[$i + 1]
+            }
+            continue
+        }
+        if ($token -like "--scenario=*") {
+            return $token.Substring(11)
+        }
+        if ($token -like "-scenario=*") {
+            return $token.Substring(10)
+        }
+    }
+    return ""
+}
+
+function Strip-ScenarioArgs {
+    param([string[]]$ArgsIn)
+    if (-not $ArgsIn) { return @() }
+    $output = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $ArgsIn.Count; $i++) {
+        $token = $ArgsIn[$i]
+        if ($token -in @("--scenario", "-scenario")) {
+            $i++
+            continue
+        }
+        if ($token -like "--scenario=*") { continue }
+        if ($token -like "-scenario=*") { continue }
+        $output.Add($token)
+    }
+    return ,$output.ToArray()
 }
 
 function Get-ResultWaitTimeoutSeconds {
@@ -255,6 +328,10 @@ if (-not $titleDefaults) {
 }
 
 $projectPath = Join-Path $triRoot $titleDefaults.project_path
+if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
+    $projectPath = $ProjectPathOverride
+}
+$projectPath = [System.IO.Path]::GetFullPath($projectPath)
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
@@ -273,10 +350,20 @@ if (-not (Test-Path $swapScript)) {
 }
 
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
+$scenarioRelValue = if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $ScenarioRel } else { $titleDefaults.scenario_rel }
+$goalIdValue = if ($PSBoundParameters.ContainsKey("GoalId")) { $GoalId } else { "" }
+$goalSpecValue = if ($PSBoundParameters.ContainsKey("GoalSpec")) { Normalize-GoalSpecPath -GoalSpecPath $GoalSpec -RepoRoot $triRoot } else { "" }
 $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$titleDefaults.seed }
 $timeoutValue = if ($PSBoundParameters.ContainsKey("TimeoutSec")) { $TimeoutSec } else { [int]$titleDefaults.timeout_sec }
 $argsValue = if ($PSBoundParameters.ContainsKey("Args")) { $Args } else { $titleDefaults.args }
 if ($null -eq $argsValue) { $argsValue = @() }
+if (-not $scenarioRelValue) {
+    $scenarioRelValue = Get-ScenarioRelFromArgs $argsValue
+}
+if ($scenarioRelValue) {
+    $scenarioRelValue = Normalize-ScenarioRel $scenarioRelValue
+    $argsValue = Strip-ScenarioArgs $argsValue
+}
 if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
@@ -351,6 +438,7 @@ if (-not $preflight.ok) {
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
+$repoRootWsl = Convert-ToWslPath $projectPath
 Write-Host ("build_id={0} commit={1}" -f $buildId, $commitFull)
 Write-Host ("artifact={0}" -f $artifactZip)
 
@@ -378,6 +466,16 @@ for ($i = 1; $i -le $Repeat; $i++) {
         feature_flags = [ordered]@{}
         artifact_uri = $artifactUri
         created_utc = $createdUtc
+        repo_root = $repoRootWsl
+    }
+    if ($scenarioRelValue) {
+        $job.scenario_rel = $scenarioRelValue
+    }
+    if ($goalIdValue) {
+        $job.goal_id = $goalIdValue
+    }
+    if ($goalSpecValue) {
+        $job.goal_spec = $goalSpecValue
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6

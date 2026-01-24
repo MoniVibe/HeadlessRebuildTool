@@ -1,0 +1,21 @@
+﻿{
+  "goal_id": "space4x_ftl_02",
+  "goal_version": "v0",
+  "description": "FTL jump occurs after sim has advanced (tick >= 300).",
+  "proof": {
+    "log_regex": [
+      "FTL_JUMP.*tick=(3\\d\\d|[4-9]\\d\\d|\\d{4,})",
+      "FTL_?(JUMP|COMPLETE)"
+    ],
+    "operator_contains": [
+      "ftl",
+      "jump"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "log",
+      "operator"
+    ]
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "safe_extended_20260123",
+  "queue_root": "C:\\polish\\queue",
+  "wsl_distro": "Ubuntu",
+  "poll_sec": 60,
+  "pending_grace_sec": 600,
+  "max_minutes": 720,
+  "jobs": [
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_turnrate_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_turnrate_micro.json",
+      "seed": 1101,
+      "timeout_sec": 90,
+      "repeat": 3,
+      "args": [],
+      "base_ref": "nightly/base_space4x_20260123"
+    },
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_sensors_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_sensors_micro.json",
+      "seed": 901,
+      "timeout_sec": 120,
+      "repeat": 3,
+      "args": [],
+      "base_ref": "nightly/base_space4x_20260123"
+    },
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_comms_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_comms_micro.json",
+      "seed": 907,
+      "timeout_sec": 90,
+      "repeat": 3,
+      "args": [],
+      "base_ref": "nightly/base_space4x_20260123"
+    },
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_comms_blocked_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_comms_blocked_micro.json",
+      "seed": 911,
+      "timeout_sec": 90,
+      "repeat": 3,
+      "args": [],
+      "base_ref": "nightly/base_space4x_20260123"
+    },
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_mining_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_mining_micro.json",
+      "seed": 42,
+      "timeout_sec": 180,
+      "repeat": 3,
+      "args": [],
+      "base_ref": "nightly/base_space4x_20260123"
+    }
+  ]
+}

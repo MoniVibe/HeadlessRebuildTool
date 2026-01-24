@@ -1,0 +1,20 @@
+﻿{
+  "goal_id": "space4x_stuck_low_01",
+  "goal_version": "v0",
+  "description": "Stuck ticks remain low.",
+  "proof": {
+    "metric_keys": [
+      "move.stuck_ticks"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "metric"
+    ]
+  },
+  "thresholds": {
+    "metric_max": {
+      "move.stuck_ticks": 5
+    }
+  }
+}

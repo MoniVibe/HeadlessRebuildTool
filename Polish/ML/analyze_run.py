@@ -4,6 +4,8 @@ import glob
 import json
 import math
 import os
+import subprocess
+import sys
 
 
 def load_json(path):
@@ -155,6 +157,40 @@ def gather_telemetry(out_dir):
     return entries, bytes_total, format_hint
 
 
+def compute_telemetry_summary(out_dir, top_limit=5):
+    summary = {"event_total": 0, "top_event_types": []}
+    path = os.path.join(out_dir, "telemetry.ndjson")
+    if not os.path.isfile(path):
+        summary["source"] = "missing"
+        return summary
+
+    counts = {}
+    total = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            total += 1
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                event_type = obj.get("type") or obj.get("event") or obj.get("name") or obj.get("event_type")
+            else:
+                event_type = None
+            if event_type is None:
+                event_type = "unknown"
+            counts[str(event_type)] = counts.get(str(event_type), 0) + 1
+
+    top = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:top_limit]
+    summary["event_total"] = total
+    summary["top_event_types"] = [{"type": key, "count": value} for key, value in top]
+    summary["source"] = "out/telemetry.ndjson"
+    return summary
+
+
 def percentile(values, p):
     if not values:
         return None
@@ -295,6 +331,48 @@ def compute_score(exit_reason, runtime_sec, runtime_budget_sec, telemetry_bytes,
     return total_loss, breakdown, grade
 
 
+def resolve_goal_spec_path(script_dir, goal_spec_value, goal_id):
+    repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+    if goal_spec_value:
+        candidate = goal_spec_value
+        if not os.path.isabs(candidate):
+            candidate = os.path.join(repo_root, candidate)
+        if os.path.isfile(candidate):
+            return candidate
+    if goal_id:
+        candidate = os.path.join(repo_root, "Goals", "specs", f"{goal_id}.json")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def maybe_score_goal(meta, run_summary, out_dir):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    score_goal_path = os.path.abspath(os.path.join(script_dir, "..", "Goals", "score_goal.py"))
+    if not os.path.isfile(score_goal_path):
+        return None
+
+    goal_spec_value = meta.get("goal_spec") or run_summary.get("goal_spec")
+    goal_id = meta.get("goal_id") or run_summary.get("goal_id")
+    goal_spec_path = resolve_goal_spec_path(script_dir, goal_spec_value, goal_id)
+    if not goal_spec_path:
+        return None
+
+    result_root = os.path.abspath(os.path.join(out_dir, ".."))
+    try:
+        subprocess.run(
+            [sys.executable, score_goal_path, "--result_root", result_root, "--goal_spec", goal_spec_path],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+
+    report_path = os.path.join(out_dir, "goal_report.json")
+    return load_json(report_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate ML-friendly run summary and score.")
     parser.add_argument("--meta", required=True)
@@ -326,6 +404,7 @@ def main():
         failing_invariants = collect_failing_invariants(inv)
 
     telemetry_files, telemetry_bytes, telemetry_format = gather_telemetry(out_dir)
+    telemetry_summary = compute_telemetry_summary(out_dir)
     perf_summary = parse_perf_telemetry(out_dir)
 
     artifact_paths = meta.get("artifact_paths")
@@ -357,6 +436,7 @@ def main():
             "bytes_total": int(telemetry_bytes),
             "format_hint": telemetry_format,
         },
+        "telemetry_summary": telemetry_summary,
         "perf": perf_summary,
         "artifacts_present": artifacts_present,
     }
@@ -383,7 +463,16 @@ def main():
         "grade": grade,
     }
 
-    write_json(os.path.join(out_dir, "run_summary.json"), run_summary)
+    run_summary_path = os.path.join(out_dir, "run_summary.json")
+    write_json(run_summary_path, run_summary)
+
+    goal_report = maybe_score_goal(meta, run_summary, out_dir)
+    if isinstance(goal_report, dict):
+        run_summary["goal_id"] = goal_report.get("goal_id")
+        run_summary["goal_version"] = goal_report.get("goal_version")
+        run_summary["goal_status"] = goal_report.get("goal_status")
+        run_summary["goal_score"] = goal_report.get("goal_score")
+        write_json(run_summary_path, run_summary)
     write_json(os.path.join(out_dir, "polish_score_v0.json"), polish_score)
 
 

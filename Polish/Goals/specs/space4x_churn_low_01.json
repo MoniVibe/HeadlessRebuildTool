@@ -1,0 +1,20 @@
+﻿{
+  "goal_id": "space4x_churn_low_01",
+  "goal_version": "v0",
+  "description": "AI decision churn remains low.",
+  "proof": {
+    "metric_keys": [
+      "ai.decision_churn_per_min"
+    ]
+  },
+  "required": {
+    "any_of": [
+      "metric"
+    ]
+  },
+  "thresholds": {
+    "metric_max": {
+      "ai.decision_churn_per_min": 20
+    }
+  }
+}

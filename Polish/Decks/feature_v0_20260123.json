@@ -1,0 +1,31 @@
+{
+  "name": "feature_v0_20260123",
+  "queue_root": "C:\\polish\\queue",
+  "wsl_distro": "Ubuntu",
+  "poll_sec": 60,
+  "pending_grace_sec": 600,
+  "max_minutes": 720,
+  "jobs": [
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_arc_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_arc_micro.json",
+      "seed": 1207,
+      "timeout_sec": 180,
+      "repeat": 12,
+      "args": [],
+      "base_ref": "nightly/base_space4x_20260123",
+      "required_bank": "S1.SPACE4X_ARC_MICRO"
+    },
+    {
+      "title": "godgame",
+      "scenario_id": "godgame_storehouse_micro",
+      "scenario_rel": "Assets/Scenarios/Godgame/godgame_storehouse_micro.json",
+      "seed": 42,
+      "timeout_sec": 180,
+      "repeat": 12,
+      "args": [],
+      "base_ref": "nightly/base_godgame_20260123"
+    }
+  ]
+}

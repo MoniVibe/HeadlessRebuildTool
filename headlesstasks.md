@@ -1,16 +1,30 @@
+> STATUS: LEGACY REFERENCE (task bank). Nightly is EngineerTick + queue + runner + intel/scoreboard.
+> See: `Polish/Docs/HEADLESS_DOCS_INDEX.md`
+> Still useful for: long-form task bank + cycle log.
+
 # Headless Tasks
 
 Mini goals for headless agents to pursue during unattended runs.
 Scope: logic-only changes (no `Assets/` or `.meta` edits). Update status as goals are achieved.
 
+## Nightly Goals (CURRENT)
+- Sentinel: `space4x.ftl.01` proof markers in `out/player.log`:
+  - `[Anviloop][FTL] FTL_ENGAGE` / `FTL_COMPLETE` / `FTL_JUMP` with `tick >= 30`.
+- Concept: `space4x.arc.01` proof marker in `out/player.log`:
+  - `[Anviloop] ARC_START_STUB`.
+- Goal rotation: use the nightly plan/cursor (`C:\polish\queue\reports\nightly_plan.json` + cursor file).
+- Stop conditions: if the same failure signature repeats twice, stop and consult the ledger.
+
 ## Rules
 - Use WSL clone `/home/oni/Tri` for logic changes; avoid `/mnt/c` for active WSL work.
 - Do not touch `Assets/` or `.meta` from WSL (presentation owns those files).
+- Assets/.meta edits are daytime-only and must be grouped into an approved asset batch.
 - When rebuilding, align `UNITY_WIN` to the Unity version in `ProjectSettings/ProjectVersion.txt` for the target repo.
 - Keep `Packages/manifest.json` and `Packages/packages-lock.json` in sync across clones when logic changes.
 - Scenario authoring is allowed only in headless-only locations (prefer `/home/oni/Tri/.tri/scenarios` or `$TRI_STATE_DIR/scenarios`); always reference the explicit scenario path in task notes.
 - Each task must include a scenario, measurable metric, and target threshold.
 - If a metric is missing, add minimal telemetry to support it.
+- Progress scenarios must have BANK PASS or validate_metric_keys + thresholds; smoke-only runs are not proof.
 - If a bank failure is fixed or proof/env toggles change, update the runbook/prompt in the same cycle and note the update in the cycle log.
 - Nightly headless agents must attempt at least one task per cycle and update this file with baseline/threshold and status (even if still pending).
 - Keep tasks project-scoped: Godgame agents use Godgame + Cross-cutting tasks; Space4X agents use Space4X + Cross-cutting tasks.
