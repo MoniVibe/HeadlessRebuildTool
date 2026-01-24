@@ -33,3 +33,4 @@
 - `Polish/Docs/ANVILOOP_RECURRING_ERRORS.md`
 - `Polish/Intel/anviloop_intel.py`
 - `Polish/Goals/scoreboard.py`
+- `Polish/Docs/ENTITY_SIM_TEMPLATE_CONTRACT.md`

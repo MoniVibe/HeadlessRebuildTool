@@ -37,3 +37,4 @@
   - Scenarios stay small/deterministic; the simulation inside them is real and dynamic.
   - Primary metrics must be emergent from the sim (acquire → solve → align → fire → hit), not computed by a flat formula.
   - Use templates/spawners for crewed/autonomous/hive ships to keep scenario JSON small but expressive.
+- Simulation template contract: `Polish/Docs/ENTITY_SIM_TEMPLATE_CONTRACT.md`.
