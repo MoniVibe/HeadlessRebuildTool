@@ -17,6 +17,12 @@ Each entity is a blank ID card with runtime-modifiable parts.
 - Modifiers: augments[], status_effects[].
 - Behavior profile: profile_id (selects decision weights/heuristics).
 
+Mutability (non-negotiable):
+- Limbs/organs/sensors are mutable, replaceable, and augmentable at runtime.
+- Bodies can be controlled as vehicles/ships or act as autonomous agents.
+- Sensors can be deceived or degraded (countermeasures, damage, status effects).
+- All template fields should allow overrides and runtime state changes.
+
 ## Ship Template (v0)
 Ships are physical systems plus governance.
 - Physics: mass, thrust, inertia, angular_limits.
