@@ -68,6 +68,44 @@ TRI_WSL=""
 LOG_PATH=""
 LOG_PATH_WIN=""
 BUILD_SRC=""
+MANIFEST_DIR=""
+MANIFEST_FILE=""
+MANIFEST_HEADLESS=""
+MANIFEST_BAK=""
+LOCK_FILE=""
+LOCK_HEADLESS=""
+LOCK_BAK=""
+
+restore_headless_manifest() {
+  if [ -n "$MANIFEST_BAK" ] && [ -f "$MANIFEST_BAK" ]; then
+    mv -f "$MANIFEST_BAK" "$MANIFEST_FILE" || true
+  fi
+  if [ -n "$LOCK_BAK" ] && [ -f "$LOCK_BAK" ]; then
+    mv -f "$LOCK_BAK" "$LOCK_FILE" || true
+  fi
+}
+
+swap_headless_manifest() {
+  MANIFEST_DIR="${PROJECT_DIR}/Packages"
+  MANIFEST_FILE="${MANIFEST_DIR}/manifest.json"
+  MANIFEST_HEADLESS="${MANIFEST_DIR}/manifest.headless.json"
+  MANIFEST_BAK="${MANIFEST_DIR}/manifest.json.bak_headless"
+  LOCK_FILE="${MANIFEST_DIR}/packages-lock.json"
+  LOCK_HEADLESS="${MANIFEST_DIR}/packages-lock.headless.json"
+  LOCK_BAK="${MANIFEST_DIR}/packages-lock.json.bak_headless"
+
+  if [ -f "$MANIFEST_HEADLESS" ]; then
+    cp -f "$MANIFEST_FILE" "$MANIFEST_BAK"
+    cp -f "$MANIFEST_HEADLESS" "$MANIFEST_FILE"
+    echo "Headless manifest swapped: $MANIFEST_HEADLESS -> $MANIFEST_FILE"
+  fi
+
+  if [ -f "$LOCK_HEADLESS" ]; then
+    cp -f "$LOCK_FILE" "$LOCK_BAK"
+    cp -f "$LOCK_HEADLESS" "$LOCK_FILE"
+    echo "Headless lock swapped: $LOCK_HEADLESS -> $LOCK_FILE"
+  fi
+}
 
 if [ "$FORCE_LINUX_UNITY" = "1" ]; then
   UNITY_PATH="$(find_unity_linux || true)"
@@ -106,6 +144,9 @@ if [ "$UNITY_MODE" = "linux" ]; then
   LOG_PATH="${TRI_ROOT}/space4x_headless_build.log"
   BUILD_SRC="${PROJECT_DIR}/Builds/Space4X_headless/Linux"
 fi
+
+trap restore_headless_manifest EXIT
+swap_headless_manifest
 
 UNITY_VERSION="$(basename "$(dirname "$(dirname "$UNITY_PATH")")")"
 if [ -z "$UNITY_VERSION" ]; then
