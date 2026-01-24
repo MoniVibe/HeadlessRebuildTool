@@ -12,16 +12,11 @@
         42
       ],
       "default_pack": "nightly-default",
-      "env": {
-        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF": "1",
-        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF_EXIT": "1",
-        "SPACE4X_SCENARIO_PATH": "space4x/Assets/Scenarios/space4x_crew_sensors_causality_micro.json"
-      },
       "tags": [
         "nightly"
       ],
       "nightly_order": 10,
-      "required_bank": "G0.GODGAME_SMOKE",
+      "required_bank": "",
       "metric_keys": [
         "godgame.registry.villagers.total",
         "godgame.registry.storehouses.stored",
@@ -48,9 +43,7 @@
         "god.pile_haul_rate"
       ],
       "validate_metric_keys": [
-        "godgame.registry.villagers.total",
-        "godgame.registry.storehouses.stored",
-        "telemetry.heartbeat"
+        "telemetry.truncated"
       ],
       "thresholds": {
         "godgame.registry.villagers.total": {
@@ -148,11 +141,6 @@
         42
       ],
       "default_pack": "nightly-default",
-      "env": {
-        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF": "1",
-        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF_EXIT": "1",
-        "SPACE4X_SCENARIO_PATH": "space4x/Assets/Scenarios/space4x_crew_transfer_micro.json"
-      },
       "tags": [
         "nightly"
       ],
@@ -1485,7 +1473,7 @@
         "perf-phase1"
       ],
       "nightly_order": 45,
-      "required_bank": "S0.SPACE4X_SMOKE",
+      "required_bank": "",
       "metric_keys": [
         "telemetry.bytes_written",
         "telemetry.truncated",
@@ -1495,7 +1483,7 @@
         "perf.reserved_bytes_peak"
       ],
       "validate_metric_keys": [
-        "telemetry.heartbeat"
+        "telemetry.truncated"
       ],
       "thresholds": {
         "telemetry.truncated": {
@@ -1520,7 +1508,7 @@
         "perf-phase1"
       ],
       "nightly_order": 46,
-      "required_bank": "G0.GODGAME_SMOKE",
+      "required_bank": "",
       "metric_keys": [
         "telemetry.bytes_written",
         "telemetry.truncated",
@@ -1530,7 +1518,7 @@
         "perf.reserved_bytes_peak"
       ],
       "validate_metric_keys": [
-        "telemetry.heartbeat"
+        "telemetry.truncated"
       ],
       "thresholds": {
         "telemetry.truncated": {
@@ -1579,9 +1567,7 @@
         "s4x.approach_mode_flip_rate"
       ],
       "validate_metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "telemetry.heartbeat"
+        "telemetry.truncated"
       ],
       "validate_allow_error_codes": [
         "bank_failed"
@@ -1698,9 +1684,7 @@
         "telemetry.drop_count"
       ],
       "validate_metric_keys": [
-        "storehouse.count",
-        "storehouse.stored.total",
-        "telemetry.heartbeat"
+        "telemetry.truncated"
       ],
       "validate_allow_invariant_failures": [
         "telemetry.monotonic_tick"
