@@ -1477,6 +1477,18 @@
         77
       ],
       "default_pack": "perf-phase1",
+      "env": {
+        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_CAUSALITY_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_TRANSFER_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_CREW_PROOF": "0",
+        "SPACE4X_HEADLESS_CREW_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_ARC_PROOF": "0",
+        "SPACE4X_HEADLESS_ARC_PROOF_EXIT": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+      },
       "tags": [
         "nightly",
         "perf-phase1"
