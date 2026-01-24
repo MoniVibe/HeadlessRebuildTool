@@ -352,6 +352,27 @@ def resolve_scenario_path(tri_root, scenario_path):
         return scenario_path
     return os.path.join(tri_root, scenario_path)
 
+def copy_scenario_templates(src_path, run_dir):
+    if not src_path:
+        return
+    scenario_dir = os.path.dirname(src_path)
+    if not scenario_dir:
+        return
+    templates_dir = os.path.join(scenario_dir, "Templates")
+    if not os.path.isdir(templates_dir):
+        return
+    dest_dir = os.path.join(run_dir, "Templates")
+    os.makedirs(dest_dir, exist_ok=True)
+    for name in os.listdir(templates_dir):
+        if not name.lower().endswith(".json"):
+            continue
+        src_file = os.path.join(templates_dir, name)
+        dest_file = os.path.join(dest_dir, name)
+        try:
+            shutil.copy2(src_file, dest_file)
+        except Exception as exc:
+            eprint(f"HEADLESSCTL: failed to copy template {src_file} -> {dest_file}: {exc}")
+
 
 def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
     if seed_value is None:
@@ -369,6 +390,7 @@ def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
     dest_path = os.path.join(run_dir, "scenario_seed_override.json")
     with open(dest_path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, sort_keys=True)
+    copy_scenario_templates(src_path, run_dir)
     return dest_path, seed_value
 
 
