@@ -1482,7 +1482,6 @@
         "perf-phase1"
       ],
       "nightly_order": 45,
-      "required_bank": "S0.SPACE4X_SMOKE",
       "metric_keys": [
         "telemetry.bytes_written",
         "telemetry.truncated",
@@ -1517,7 +1516,6 @@
         "perf-phase1"
       ],
       "nightly_order": 46,
-      "required_bank": "G0.GODGAME_SMOKE",
       "metric_keys": [
         "telemetry.bytes_written",
         "telemetry.truncated",
