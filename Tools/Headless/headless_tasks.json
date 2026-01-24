@@ -1205,6 +1205,76 @@
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     },
+    "P1.SPACE4X_PERF_PHASE1_SMOKE": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "none",
+      "default_seeds": [
+        77
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "nightly",
+        "perf-phase1"
+      ],
+      "nightly_order": 45,
+      "required_bank": "S0.SPACE4X_SMOKE",
+      "metric_keys": [
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "perf.tick_total_ms.p95",
+        "perf.tick_total_ms.max",
+        "perf.reserved_bytes_peak"
+      ],
+      "validate_metric_keys": [
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      }
+    },
+    "P1.GODGAME_PERF_PHASE1_SMOKE": {
+      "project": "godgame",
+      "runner": "godgame_loader",
+      "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
+      "tick_budget": 1200,
+      "timeout_s": 900,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "perf-phase1",
+      "tags": [
+        "nightly",
+        "perf-phase1"
+      ],
+      "nightly_order": 46,
+      "required_bank": "G0.GODGAME_SMOKE",
+      "metric_keys": [
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count",
+        "perf.tick_total_ms.p95",
+        "perf.tick_total_ms.max",
+        "perf.reserved_bytes_peak"
+      ],
+      "validate_metric_keys": [
+        "telemetry.heartbeat"
+      ],
+      "thresholds": {
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      }
+    },
     "S0.SPACE4X_SMOKE": {
       "project": "space4x",
       "runner": "space4x_loader",
