@@ -244,7 +244,8 @@ fi
 set -e
 
 if [ "$UNITY_EXIT" -ne 0 ]; then
-  if [ -f "$BUILD_SRC/Space4X_Headless.x86_64" ] && [ -f "$LOG_PATH" ] && grep -q "Build Finished, Result: Success." "$LOG_PATH"; then
+  REPORT_PATH="${BUILD_SRC}/Space4X_HeadlessBuildReport.log"
+  if [ -f "$BUILD_SRC/Space4X_Headless.x86_64" ] && [ -f "$REPORT_PATH" ] && grep -q "Result:[[:space:]]*Succeeded" "$REPORT_PATH"; then
     echo "Unity exited with code ${UNITY_EXIT} but build output exists and report indicates success. Continuing."
   else
     exit "$UNITY_EXIT"
