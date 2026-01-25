@@ -608,8 +608,8 @@
       "project": "space4x",
       "runner": "space4x_loader",
       "scenario_path": "space4x/Assets/Scenarios/space4x_crew_sensors_causality_micro.json",
-      "tick_budget": 300,
-      "timeout_s": 600,
+      "tick_budget": 3600,
+      "timeout_s": 1200,
       "seed_policy": "none",
       "default_seeds": [
         1101
