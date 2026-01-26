@@ -30,7 +30,7 @@ CURRENT_CORE_DUMP_PRESENT=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
-DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
+DEFAULT_REPORTS_DIR=""
 DEFAULT_TELEMETRY_MAX_BYTES=52428800
 log() {
   echo "wsl_runner: $*" >&2
@@ -52,7 +52,7 @@ Options:
   --diag-timeout <sec>        Diagnostics timeout seconds (default: 15).
   --print-summary             Print summary line after each job.
   --emit-triage-on-fail        Emit triage summary JSON on failures (default).
-  --reports-dir <path>         Triage reports directory (default: /mnt/c/polish/queue/reports).
+  --reports-dir <path>         Triage reports directory (default: <queue>/reports).
   --telemetry-max-bytes <bytes> Telemetry output cap in bytes (default: 52428800).
   --requeue-stale-leases      Requeue stale leases (helper mode).
   --ttl-sec <sec>             TTL seconds for stale leases (default: 600).
@@ -260,6 +260,38 @@ print(json.dumps(val, sort_keys=True, separators=(',', ':')))
 PY
 }
 
+json_get_env_pairs() {
+  local file="$1"
+  local field="$2"
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    jq -r --arg field "$field" '
+      .[$field] |
+      if type=="object" then
+        to_entries[] | "\(.key)=\(.value|tostring)"
+      else empty end
+    ' "$file" 2>/dev/null || true
+    return 0
+  fi
+  "$PYTHON_BIN" - "$file" "$field" <<'PY'
+import json,sys
+path=sys.argv[1]
+field=sys.argv[2]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+except Exception:
+    data={}
+val=data.get(field, {})
+if not isinstance(val, dict):
+    val={}
+for key in sorted(val.keys()):
+    value=val[key]
+    if value is None:
+        continue
+    print(f"{key}={value}")
+PY
+}
+
 read_json_array_field() {
   local file="$1"
   local field="$2"
@@ -392,6 +424,25 @@ strip_diagnostic_args() {
   done
 }
 
+get_env_pair_value() {
+  local key="$1"
+  shift
+  local pair
+  for pair in "$@"; do
+    case "$pair" in
+      "$key="*) printf '%s' "${pair#*=}"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+is_truthy() {
+  case "$1" in
+    1|true|True|TRUE|yes|YES|on|ON) return 0 ;;
+  esac
+  return 1
+}
+
 args_include_flag() {
   local flag="$1"
   shift
@@ -400,6 +451,47 @@ args_include_flag() {
     if [[ "$arg" == "$flag" || "$arg" == "$flag="* ]]; then
       return 0
     fi
+  done
+  return 1
+}
+
+get_arg_value() {
+  local flag="$1"
+  shift
+  local arg
+  local next=0
+  for arg in "$@"; do
+    if [ "$next" -eq 1 ]; then
+      printf '%s' "$arg"
+      return 0
+    fi
+    if [ "$arg" = "$flag" ]; then
+      next=1
+      continue
+    fi
+    case "$arg" in
+      "$flag="*) printf '%s' "${arg#"$flag="}"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+replace_arg_value() {
+  local flag="$1"
+  local new_value="$2"
+  shift 2
+  local -n args_ref="$1"
+  local i
+  for i in "${!args_ref[@]}"; do
+    if [ "${args_ref[$i]}" = "$flag" ]; then
+      if [ $((i + 1)) -lt "${#args_ref[@]}" ]; then
+        args_ref[$((i + 1))]="$new_value"
+        return 0
+      fi
+    fi
+    case "${args_ref[$i]}" in
+      "$flag="*) args_ref[$i]="${flag}=$new_value"; return 0 ;;
+    esac
   done
   return 1
 }
@@ -414,6 +506,172 @@ args_include_logfile() {
     esac
   done
   return 1
+}
+
+write_space4x_mining_override() {
+  local src_path="$1"
+  local run_dir="$2"
+  local tier0_mode="$3"
+  local force_undock="$4"
+  if [ -z "$src_path" ] || [ ! -f "$src_path" ]; then
+    return 1
+  fi
+  local base
+  base="$(basename "$src_path")"
+  local dest_path="${run_dir}/${base}"
+  "$PYTHON_BIN" - "$src_path" "$dest_path" "$tier0_mode" "$force_undock" <<'PY'
+import json
+import os
+import sys
+
+src=sys.argv[1]
+dest=sys.argv[2]
+tier0_raw=sys.argv[3] if len(sys.argv) > 3 else ""
+force_undock_raw=sys.argv[4] if len(sys.argv) > 4 else ""
+tier0_mode=str(tier0_raw).strip().lower() in ("1","true","yes","on")
+is_smoke=os.path.basename(src).lower()=="space4x_smoke.json"
+is_mining_combat=os.path.basename(src).lower()=="space4x_mining_combat.json"
+is_mining=os.path.basename(src).lower()=="space4x_mining.json"
+force_undock=str(force_undock_raw).strip().lower() in ("1","true","yes","on")
+with open(src, "r", encoding="utf-8") as handle:
+    data=json.load(handle)
+proofs=data.get("proofs")
+if not isinstance(proofs, dict):
+    proofs={}
+    data["proofs"]=proofs
+proofs["mining"]=True
+if tier0_mode and is_smoke:
+    try:
+        data["duration_s"]=120
+    except Exception:
+        data["duration_s"]=120
+    data["actions"]=[]
+    spawn=data.get("spawn")
+    if isinstance(spawn, list):
+        carrier=None
+        miner=None
+        deposit=None
+        for item in spawn:
+            kind=item.get("kind") if isinstance(item, dict) else ""
+            if kind=="Carrier" and carrier is None:
+                carrier=dict(item)
+            elif kind=="MiningVessel" and miner is None:
+                miner=dict(item)
+            elif kind=="ResourceDeposit" and deposit is None:
+                deposit=dict(item)
+            if carrier and miner and deposit:
+                break
+        if carrier and miner and deposit:
+            carrier["position"]=[0,0]
+            deposit["position"]=[10,0]
+            miner["position"]=[5,0]
+            miner["startDocked"]=False
+            if carrier.get("entityId"):
+                miner["carrierId"]=carrier["entityId"]
+            if deposit.get("resourceId"):
+                miner["resourceId"]=deposit["resourceId"]
+            data["spawn"]=[carrier, miner, deposit]
+elif force_undock and is_mining_combat:
+    spawn=data.get("spawn")
+    if isinstance(spawn, list):
+        friendly=None
+        hostile=None
+        deposit=None
+
+        def fleet_id(entry):
+            comps=entry.get("components") if isinstance(entry, dict) else {}
+            fleet=comps.get("Fleet") if isinstance(comps, dict) else {}
+            if not isinstance(fleet, dict):
+                return ""
+            return fleet.get("fleetId") or ""
+
+        def is_hostile(entry):
+            comps=entry.get("components") if isinstance(entry, dict) else {}
+            combat=comps.get("Combat") if isinstance(comps, dict) else {}
+            if not isinstance(combat, dict):
+                return False
+            return bool(combat.get("isHostile", False))
+
+        for item in spawn:
+            if not isinstance(item, dict):
+                continue
+            kind=item.get("kind")
+            if kind=="Carrier":
+                hostile_flag=is_hostile(item)
+                fid=fleet_id(item)
+                if hostile_flag:
+                    if fid=="HOSTILE-FLEET-1":
+                        hostile=dict(item)
+                    elif hostile is None:
+                        hostile=dict(item)
+                else:
+                    if fid=="FRIENDLY-FLEET-1":
+                        friendly=dict(item)
+                    elif friendly is None:
+                        friendly=dict(item)
+            elif kind=="ResourceDeposit" and deposit is None:
+                deposit=dict(item)
+
+        miner=None
+        if friendly is not None:
+            friendly_id=friendly.get("entityId")
+            for item in spawn:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("kind")!="MiningVessel":
+                    continue
+                if friendly_id and item.get("carrierId")==friendly_id:
+                    miner=dict(item)
+                    break
+        if miner is None:
+            for item in spawn:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("kind")=="MiningVessel":
+                    miner=dict(item)
+                    break
+
+        if friendly and hostile and miner and deposit:
+            friendly["position"]=[0,0]
+            hostile["position"]=[200,0]
+            deposit["position"]=[20,0]
+            miner["position"]=[10,0]
+            miner["startDocked"]=False
+            if friendly.get("entityId"):
+                miner["carrierId"]=friendly["entityId"]
+            if deposit.get("resourceId"):
+                miner["resourceId"]=deposit["resourceId"]
+            data["spawn"]=[friendly, hostile, miner, deposit]
+elif force_undock and is_mining:
+    spawn=data.get("spawn")
+    if isinstance(spawn, list):
+        carrier=None
+        miner=None
+        deposit=None
+        for item in spawn:
+            kind=item.get("kind") if isinstance(item, dict) else ""
+            if kind=="Carrier" and carrier is None:
+                carrier=dict(item)
+            elif kind=="MiningVessel" and miner is None:
+                miner=dict(item)
+            elif kind=="ResourceDeposit" and deposit is None:
+                deposit=dict(item)
+            if carrier and miner and deposit:
+                break
+        if carrier and miner and deposit:
+            carrier["position"]=[0,0]
+            deposit["position"]=[10,0]
+            miner["position"]=[5,0]
+            miner["startDocked"]=False
+            if carrier.get("entityId"):
+                miner["carrierId"]=carrier["entityId"]
+            if deposit.get("resourceId"):
+                miner["resourceId"]=deposit["resourceId"]
+            data["spawn"]=[carrier, miner, deposit]
+with open(dest, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, ensure_ascii=True, indent=2)
+PY
+  echo "$dest_path"
 }
 
 telemetry_disabled_in_args() {
@@ -450,7 +708,21 @@ build_repro_command() {
   local param_json="$2"
   local feature_json="$3"
   shift 3
-  local -a args=("$@")
+  local -a env_pairs=()
+  local -a args=()
+  local parsing_env=1
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+      parsing_env=0
+      continue
+    fi
+    if [ "$parsing_env" -eq 1 ]; then
+      env_pairs+=("$arg")
+    else
+      args+=("$arg")
+    fi
+  done
   local -a parts=()
   if [ -n "$param_json" ]; then
     parts+=("TRI_PARAM_OVERRIDES=$(shell_quote "$param_json")")
@@ -458,8 +730,10 @@ build_repro_command() {
   if [ -n "$feature_json" ]; then
     parts+=("TRI_FEATURE_FLAGS=$(shell_quote "$feature_json")")
   fi
+  for arg in "${env_pairs[@]}"; do
+    parts+=("$(shell_quote "$arg")")
+  done
   parts+=("$(shell_quote "$entrypoint_path")")
-  local arg
   for arg in "${args[@]}"; do
     parts+=("$(shell_quote "$arg")")
   done
@@ -742,6 +1016,7 @@ add("progress_json","progress.json","out/progress.json")
 add("invariants_json","invariants.json","out/invariants.json")
 add("telemetry","telemetry.ndjson","out/telemetry.ndjson")
 add("perf_telemetry","perf_telemetry.ndjson","out/perf_telemetry.ndjson")
+add("asteroid_dig_gate_summary","asteroid_dig_gate_summary.json","out/asteroid_dig_gate_summary.json")
 add("diag_stdout_tail","diag_stdout_tail.txt","out/diag_stdout_tail.txt")
 add("diag_stderr_tail","diag_stderr_tail.txt","out/diag_stderr_tail.txt")
 add("system_snapshot","system_snapshot.txt","out/system_snapshot.txt")
@@ -1219,6 +1494,7 @@ run_job() {
   local artifact_uri=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
+  local -a job_env=()
 
   local error_context=""
   local repro_command=""
@@ -1237,6 +1513,10 @@ run_job() {
     artifact_uri="$(json_get_string "$lease_path" "artifact_uri")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      job_env+=("$line")
+    done < <(json_get_env_pairs "$lease_path" "env")
   fi
 
   if [ -z "$error_context" ] && [ -z "$scenario_id" ]; then
@@ -1326,7 +1606,18 @@ run_job() {
   fi
 
   if [ -z "$error_context" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
-    if ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
+    local supported_ok=0
+    local supported_id
+    while read -r supported_id; do
+      if [ -z "$supported_id" ]; then
+        continue
+      fi
+      if [ "$scenario_id" = "$supported_id" ] || [[ "$scenario_id" == "${supported_id}_"* ]]; then
+        supported_ok=1
+        break
+      fi
+    done < <(read_json_array_field "$manifest_path" "scenarios_supported")
+    if [ "$supported_ok" -ne 1 ]; then
       error_context="scenario_not_supported:${scenario_id}"
     fi
   fi
@@ -1361,6 +1652,23 @@ run_job() {
     fi
 
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
+    local mining_proof_env=""
+    mining_proof_env="$(get_env_pair_value "SPACE4X_HEADLESS_MINING_PROOF" "${job_env[@]}" || true)"
+    if is_truthy "$mining_proof_env"; then
+      local tier0_env=""
+      tier0_env="$(get_env_pair_value "SPACE4X_HEADLESS_MINING_PROOF_TIER0" "${job_env[@]}" || true)"
+      local scenario_arg=""
+      scenario_arg="$(get_arg_value "--scenario" "${final_args[@]}" || true)"
+      if [ -n "$scenario_arg" ]; then
+      local undock_env=""
+      undock_env="$(get_env_pair_value "SPACE4X_HEADLESS_MINING_PROOF_UNDOCK" "${job_env[@]}" || true)"
+      local scenario_override=""
+      scenario_override="$(write_space4x_mining_override "$scenario_arg" "$run_dir" "$tier0_env" "$undock_env" 2>/dev/null || true)"
+        if [ -n "$scenario_override" ]; then
+          replace_arg_value "--scenario" "$scenario_override" final_args || final_args+=("--scenario" "$scenario_override")
+        fi
+      fi
+    fi
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
       final_args+=("--scenario" "$scenario_id")
     fi
@@ -1378,7 +1686,13 @@ run_job() {
       final_args+=("-logFile" "$player_log")
     fi
 
-    repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${final_args[@]}")"
+    local dig_gate_env="SPACE4X_DIG_GATE_SESSION_DIR=$out_dir"
+    local history_horizon_env=""
+    if [ -z "$(get_env_pair_value "PUREDOTS_HEADLESS_HISTORY_HORIZON_SECONDS" "${job_env[@]}" || true)" ] && \
+       [ -z "$(get_env_pair_value "PUREDOTS_HISTORY_HORIZON_SECONDS" "${job_env[@]}" || true)" ]; then
+      history_horizon_env="PUREDOTS_HEADLESS_HISTORY_HORIZON_SECONDS=10"
+    fi
+    repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${job_env[@]}" "$dig_gate_env" "$history_horizon_env" -- "${final_args[@]}")"
   fi
 
   local diag_ran=0
@@ -1393,6 +1707,9 @@ run_job() {
     orig_dir="$(pwd)"
     cd "$build_dir" || true
     setsid -- env \
+      "${job_env[@]}" \
+      "$dig_gate_env" \
+      ${history_horizon_env:+$history_horizon_env} \
       TRI_PARAM_OVERRIDES="$param_overrides_json" \
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
@@ -1558,6 +1875,9 @@ self_test() {
   tmp_root="$(mktemp -d)"
   local queue_dir="${tmp_root}/queue"
   local workdir="${tmp_root}/runs"
+  if [ -z "$reports_dir" ]; then
+    reports_dir="${queue_dir}/reports"
+  fi
   ensure_queue_dirs "$queue_dir"
   mkdir -p "$workdir"
 
@@ -1736,6 +2056,9 @@ main() {
   fi
   if [[ "$workdir" != /* ]]; then
     workdir="$(pwd)/${workdir}"
+  fi
+  if [ -z "$reports_dir" ]; then
+    reports_dir="${queue_dir}/reports"
   fi
   if [[ "$reports_dir" != /* ]]; then
     reports_dir="$(pwd)/${reports_dir}"

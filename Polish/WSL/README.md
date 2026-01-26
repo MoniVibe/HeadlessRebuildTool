@@ -1,6 +1,7 @@
 # WSL Headless Runner (Polish Loop)
 
 Runs headless scenario jobs from a queue, enforces watchdog timeouts, and publishes deterministic result bundles.
+Start here: `Tools/Polish/Docs/HEADLESS_DOCS_INDEX.md`.
 
 ## Dependencies
 Required:
@@ -14,14 +15,14 @@ Optional:
 - gdb (for hang/crash backtraces)
 
 ## Usage
-Run one job:
+Run one job (anviloop queue):
 ```bash
-./wsl_runner.sh --queue /home/oni/Tri/.tri/state/queue --once
+./wsl_runner.sh --queue /mnt/c/polish/anviloop/space4x/queue --once
 ```
 
-Run as daemon:
+Run as daemon (anviloop queue):
 ```bash
-./wsl_runner.sh --queue /home/oni/Tri/.tri/state/queue --daemon
+./wsl_runner.sh --queue /mnt/c/polish/anviloop/space4x/queue --daemon --reports-dir /mnt/c/polish/anviloop/space4x/queue/reports
 ```
 
 Self-test:
@@ -37,6 +38,7 @@ Self-test:
 ## Key Options
 - `--queue <path>`: Queue root with `jobs/`, `leases/`, `results/`.
 - `--workdir <path>`: Run root (default: `~/polish/runs`). Must be on WSL ext4 (not `/mnt/c`).
+- `--reports-dir <path>`: Where to write triage reports (default is `<queue>/reports`).
 - `--once` / `--daemon`: Single-run or poll forever.
 - `--heartbeat-interval <sec>`: Updates run heartbeat + lease mtime (default: 2).
 - `--diag-timeout <sec>`: Time cap for diagnostics (default: 15).
@@ -50,9 +52,13 @@ Expected directories under `<queue>`:
 - `results/` published `result_<job_id>.zip`
 - `artifacts/` optional local artifact storage
 
+Notes:
+- For the Polish pipeline, queues live under `/mnt/c/polish/anviloop/<title>/queue`.
+- For local debug runs, headlessctl uses `${TRI_STATE_DIR:-~/.local/state/tri-headless}` and does not need a queue.
+
 ## artifact_uri Resolution
 Accepted forms:
-- Windows drive paths: `C:\polish\queue\artifacts\artifact_<id>.zip` -> `/mnt/c/polish/queue/artifacts/...`
+- Windows drive paths: `C:\polish\anviloop\<title>\queue\artifacts\artifact_<id>.zip` -> `/mnt/c/polish/anviloop/<title>/queue/artifacts/...`
 - UNC paths: `\\wsl$\Distro\home\oni\...` or `//wsl$/Distro/home/oni/...`
 - Direct WSL paths on ext4
 
@@ -90,4 +96,5 @@ Standardized runner exit codes (also recorded in `meta.json`):
 - `-logFile <out/player.log>` is forced unless the job args explicitly override it.
 - `--outDir <out>` + Phase 0 diagnostics paths are always injected into the command line.
 - `TRI_PARAM_OVERRIDES` and `TRI_FEATURE_FLAGS` are passed as JSON env vars (sorted keys) for determinism.
+- Optional job field `env` supplies extra environment variables (string values) for a run.
 - `invariants.json` includes `diagnostics_version: 1`; `determinism_hash` excludes build metadata and uses stable sim outputs only.

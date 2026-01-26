@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "tiers": {
+    "tier0": {
+      "space4x": [
+        {
+          "scenario_id": "space4x_smoke",
+          "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
+          "seed": 77,
+          "timeout_sec": 600,
+          "repeat": 2,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "SPACE4X_HEADLESS_MINING_PROOF": "1",
+            "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+            "SPACE4X_HEADLESS_MINING_PROOF_TIER0": "1"
+          }
+        }
+      ],
+      "godgame": [
+        {
+          "scenario_id": "godgame_smoke",
+          "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
+          "seed": 42,
+          "timeout_sec": 600,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
+            "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1",
+            "GODGAME_HEADLESS_EXIT_MIN_TICK": "60",
+            "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60",
+            "GODGAME_HEADLESS_SMOKE_EXIT": "1",
+            "GODGAME_HEADLESS_SMOKE_MIN_TICKS": "60"
+          }
+        }
+      ]
+    },
+    "tier1": {
+      "space4x": [
+        {
+          "scenario_id": "space4x_mining",
+          "scenario_path": "space4x/Assets/Scenarios/space4x_mining.json",
+          "seed": 77,
+          "timeout_sec": 600,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "SPACE4X_HEADLESS_MINING_PROOF": "1",
+            "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1",
+            "SPACE4X_HEADLESS_MINING_PROOF_UNDOCK": "1"
+          }
+        },
+        {
+          "scenario_id": "space4x_mining_combat",
+          "scenario_path": "space4x/Assets/Scenarios/space4x_mining_combat.json",
+          "seed": 77,
+          "timeout_sec": 600,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "SPACE4X_HEADLESS_MINING_PROOF": "1",
+            "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1",
+            "SPACE4X_HEADLESS_MINING_PROOF_UNDOCK": "1"
+          }
+        },
+        {
+          "scenario_id": "space4x_dogfight_headless",
+          "scenario_path": "space4x/Assets/Scenarios/space4x_dogfight_headless.json",
+          "seed": 7,
+          "timeout_sec": 600,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "SPACE4X_HEADLESS_MINING_PROOF": "0",
+            "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+          }
+        },
+        {
+          "scenario_id": "space4x_collision_micro",
+          "scenario_path": "space4x/Assets/Scenarios/space4x_collision_micro.json",
+          "seed": 77,
+          "timeout_sec": 600,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "SPACE4X_HEADLESS_MINING_PROOF": "0",
+            "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+          }
+        }
+      ],
+      "godgame": [
+        {
+          "scenario_id": "job_loop_01",
+          "scenario_path": "godgame/Assets/Scenarios/Godgame/job_loop_01.json",
+          "seed": 20260108,
+          "timeout_sec": 180,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
+            "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1",
+            "GODGAME_HEADLESS_EXIT_MIN_TICK": "60",
+            "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60"
+          }
+        },
+        {
+          "scenario_id": "godgame_collision_micro",
+          "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_collision_micro.json",
+          "seed": 42,
+          "timeout_sec": 180,
+          "repeat": 1,
+          "args": ["--telemetryEnabled", "1"],
+          "env": {
+            "GODGAME_HEADLESS_COLLISION_PROOF": "1",
+            "GODGAME_HEADLESS_COLLISION_PROOF_EXIT": "1",
+            "GODGAME_HEADLESS_VILLAGER_PROOF": "0"
+          }
+        }
+      ]
+    }
+  }
+}

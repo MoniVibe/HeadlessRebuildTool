@@ -10,12 +10,12 @@ Space4x:
 - HEAD: 1bcf70603020c72d0731af130c9b59cce91d4f59
 
 Queue:
-- Windows: C:\polish\queue
-- WSL: /mnt/c/polish/queue
+- Windows: C:\polish\anviloop\space4x\queue
+- WSL: /mnt/c/polish/anviloop/space4x/queue
 
 Commands:
 - Start WSL daemon (from ext4 Tools clone):
-  ./Polish/WSL/wsl_runner.sh --queue /mnt/c/polish/queue --daemon --print-summary --requeue-stale-leases --ttl-sec 600
+  ./Polish/WSL/wsl_runner.sh --queue /mnt/c/polish/anviloop/space4x/queue --daemon --print-summary --requeue-stale-leases --ttl-sec 600
 - Run smoke (Windows PS):
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File Tools/Polish/pipeline_smoke.ps1 -Title Space4x -Repeat 10
 

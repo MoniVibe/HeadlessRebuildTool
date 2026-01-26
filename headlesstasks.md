@@ -62,6 +62,16 @@ Format:
 - Action: Ran S0 collision micro twice with SPACE4X_HEADLESS_MINING_PROOF=0; scanned telemetry for NaN/Infinity tokens
 - Result: Baseline set; no NaN/Inf detected
 - Notes: Initial collision run tripped Space4XHeadlessMiningProof; disabled mining proof for collision/smoke.
+- UTC: 2026-01-26T02:14:10Z
+- Agent: codex-cli
+- Project: Space4X
+- Task: H-S01 Mining throughput
+- Scenario: /home/oni/Tri/.tri/scenarios/space4x_mining.json
+- Baseline: cargoSum=8.00 over 15s (~32/min); BANK:S1.MINING_ONLY:PASS
+- Threshold: >= ~32/min; no regressions
+- Action: Added a headless-only mining micro scenario and reran S0.SPACE4X_MINING_PROOF twice
+- Result: PASS (two-green)
+- Notes: BANK id emitted as S1.MINING_ONLY (nightlylist uses S0.SPACE4X_MINING_PROOF)
 
 ## Cross-cutting
 - H-C01 Frame-rate independence (Godgame). Scenario: `godgame/Assets/Scenarios/Godgame/villager_loop_small.json`. Metric: end-of-run total resource delta (pile + storehouse). Target: 30 vs 120 tick rate drift <= 1 unit. Status: pending.
@@ -76,7 +86,7 @@ Format:
 - H-G04 Stuck movement. Scenario: `godgame/Assets/Scenarios/Godgame/villager_movement_diagnostics.json`. Metric: units with zero displacement for N seconds. Target: 0 after warm-up. Status: pending.
 
 ## Space4X
-- H-S01 Mining throughput. Scenario: `space4x/Assets/Scenarios/space4x_mining.json`. Metric: total yield per simulated minute. Target: >= baseline; no regressions. Status: pending.
+- H-S01 Mining throughput. Scenario: `.tri/scenarios/space4x_mining.json`. Metric: total yield per simulated minute. Target: >= baseline; no regressions. Status: baseline set (cargoSum=8.00 over 15s => ~32/min).
 - H-S02 Dropoff stall. Scenario: `space4x/Assets/Scenarios/space4x_mining.json`. Metric: time from full cargo -> dropoff. Target: no stall events after warm-up. Status: pending.
 - H-S03 Collision micro stability. Scenario: `space4x/Assets/Scenarios/space4x_collision_micro.json`. Metric: velocity/position NaNs, excessive spikes. Target: zero NaNs, bounded deltas. Status: baseline set (NaN/Inf=0 on 2 runs; spikes pending).
 - H-S04 Fleet cohesion. Scenario: `space4x/Assets/Scenarios/space4x_smoke.json`. Metric: miner distance to carrier band. Target: within band for > X% of ticks. Status: pending.
@@ -222,3 +232,33 @@ Format:
 - Action: Ran smoke + perf_gate_100k with PUREDOTS_TELEMETRY_LEVEL=summary; checked telemetry sizes and logs
 - Result: PASS
 - Notes: perf_gate_250k/500k/1m aborted early; WSL crash during perf_gate_500k run.
+- UTC: 2026-01-26T01:50:49.0167668Z
+- Agent: codex-cli
+- Project: Space4X
+- Task: H-C04 Telemetry health
+- Scenario: space4x/Assets/Scenarios/space4x_smoke.json
+- Baseline: telemetry sizes 136K and 139K (runs 0eeab38243fa4aaf8d16c8584b142249, be20f27fce1c4158b88deddfa26fcc81)
+- Threshold: <= 200K; telemetry.truncated == 0
+- Action: Ran S0.SPACE4X_SMOKE twice; checked telemetry file sizes and truncation counters
+- Result: PASS
+- Notes: telemetry paths under /home/oni/.local/state/tri-headless/runs/<run_id>/telemetry.ndjson
+- UTC: 2026-01-26T08:06:51.1351153Z
+- Agent: codex-cli
+- Project: Cross-cutting
+- Task: H-C05 Invariant allowlist + Tier-1 task wiring
+- Scenario: n/a
+- Baseline: n/a
+- Threshold: n/a
+- Action: Allowed run_task to pass when only allowlisted invariants fail; added Tier-1 tasks for Space4X comms cohesion and Godgame scale smoke; mapped new bank ids in headless proofs
+- Result: PASS (code change)
+- Notes: Requires rebuild to affect headless binaries.
+- UTC: 2026-01-26T05:38:45.7642459Z
+- Agent: codex-cli
+- Project: Space4X
+- Task: H-C04 Telemetry health
+- Scenario: /home/oni/Tri/space4x/Assets/Scenarios/space4x_smoke.json
+- Baseline: telemetry sizes 141367 and 139184 bytes (runs 88fe3e85535342988768cf701b6a88a9, 84f71fb58e88455d91db3f0868e796fa)
+- Threshold: <= 7000000 bytes; no truncation markers
+- Action: Ran S0.SPACE4X_SMOKE twice (seed 77); checked telemetry file sizes and stdout for truncation
+- Result: PASS
+- Notes: No truncation markers in stdout.

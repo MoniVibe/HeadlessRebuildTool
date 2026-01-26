@@ -1,5 +1,9 @@
 # Headless Runbook (WSL/Linux)
 
+Note: canonical headless rules live in `puredots/Docs/Headless/headless_runbook.md`.
+This file is a legacy manual command reference. For the anviloop pipeline, start at
+`Tools/Polish/Docs/HEADLESS_DOCS_INDEX.md`.
+
 These commands run the already-built Linux headless players and write NDJSON telemetry to `/home/oni/Tri/telemetry/`.
 If your WSL clone lives elsewhere, replace `/home/oni/Tri` with your local TRI root; avoid `/mnt/c` for active WSL runs due to drvfs I/O errors.
 Rebuilds are done via Windows Unity interop from `/mnt/c/dev/Tri`, then published into `/home/oni/Tri/Tools/builds` for runs.

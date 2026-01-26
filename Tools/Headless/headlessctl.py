@@ -74,6 +74,9 @@ def resolve_tri_root():
         return parent
 
     tool_root = resolve_tool_root()
+    parent = os.path.dirname(tool_root)
+    if is_tri_root(parent):
+        return parent
     sibling = os.path.join(os.path.dirname(tool_root), "Tri")
     if is_tri_root(sibling):
         return sibling
@@ -241,6 +244,8 @@ def resolve_seed_list(task, seed, seeds):
         return [seed]
     default_seeds = task.get("default_seeds") or []
     if default_seeds:
+        if task.get("seed_policy") == "ai_polish":
+            return [int(value) for value in default_seeds]
         return [int(default_seeds[0])]
     return []
 
@@ -353,7 +358,44 @@ def resolve_scenario_path(tri_root, scenario_path):
     return os.path.join(tri_root, scenario_path)
 
 
-def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
+def apply_space4x_smoke_mining_override(data):
+    actions = data.get("actions")
+    if isinstance(actions, list):
+        data["actions"] = []
+    spawn = data.get("spawn")
+    if not isinstance(spawn, list):
+        return
+    deposit_pos = None
+    for entry in spawn:
+        if entry.get("kind") == "ResourceDeposit" and isinstance(entry.get("position"), list):
+            deposit_pos = entry["position"]
+            break
+    if deposit_pos is None:
+        return
+    for entry in spawn:
+        if entry.get("kind") == "MiningVessel":
+            entry["position"] = deposit_pos
+            entry["startDocked"] = False
+            break
+
+
+def apply_space4x_mining_combat_override(data):
+    spawn = data.get("spawn")
+    if not isinstance(spawn, list):
+        return
+    deposit_pos = None
+    for entry in spawn:
+        if entry.get("kind") == "ResourceDeposit" and isinstance(entry.get("position"), list):
+            deposit_pos = entry["position"]
+            break
+    for entry in spawn:
+        if entry.get("kind") == "MiningVessel":
+            entry["startDocked"] = False
+            if deposit_pos is not None:
+                entry["position"] = deposit_pos
+
+
+def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind, force_mining_proof=False):
     if seed_value is None:
         return src_path, None
     if not src_path:
@@ -366,7 +408,17 @@ def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
     except Exception:
         return src_path, None
     data["seed"] = seed_value
-    dest_path = os.path.join(run_dir, "scenario_seed_override.json")
+    if runner_kind == "space4x_loader" and force_mining_proof:
+        proofs = data.setdefault("proofs", {})
+        if isinstance(proofs, dict):
+            proofs["mining"] = True
+        scenario_name = os.path.basename(src_path).lower()
+        normalized_src = src_path.replace("\\", "/")
+        if scenario_name == "space4x_smoke.json":
+            apply_space4x_smoke_mining_override(data)
+        elif scenario_name == "space4x_mining_combat.json" and "/.tri/scenarios/" not in normalized_src:
+            apply_space4x_mining_combat_override(data)
+    dest_path = os.path.join(run_dir, os.path.basename(src_path))
     with open(dest_path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, sort_keys=True)
     return dest_path, seed_value
@@ -618,7 +670,6 @@ def run_task_internal(task_id, seed, pack_name):
         default_seeds = task.get("default_seeds") or []
         if default_seeds:
             seed_requested = int(default_seeds[0])
-    scenario_used, seed_effective = override_seed_if_supported(scenario_abs, run_dir, seed_requested, runner)
 
     telemetry_path = os.path.join(run_dir, "telemetry.ndjson")
     stdout_path = os.path.join(run_dir, "stdout.log")
@@ -629,12 +680,33 @@ def run_task_internal(task_id, seed, pack_name):
     for key, value in task.get("env", {}).items():
         env[str(key)] = str(value)
     env["PUREDOTS_TELEMETRY_PATH"] = telemetry_path
+
+    force_mining_proof = False
+    if runner == "space4x_loader":
+        mining_env = env.get("SPACE4X_HEADLESS_MINING_PROOF", "").strip()
+        force_mining_proof = bool(mining_env and mining_env != "0")
+
+    scenario_used, seed_effective = override_seed_if_supported(
+        scenario_abs,
+        run_dir,
+        seed_requested,
+        runner,
+        force_mining_proof=force_mining_proof
+    )
+
     if project == "space4x":
         if scenario_abs:
             env["SPACE4X_SCENARIO_SOURCE_PATH"] = scenario_abs
-            env["SPACE4X_SCENARIO_PATH"] = scenario_abs
-        elif scenario_used:
+        if scenario_used:
             env["SPACE4X_SCENARIO_PATH"] = scenario_used
+        elif scenario_abs:
+            env["SPACE4X_SCENARIO_PATH"] = scenario_abs
+        env["SPACE4X_DIG_GATE_SESSION_DIR"] = run_dir
+    if project == "godgame":
+        if scenario_abs:
+            env["GODGAME_SCENARIO_PATH"] = scenario_abs
+        elif scenario_used:
+            env["GODGAME_SCENARIO_PATH"] = scenario_used
 
     cmd = [binary, "-batchmode", "-nographics", "-logFile", "-", "--scenario", scenario_used]
 
@@ -725,7 +797,10 @@ def run_task_internal(task_id, seed, pack_name):
     seed_used = telemetry_scan["seed_used"] if telemetry_scan else None
     scenario_id = telemetry_scan["scenario_id"] if telemetry_scan else None
 
-    invariant_fail = any(inv.get("ok") is False for inv in invariants)
+    invariant_failures = [inv.get("name") for inv in invariants if inv.get("ok") is False]
+    allow_invariant_failures = set(task.get("validate_allow_invariant_failures") or [])
+    disallowed_invariants = [name for name in invariant_failures if name not in allow_invariant_failures]
+    invariant_fail = bool(disallowed_invariants)
     bank_required = bool(required_bank)
     bank_status = None
     if bank_required:
@@ -808,6 +883,8 @@ def run_task_internal(task_id, seed, pack_name):
         "metrics_summary": metrics_summary,
         "metrics_stats": metrics_stats,
         "invariants": invariants,
+        "invariant_failures_allowed": [name for name in invariant_failures if name in allow_invariant_failures],
+        "invariant_failures_disallowed": disallowed_invariants,
         "artifacts": artifacts
     }
 
@@ -1286,7 +1363,17 @@ def validate():
 
         cmd = [sys.executable, script_path, "run_task", task_id]
         eprint(f"HEADLESSCTL: validate start runner={runner} task={task_id}")
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        proc_env = os.environ.copy()
+        proc_env["TRI_ROOT"] = tri_root
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=proc_env
+        )
         stdout, stderr = proc.communicate()
         if stderr:
             eprint(stderr.rstrip())

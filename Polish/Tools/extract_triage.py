@@ -7,7 +7,7 @@ from collections import deque
 from pathlib import Path
 
 
-DEFAULT_REPORTS_DIR = Path("/mnt/c/polish/queue/reports")
+DEFAULT_REPORTS_DIR = None
 
 
 def read_json_entry(zf, name):
@@ -95,7 +95,7 @@ def derive_job_id(zip_path, meta):
 def main():
     parser = argparse.ArgumentParser(description="Write triage summary for a result zip.")
     parser.add_argument("--result-zip", dest="result_zip", help="Path to result_<job>.zip")
-    parser.add_argument("--outdir", default=str(DEFAULT_REPORTS_DIR), help="Directory for triage output JSON.")
+    parser.add_argument("--outdir", default="", help="Directory for triage output JSON.")
     parser.add_argument("result_zip_pos", nargs="?", help="Path to result_<job>.zip (positional).")
     args = parser.parse_args()
 
@@ -132,7 +132,14 @@ def main():
             "watchdog": watchdog_summary(watchdog),
         }
 
-    out_dir = Path(args.outdir)
+    out_dir_value = args.outdir.strip()
+    if not out_dir_value:
+        if zip_path.parent.name == "results":
+            out_dir = zip_path.parent.parent / "reports"
+        else:
+            out_dir = zip_path.parent / "reports"
+    else:
+        out_dir = Path(out_dir_value)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"triage_{job_id}.json"
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
