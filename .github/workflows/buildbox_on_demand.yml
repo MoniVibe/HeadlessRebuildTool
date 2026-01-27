@@ -123,3 +123,5 @@ jobs:
         with:
           name: pipeline_log
           path: pipeline_smoke.log
+
+# noop touch for workflow_dispatch registration
