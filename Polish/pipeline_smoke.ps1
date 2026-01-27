@@ -4,6 +4,7 @@ param(
     [string]$Title,
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
+    [string]$ProjectPathOverride,
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$ScenarioId,
     [int]$Seed,
@@ -242,6 +243,12 @@ function Get-ArtifactPreflight {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
+if (-not (Test-Path (Join-Path $triRoot "space4x")) -and -not (Test-Path (Join-Path $triRoot "godgame"))) {
+    $triCandidate = (Resolve-Path (Join-Path $triRoot "..")).Path
+    if ((Test-Path (Join-Path $triCandidate "space4x")) -or (Test-Path (Join-Path $triCandidate "godgame"))) {
+        $triRoot = $triCandidate
+    }
+}
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
 if (-not (Test-Path $defaultsPath)) {
     throw "Missing defaults file: $defaultsPath"
@@ -255,6 +262,9 @@ if (-not $titleDefaults) {
 }
 
 $projectPath = Join-Path $triRoot $titleDefaults.project_path
+if ($ProjectPathOverride) {
+    $projectPath = (Resolve-Path $ProjectPathOverride).Path
+}
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
@@ -281,11 +291,11 @@ if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
 
-$commitFull = & git -C $projectPath rev-parse HEAD 2>&1
+$commitFull = & git -c "safe.directory=$projectPath" -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
 }
-$commitShort = & git -C $projectPath rev-parse --short=8 HEAD 2>&1
+$commitShort = & git -c "safe.directory=$projectPath" -C $projectPath rev-parse --short=8 HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
