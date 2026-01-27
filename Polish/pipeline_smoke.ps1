@@ -24,6 +24,33 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Ensure-PureDots {
+    param(
+        [string]$ProjectPath,
+        [string]$TriRoot
+    )
+    $expected = Join-Path $ProjectPath "puredots\\Packages\\com.moni.puredots\\package.json"
+    if (Test-Path $expected) { return }
+
+    $source = Join-Path $TriRoot "puredots"
+    $dest = Join-Path $ProjectPath "puredots"
+    if (Test-Path $source) {
+        if (-not (Test-Path $dest)) {
+            try {
+                New-Item -ItemType Junction -Path $dest -Target $source | Out-Null
+                Write-Host "PUREDOTS_LINK_CREATED source=$source dest=$dest"
+            } catch {
+                cmd /c "mklink /J `"$dest`" `"$source`"" | Out-Null
+                Write-Host "PUREDOTS_LINK_CREATED source=$source dest=$dest"
+            }
+        }
+    }
+
+    if (-not (Test-Path $expected)) {
+        throw "Missing puredots package: $expected (set up $source or link into worktree)."
+    }
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -268,6 +295,8 @@ if ($ProjectPathOverride) {
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
+
+Ensure-PureDots -ProjectPath $projectPath -TriRoot $triRoot
 
 if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
