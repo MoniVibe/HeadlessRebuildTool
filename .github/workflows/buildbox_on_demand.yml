@@ -76,6 +76,9 @@ jobs:
           New-Item -ItemType Directory -Path $wtRoot -Force | Out-Null
           $wt = Join-Path $wtRoot $safe
 
+          git config --global --add safe.directory $repoPath | Out-Null
+          git config --global --add safe.directory $wt | Out-Null
+
           git -C $repoPath fetch --all --tags
 
           if (-not (Test-Path $wt)) {
@@ -105,14 +108,14 @@ jobs:
             $queueRoot = "C:\\polish\\anviloop\\$title\\queue"
           }
 
-          $args = @(
-            "-Title", $title,
-            "-UnityExe", $env:UNITY_EXE,
-            "-ProjectPathOverride", $wt,
-            "-QueueRoot", $queueRoot,
-            "-Repeat", $repeat
-          )
-          if ($wait) { $args += "-WaitForResult" }
+          $args = @{
+            Title = $title
+            UnityExe = $env:UNITY_EXE
+            ProjectPathOverride = $wt
+            QueueRoot = $queueRoot
+            Repeat = $repeat
+          }
+          if ($wait) { $args.WaitForResult = $true }
 
           $log = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke.log"
           & $pipeline @args 2>&1 | Tee-Object -FilePath $log
