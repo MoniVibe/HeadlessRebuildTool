@@ -313,6 +313,122 @@ function Get-ArtifactPreflight {
     }
 }
 
+function Get-FirstErrorLine {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return "" }
+    $lines = $Text -split "`r?`n"
+    foreach ($line in $lines) {
+        if ($line -match '\[Error\]' -or $line -match 'error CS\d+' -or $line -match 'PPtr cast failed') {
+            return $line.Trim()
+        }
+    }
+    return ""
+}
+
+function Get-ArtifactSummary {
+    param([string]$ZipPath)
+    if (-not (Test-Path $ZipPath)) { return $null }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $summary = [ordered]@{}
+        $outcomeText = Read-ZipEntryText -Archive $archive -EntryPath "logs/build_outcome.json"
+        if ($outcomeText) {
+            try {
+                $outcome = $outcomeText | ConvertFrom-Json
+                if ($outcome.result) { $summary.result = $outcome.result }
+                if ($outcome.message) { $summary.message = $outcome.message }
+            }
+            catch {
+            }
+        }
+        $reportText = Read-ZipEntryText -Archive $archive -EntryPath "build/Space4X_HeadlessBuildReport.log"
+        $firstError = Get-FirstErrorLine -Text $reportText
+        if (-not $firstError) {
+            $tailText = Read-ZipEntryText -Archive $archive -EntryPath "logs/unity_build_tail.txt"
+            $firstError = Get-FirstErrorLine -Text $tailText
+        }
+        if ($firstError) { $summary.first_error = $firstError }
+        return $summary
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Write-PipelineSummary {
+    param(
+        [string]$ReportsDir,
+        [string]$BuildId,
+        [string]$Title,
+        [string]$ProjectPath,
+        [string]$Commit,
+        [string]$ArtifactZip,
+        [string]$ScenarioId,
+        [string]$ScenarioRel,
+        [string]$GoalId,
+        [string]$GoalSpec,
+        [int]$Seed,
+        [int]$TimeoutSec,
+        [string[]]$Args,
+        [string]$Status,
+        [string]$Failure,
+        [string[]]$JobPaths,
+        [string[]]$ResultZips
+    )
+    if ([string]::IsNullOrWhiteSpace($ReportsDir)) { return }
+    Ensure-Directory $ReportsDir
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("# Pipeline Smoke Summary")
+    $lines.Add("")
+    $lines.Add("* status: $Status")
+    if ($Failure) { $lines.Add("* failure: $Failure") }
+    if ($BuildId) { $lines.Add("* build_id: $BuildId") }
+    if ($Commit) { $lines.Add("* commit: $Commit") }
+    if ($Title) { $lines.Add("* title: $Title") }
+    if ($ProjectPath) { $lines.Add("* project_path: $ProjectPath") }
+    if ($ArtifactZip) { $lines.Add("* artifact: $ArtifactZip") }
+    if ($ScenarioId) { $lines.Add("* scenario_id: $ScenarioId") }
+    if ($ScenarioRel) { $lines.Add("* scenario_rel: $ScenarioRel") }
+    if ($GoalId) { $lines.Add("* goal_id: $GoalId") }
+    if ($GoalSpec) { $lines.Add("* goal_spec: $GoalSpec") }
+    if ($Seed) { $lines.Add("* seed: $Seed") }
+    if ($TimeoutSec) { $lines.Add("* timeout_sec: $TimeoutSec") }
+    if ($Args -and $Args.Count -gt 0) { $lines.Add("* args: " + ([string]::Join(" ", $Args))) }
+
+    if ($ArtifactZip -and (Test-Path $ArtifactZip)) {
+        $artifactSummary = Get-ArtifactSummary -ZipPath $ArtifactZip
+        if ($artifactSummary) {
+            if ($artifactSummary.result) { $lines.Add("* build_result: $($artifactSummary.result)") }
+            if ($artifactSummary.message) { $lines.Add("* build_message: $($artifactSummary.message)") }
+            if ($artifactSummary.first_error) { $lines.Add("* build_first_error: $($artifactSummary.first_error)") }
+        }
+    }
+
+    if ($JobPaths -and $JobPaths.Count -gt 0) {
+        $lines.Add("")
+        $lines.Add("## Jobs")
+        foreach ($job in $JobPaths) { $lines.Add("- $job") }
+    }
+
+    if ($ResultZips -and $ResultZips.Count -gt 0) {
+        $lines.Add("")
+        $lines.Add("## Results")
+        foreach ($zip in $ResultZips) {
+            $details = Get-ResultDetails -ZipPath $zip
+            $summary = Format-ResultSummary -Index 1 -Total 1 -Details $details
+            $lines.Add("- $zip")
+            $lines.Add("  $summary")
+        }
+    }
+
+    $outPath = if ($BuildId) { Join-Path $ReportsDir ("pipeline_smoke_summary_{0}.md" -f $BuildId) } else { Join-Path $ReportsDir "pipeline_smoke_summary_unknown.md" }
+    Set-Content -Path $outPath -Value ($lines -join "`r`n") -Encoding ascii
+    $latestPath = Join-Path $ReportsDir "pipeline_smoke_summary_latest.md"
+    Copy-Item -Path $outPath -Destination $latestPath -Force
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
@@ -392,6 +508,40 @@ Ensure-Directory $leasesDir
 Ensure-Directory $resultsDir
 Ensure-Directory $reportsDir
 
+$summaryJobPaths = New-Object System.Collections.Generic.List[string]
+$summaryResultZips = New-Object System.Collections.Generic.List[string]
+$summaryStatus = "SUCCESS"
+$summaryFailure = ""
+$summaryWritten = $false
+
+function Finalize-PipelineSummary {
+    param(
+        [string]$Status,
+        [string]$Failure
+    )
+    if ($summaryWritten) { return }
+    $summaryWritten = $true
+    if ($Status) { $script:summaryStatus = $Status }
+    if ($Failure) { $script:summaryFailure = $Failure }
+    Write-PipelineSummary -ReportsDir $reportsDir `
+        -BuildId $buildId `
+        -Title $Title `
+        -ProjectPath $projectPath `
+        -Commit $commitFull `
+        -ArtifactZip $artifactZip `
+        -ScenarioId $scenarioIdValue `
+        -ScenarioRel $scenarioRelValue `
+        -GoalId $goalIdValue `
+        -GoalSpec $goalSpecValue `
+        -Seed $seedValue `
+        -TimeoutSec $timeoutValue `
+        -Args $argsValue `
+        -Status $summaryStatus `
+        -Failure $summaryFailure `
+        -JobPaths $summaryJobPaths.ToArray() `
+        -ResultZips $summaryResultZips.ToArray()
+}
+
 $supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
 if (-not (Test-Path $supervisorProject)) {
     throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
@@ -425,6 +575,8 @@ if ($supervisorExit -ne 0) {
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
 if (-not (Test-Path $artifactZip)) {
+    $summaryFailure = "artifact_missing"
+    Finalize-PipelineSummary -Status "FAIL" -Failure "artifact_missing"
     throw "Artifact zip not found: $artifactZip"
 }
 
@@ -434,6 +586,8 @@ if (-not $preflight.ok) {
     if ($preflight.result) { $summary += " result=$($preflight.result)" }
     if ($preflight.message) { $summary += " message=$($preflight.message)" }
     Write-Host $summary
+    $summaryFailure = $summary
+    Finalize-PipelineSummary -Status "FAIL" -Failure $summary
     exit 1
 }
 
@@ -485,6 +639,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
     Move-Item -Path $jobTempPath -Destination $jobPath -Force
 
     Write-Host ("job={0}" -f $jobPath)
+    $summaryJobPaths.Add($jobPath) | Out-Null
 
     if ($WaitForResult) {
         $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
@@ -538,20 +693,27 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $alternateNames = if ($alternates) { $alternates | Select-Object -ExpandProperty Name } else { @() }
             $alternateList = if (@($alternateNames).Count -gt 0) { [string]::Join(", ", @($alternateNames)) } else { "(none)" }
             Write-Host ("Timed out waiting for {0}; found alternates: {1}" -f $resultZip, $alternateList)
+            $summaryFailure = "result_timeout"
+            Finalize-PipelineSummary -Status "FAIL" -Failure "Timed out waiting for result: $resultZip"
             throw "Timed out waiting for result: $resultZip"
         }
 
         $details = Get-ResultDetails -ZipPath $resultZip
         $summary = Format-ResultSummary -Index $i -Total $Repeat -Details $details
         Write-Host $summary
+        $summaryResultZips.Add($resultZip) | Out-Null
 
         if ($details.exit_reason -in @("INFRA_FAIL", "CRASH", "HANG_TIMEOUT")) {
             Write-Host ("stop_reason={0}" -f $details.exit_reason)
+            $summaryFailure = "stop_reason=$($details.exit_reason)"
+            Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 2
         }
 
         if ([string]::IsNullOrWhiteSpace($details.determinism_hash)) {
             Write-Host ("stop_reason=determinism_hash_missing run_index={0}" -f $i)
+            $summaryFailure = "determinism_hash_missing"
+            Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 3
         }
 
@@ -565,7 +727,11 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $baselineInv = Get-ResultInvariants -ZipPath $baselineZip
             $currentInv = Get-ResultInvariants -ZipPath $resultZip
             Write-InvariantDiff -Baseline $baselineInv -Current $currentInv -BaselineLabel ("run{0}" -f $baselineIndex) -CurrentLabel ("run{0}" -f $i)
+            $summaryFailure = "determinism_hash_divergence"
+            Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 3
         }
     }
 }
+
+Finalize-PipelineSummary -Status "SUCCESS" -Failure ""
