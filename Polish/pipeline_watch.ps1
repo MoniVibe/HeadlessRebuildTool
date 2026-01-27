@@ -52,6 +52,45 @@ function Read-BuildOutcome {
     }
 }
 
+function Read-ZipEntryText {
+    param(
+        [System.IO.Compression.ZipArchive]$Archive,
+        [string]$EntryPath
+    )
+    $entry = $Archive.GetEntry($EntryPath)
+    if (-not $entry) { return $null }
+    $reader = New-Object System.IO.StreamReader($entry.Open())
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
+
+function Get-ArtifactTitle {
+    param([string]$ZipPath)
+    if (-not (Test-Path $ZipPath)) { return "" }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "build_manifest.json"
+        if (-not $manifestText) {
+            $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "logs/build_report.json"
+        }
+        if (-not $manifestText) { return "" }
+        try { $manifest = $manifestText | ConvertFrom-Json } catch { return "" }
+        $candidate = ""
+        if ($manifest.entrypoint) { $candidate = $manifest.entrypoint }
+        elseif ($manifest.summary -and $manifest.summary.output_path) { $candidate = $manifest.summary.output_path }
+        if ([string]::IsNullOrWhiteSpace($candidate)) { return "" }
+        $lower = $candidate.ToLowerInvariant()
+        if ($lower -like "*space4x*") { return "space4x" }
+        if ($lower -like "*godgame*") { return "godgame" }
+        if ($lower -like "*puredots*") { return "puredots" }
+        if ($lower -like "*headless*") { return "headless" }
+        return ""
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 Ensure-Directory (Join-Path $queueRootFull "artifacts")
 
@@ -75,6 +114,11 @@ if (-not $outcome) {
 }
 if ($outcome.result -ne "Succeeded") {
     throw "Artifact build not succeeded: result=$($outcome.result) message=$($outcome.message)"
+}
+
+$artifactTitle = Get-ArtifactTitle -ZipPath $artifactPath
+if (-not [string]::IsNullOrWhiteSpace($artifactTitle) -and $artifactTitle -ne $Title.ToLowerInvariant()) {
+    throw "Artifact title mismatch: expected=$Title actual=$artifactTitle artifact=$artifactPath"
 }
 
 $enqueueScript = Join-Path $PSScriptRoot "pipeline_enqueue.ps1"
