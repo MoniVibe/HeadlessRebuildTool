@@ -82,21 +82,21 @@ if (-not (Test-Path $enqueueScript)) {
     throw "Missing pipeline_enqueue.ps1: $enqueueScript"
 }
 
-$invokeArgs = @(
-    "-Title", $Title,
-    "-ArtifactZip", $artifactPath,
-    "-QueueRoot", $QueueRoot,
-    "-Repeat", $Repeat
-)
+$invokeArgs = @{
+    Title = $Title
+    ArtifactZip = $artifactPath
+    QueueRoot = $QueueRoot
+    Repeat = $Repeat
+}
 
-if ($PSBoundParameters.ContainsKey("Seed")) { $invokeArgs += @("-Seed", $Seed) }
-if ($PSBoundParameters.ContainsKey("ScenarioId")) { $invokeArgs += @("-ScenarioId", $ScenarioId) }
-if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $invokeArgs += @("-ScenarioRel", $ScenarioRel) }
-if ($PSBoundParameters.ContainsKey("GoalId")) { $invokeArgs += @("-GoalId", $GoalId) }
-if ($PSBoundParameters.ContainsKey("GoalSpec")) { $invokeArgs += @("-GoalSpec", $GoalSpec) }
-if ($PSBoundParameters.ContainsKey("Args")) { $invokeArgs += @("-Args", $Args) }
-if ($WaitForResult) { $invokeArgs += "-WaitForResult" }
-if ($PSBoundParameters.ContainsKey("WaitTimeoutSec")) { $invokeArgs += @("-WaitTimeoutSec", $WaitTimeoutSec) }
+if ($PSBoundParameters.ContainsKey("Seed")) { $invokeArgs.Seed = $Seed }
+if ($PSBoundParameters.ContainsKey("ScenarioId")) { $invokeArgs.ScenarioId = $ScenarioId }
+if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $invokeArgs.ScenarioRel = $ScenarioRel }
+if ($PSBoundParameters.ContainsKey("GoalId")) { $invokeArgs.GoalId = $GoalId }
+if ($PSBoundParameters.ContainsKey("GoalSpec")) { $invokeArgs.GoalSpec = $GoalSpec }
+if ($PSBoundParameters.ContainsKey("Args")) { $invokeArgs.Args = $Args }
+if ($WaitForResult) { $invokeArgs.WaitForResult = $true }
+if ($PSBoundParameters.ContainsKey("WaitTimeoutSec")) { $invokeArgs.WaitTimeoutSec = $WaitTimeoutSec }
 
 Write-Host ("enqueue_start title={0} artifact={1}" -f $Title, $artifactPath)
 & $enqueueScript @invokeArgs
