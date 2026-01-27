@@ -1,0 +1,125 @@
+name: Buildbox: on-demand rebuild + headless sim
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Which project"
+        type: choice
+        options: [space4x, godgame]
+        required: true
+      ref:
+        description: "Git ref/branch/SHA to test (must be pushed to GitHub)"
+        required: true
+        default: "main"
+      repeat:
+        description: "Repeat runs"
+        required: true
+        default: "1"
+      wait_for_result:
+        description: "Wait for result zips"
+        type: boolean
+        required: true
+        default: true
+      clean_cache:
+        description: "Clear Bee/lock caches in the worktree before build"
+        type: boolean
+        required: true
+        default: false
+      queue_root:
+        description: "Optional override queue root (blank = default C:\\polish\\anviloop\\<title>\\queue)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildbox-${{ inputs.title }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: [self-hosted, buildbox]
+    timeout-minutes: 240
+
+    steps:
+      - name: Run pipeline on desktop (local Tri install)
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $title = '${{ inputs.title }}'
+          $ref   = '${{ inputs.ref }}'
+          $repeat = [int]'${{ inputs.repeat }}'
+          $wait   = '${{ inputs.wait_for_result }}' -eq 'true'
+          $clean  = '${{ inputs.clean_cache }}' -eq 'true'
+
+          if ([string]::IsNullOrWhiteSpace($env:TRI_ROOT)) { throw "Missing TRI_ROOT env var on desktop." }
+          if ([string]::IsNullOrWhiteSpace($env:UNITY_EXE)) { throw "Missing UNITY_EXE env var on desktop." }
+          if (-not (Test-Path $env:UNITY_EXE)) { throw "UNITY_EXE not found: $env:UNITY_EXE" }
+
+          $tri = $env:TRI_ROOT
+
+          # Local repos expected at: TRI_ROOT\space4x and TRI_ROOT\godgame
+          $repoPath = Join-Path $tri $title
+          if (-not (Test-Path $repoPath)) { throw "Repo missing: $repoPath" }
+
+          # Local tools expected at: TRI_ROOT\Tools\HeadlessRebuildTool\Polish\pipeline_smoke.ps1
+          $pipeline = Join-Path $tri "Tools\\HeadlessRebuildTool\\Polish\\pipeline_smoke.ps1"
+          if (-not (Test-Path $pipeline)) { throw "pipeline_smoke.ps1 not found: $pipeline" }
+
+          # Worktree for the requested ref (keeps caches stable between runs)
+          $safe = ($ref -replace '[^A-Za-z0-9_.-]', '_')
+          $wtRoot = Join-Path $tri ".tri\\worktrees\\$title"
+          New-Item -ItemType Directory -Path $wtRoot -Force | Out-Null
+          $wt = Join-Path $wtRoot $safe
+
+          git -C $repoPath fetch --all --tags
+
+          if (-not (Test-Path $wt)) {
+            git -C $repoPath worktree add $wt $ref
+          } else {
+            git -C $wt fetch --all --tags
+            git -C $wt checkout $ref
+            git -C $wt reset --hard
+          }
+
+          if ($clean) {
+            $paths = @(
+              "Library\\Bee",
+              "Library\\ScriptAssemblies",
+              "Temp\\BeeArtifacts",
+              "Temp\\UnityLockfile",
+              "Library\\UnityLockfile"
+            )
+            foreach ($p in $paths) {
+              $full = Join-Path $wt $p
+              if (Test-Path $full) { Remove-Item -Recurse -Force $full }
+            }
+          }
+
+          $queueRoot = '${{ inputs.queue_root }}'
+          if ([string]::IsNullOrWhiteSpace($queueRoot)) {
+            $queueRoot = "C:\\polish\\anviloop\\$title\\queue"
+          }
+
+          $args = @(
+            "-Title", $title,
+            "-UnityExe", $env:UNITY_EXE,
+            "-ProjectPathOverride", $wt,
+            "-QueueRoot", $queueRoot,
+            "-Repeat", $repeat
+          )
+          if ($wait) { $args += "-WaitForResult" }
+
+          $log = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke.log"
+          & $pipeline @args 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload pipeline log
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline_log
+          path: pipeline_smoke.log
