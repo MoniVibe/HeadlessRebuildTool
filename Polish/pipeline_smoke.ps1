@@ -34,6 +34,9 @@ function Ensure-PureDots {
 
     $source = Join-Path $TriRoot "puredots"
     $dest = Join-Path $ProjectPath "puredots"
+    $sourcePkg = Join-Path $source "Packages\\com.moni.puredots"
+    $destPkg = Join-Path $dest "Packages\\com.moni.puredots"
+
     if (Test-Path $source) {
         if (-not (Test-Path $dest)) {
             try {
@@ -42,6 +45,25 @@ function Ensure-PureDots {
             } catch {
                 cmd /c "mklink /J `"$dest`" `"$source`"" | Out-Null
                 Write-Host "PUREDOTS_LINK_CREATED source=$source dest=$dest"
+            }
+        } elseif (-not (Test-Path $expected) -and (Test-Path $sourcePkg)) {
+            if (Test-Path $destPkg) {
+                try {
+                    $attrs = (Get-Item $destPkg).Attributes
+                    if (-not $attrs.ToString().Contains('ReparsePoint')) {
+                        $backup = "$destPkg.bak_$(Get-Date -Format yyyyMMdd_HHmmss)"
+                        Rename-Item -Path $destPkg -NewName (Split-Path -Leaf $backup)
+                    }
+                } catch {}
+            }
+            if (-not (Test-Path $destPkg)) {
+                try {
+                    New-Item -ItemType Junction -Path $destPkg -Target $sourcePkg | Out-Null
+                    Write-Host "PUREDOTS_PKG_LINK_CREATED source=$sourcePkg dest=$destPkg"
+                } catch {
+                    cmd /c "mklink /J `"$destPkg`" `"$sourcePkg`"" | Out-Null
+                    Write-Host "PUREDOTS_PKG_LINK_CREATED source=$sourcePkg dest=$destPkg"
+                }
             }
         }
     }
