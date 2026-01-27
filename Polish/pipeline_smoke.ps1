@@ -36,6 +36,9 @@ function Ensure-PureDots {
     $dest = Join-Path $ProjectPath "puredots"
     $sourcePkg = Join-Path $source "Packages\\com.moni.puredots"
     $destPkg = Join-Path $dest "Packages\\com.moni.puredots"
+    $siblingRoot = Join-Path (Split-Path $ProjectPath -Parent) "puredots"
+    $siblingPkg = Join-Path $siblingRoot "Packages\\com.moni.puredots"
+    $expectedSibling = Join-Path $siblingRoot "Packages\\com.moni.puredots\\package.json"
 
     if (Test-Path $source) {
         if (-not (Test-Path $dest)) {
@@ -66,9 +69,37 @@ function Ensure-PureDots {
                 }
             }
         }
+        if (-not (Test-Path $expectedSibling) -and -not (Test-Path $siblingRoot)) {
+            try {
+                New-Item -ItemType Junction -Path $siblingRoot -Target $source | Out-Null
+                Write-Host "PUREDOTS_LINK_CREATED source=$source dest=$siblingRoot"
+            } catch {
+                cmd /c "mklink /J `"$siblingRoot`" `"$source`"" | Out-Null
+                Write-Host "PUREDOTS_LINK_CREATED source=$source dest=$siblingRoot"
+            }
+        } elseif (-not (Test-Path $expectedSibling) -and (Test-Path $sourcePkg)) {
+            if (Test-Path $siblingPkg) {
+                try {
+                    $attrs = (Get-Item $siblingPkg).Attributes
+                    if (-not $attrs.ToString().Contains('ReparsePoint')) {
+                        $backup = "$siblingPkg.bak_$(Get-Date -Format yyyyMMdd_HHmmss)"
+                        Rename-Item -Path $siblingPkg -NewName (Split-Path -Leaf $backup)
+                    }
+                } catch {}
+            }
+            if (-not (Test-Path $siblingPkg)) {
+                try {
+                    New-Item -ItemType Junction -Path $siblingPkg -Target $sourcePkg | Out-Null
+                    Write-Host "PUREDOTS_PKG_LINK_CREATED source=$sourcePkg dest=$siblingPkg"
+                } catch {
+                    cmd /c "mklink /J `"$siblingPkg`" `"$sourcePkg`"" | Out-Null
+                    Write-Host "PUREDOTS_PKG_LINK_CREATED source=$sourcePkg dest=$siblingPkg"
+                }
+            }
+        }
     }
 
-    if (-not (Test-Path $expected)) {
+    if (-not (Test-Path $expected) -and -not (Test-Path $expectedSibling)) {
         throw "Missing puredots package: $expected (set up $source or link into worktree)."
     }
 }
