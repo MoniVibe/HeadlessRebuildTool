@@ -2020,7 +2020,9 @@ main() {
 
   if [ "$requeue_mode" -eq 1 ]; then
     requeue_stale_leases "$queue_dir" "$ttl_sec"
-    exit 0
+    if [ "$mode" = "once" ]; then
+      exit 0
+    fi
   fi
 
   if ! ensure_workdir_ext4 "$workdir"; then
