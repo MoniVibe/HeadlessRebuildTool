@@ -400,9 +400,12 @@ function Write-PipelineSummary {
     if ($ArtifactZip -and (Test-Path $ArtifactZip)) {
         $artifactSummary = Get-ArtifactSummary -ZipPath $ArtifactZip
         if ($artifactSummary) {
-            if ($artifactSummary.result) { $lines.Add("* build_result: $($artifactSummary.result)") }
-            if ($artifactSummary.message) { $lines.Add("* build_message: $($artifactSummary.message)") }
-            if ($artifactSummary.first_error) { $lines.Add("* build_first_error: $($artifactSummary.first_error)") }
+            $resultValue = $artifactSummary["result"]
+            $messageValue = $artifactSummary["message"]
+            $firstErrorValue = $artifactSummary["first_error"]
+            if ($resultValue) { $lines.Add("* build_result: $resultValue") }
+            if ($messageValue) { $lines.Add("* build_message: $messageValue") }
+            if ($firstErrorValue) { $lines.Add("* build_first_error: $firstErrorValue") }
         }
     }
 
