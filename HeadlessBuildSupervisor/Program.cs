@@ -24,6 +24,7 @@ internal static class Program
     private const string EditorLogMissingName = "editor_log_missing.txt";
     private const string HeartbeatName = "heartbeat.jsonl";
     private const string ProgressName = "build_progress.json";
+    private const string HangSummaryName = "build_hang.json";
     private const int HeartbeatIntervalSeconds = 30;
     private const string UnityProjectLockSignature = "another unity instance is running with this project open";
     private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
@@ -175,6 +176,9 @@ internal static class Program
             WriteProcessSnapshot(Path.Combine(logsDir, "process_snapshot.txt"), logger);
             CopyCrashArtifacts(options.ProjectPath, Path.Combine(logsDir, "crash"), logger);
         }
+
+        var hangSummaryPath = Path.Combine(logsDir, HangSummaryName);
+        WriteHangSummary(hangSummaryPath, Path.Combine(logsDir, HeartbeatName), Path.Combine(logsDir, "unity_exit.json"), outcomePath, success, logger);
 
         var zipTemp = Path.Combine(options.ArtifactDir, $"artifact_{options.BuildId}.zip.tmp");
         var zipFinal = Path.Combine(options.ArtifactDir, $"artifact_{options.BuildId}.zip");
@@ -534,6 +538,218 @@ internal static class Program
         {
             logger.Warn($"heartbeat_write_failed err={ex.Message}");
         }
+    }
+
+    private sealed class HeartbeatSample
+    {
+        public DateTime Utc { get; init; }
+        public string State { get; init; } = string.Empty;
+        public bool HasExited { get; init; }
+        public int? ExitCode { get; init; }
+        public long? CpuTotalMs { get; init; }
+        public long? WorkingSetBytes { get; init; }
+        public long? LogBytes { get; init; }
+        public DateTime? LogMtimeUtc { get; init; }
+    }
+
+    private static void WriteHangSummary(
+        string summaryPath,
+        string heartbeatPath,
+        string unityExitPath,
+        string outcomePath,
+        bool success,
+        Logger logger)
+    {
+        try
+        {
+            var summary = new StringBuilder();
+            summary.Append("{");
+            AppendJsonField(summary, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
+            AppendJsonField(summary, "success", success ? "true" : "false", prependComma: true);
+
+            var outcomeResult = TryReadOutcomeResult(outcomePath);
+            if (!string.IsNullOrWhiteSpace(outcomeResult))
+            {
+                AppendJsonField(summary, "outcome", outcomeResult, prependComma: true);
+            }
+
+            HeartbeatSample? last = null;
+            HeartbeatSample? previous = null;
+            if (File.Exists(heartbeatPath))
+            {
+                ReadLastHeartbeats(heartbeatPath, out last, out previous);
+            }
+
+            if (last != null)
+            {
+                AppendJsonField(summary, "last_state", last.State, prependComma: true);
+                AppendJsonField(summary, "last_utc", last.Utc.ToString("O"), prependComma: true);
+                AppendJsonField(summary, "last_has_exited", last.HasExited ? "true" : "false", prependComma: true);
+                if (last.ExitCode.HasValue)
+                {
+                    AppendJsonField(summary, "last_exit_code", last.ExitCode.Value.ToString(), prependComma: true);
+                }
+                if (last.CpuTotalMs.HasValue)
+                {
+                    AppendJsonField(summary, "last_cpu_total_ms", last.CpuTotalMs.Value.ToString(), prependComma: true);
+                }
+                if (last.WorkingSetBytes.HasValue)
+                {
+                    AppendJsonField(summary, "last_working_set_bytes", last.WorkingSetBytes.Value.ToString(), prependComma: true);
+                }
+                if (last.LogBytes.HasValue)
+                {
+                    AppendJsonField(summary, "last_log_bytes", last.LogBytes.Value.ToString(), prependComma: true);
+                }
+                if (last.LogMtimeUtc.HasValue)
+                {
+                    AppendJsonField(summary, "last_log_mtime_utc", last.LogMtimeUtc.Value.ToString("O"), prependComma: true);
+                }
+            }
+
+            if (previous != null && last != null)
+            {
+                var cpuDelta = last.CpuTotalMs.HasValue && previous.CpuTotalMs.HasValue
+                    ? last.CpuTotalMs.Value - previous.CpuTotalMs.Value
+                    : (long?)null;
+                if (cpuDelta.HasValue)
+                {
+                    AppendJsonField(summary, "cpu_delta_ms", cpuDelta.Value.ToString(), prependComma: true);
+                }
+            }
+
+            var classification = "OK";
+            var reason = string.Empty;
+            if (!success)
+            {
+                classification = "UNKNOWN";
+                if (last != null)
+                {
+                    var staleSeconds = last.LogMtimeUtc.HasValue
+                        ? (DateTime.UtcNow - last.LogMtimeUtc.Value).TotalSeconds
+                        : double.NaN;
+                    var cpuDelta = last != null && previous != null && last.CpuTotalMs.HasValue && previous.CpuTotalMs.HasValue
+                        ? last.CpuTotalMs.Value - previous.CpuTotalMs.Value
+                        : (long?)null;
+
+                    if (!double.IsNaN(staleSeconds) && staleSeconds >= 300 && cpuDelta.HasValue && cpuDelta.Value < 50)
+                    {
+                        classification = "HANG_STALLED";
+                        reason = $"log_stale_sec={staleSeconds:F0} cpu_delta_ms={cpuDelta}";
+                    }
+                    else if (!double.IsNaN(staleSeconds) && staleSeconds >= 120 && last.HasExited == false)
+                    {
+                        classification = "HANG_SUSPECTED";
+                        reason = $"log_stale_sec={staleSeconds:F0}";
+                    }
+                    else
+                    {
+                        classification = "CRASH_OR_FAIL";
+                    }
+                }
+            }
+
+            AppendJsonField(summary, "classification", classification, prependComma: true);
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                AppendJsonField(summary, "reason", reason, prependComma: true);
+            }
+
+            summary.Append("}");
+            File.WriteAllText(summaryPath, summary.ToString(), Encoding.ASCII);
+            logger.Info($"hang_summary_written path={summaryPath} classification={classification}");
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"hang_summary_failed err={ex.Message}");
+        }
+    }
+
+    private static void ReadLastHeartbeats(string heartbeatPath, out HeartbeatSample? last, out HeartbeatSample? previous)
+    {
+        last = null;
+        previous = null;
+        var lines = File.ReadAllLines(heartbeatPath);
+        for (var i = lines.Length - 1; i >= 0 && (last == null || previous == null); i--)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+            var sample = TryParseHeartbeat(line);
+            if (sample == null)
+            {
+                continue;
+            }
+            if (last == null)
+            {
+                last = sample;
+            }
+            else if (previous == null)
+            {
+                previous = sample;
+            }
+        }
+    }
+
+    private static HeartbeatSample? TryParseHeartbeat(string line)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            var sample = new HeartbeatSample
+            {
+                Utc = root.TryGetProperty("utc", out var utcProp) && utcProp.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? DateTime.Parse(utcProp.GetString() ?? string.Empty).ToUniversalTime()
+                    : DateTime.MinValue,
+                State = root.TryGetProperty("state", out var stateProp) ? stateProp.GetString() ?? string.Empty : string.Empty,
+                HasExited = root.TryGetProperty("has_exited", out var exitedProp) && exitedProp.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? string.Equals(exitedProp.GetString(), "true", StringComparison.OrdinalIgnoreCase)
+                    : (exitedProp.ValueKind == System.Text.Json.JsonValueKind.True),
+                ExitCode = TryGetLong(root, "exit_code") is long exitVal ? (int)exitVal : null,
+                CpuTotalMs = TryGetLong(root, "cpu_total_ms"),
+                WorkingSetBytes = TryGetLong(root, "working_set_bytes"),
+                LogBytes = TryGetLong(root, "unity_log_bytes"),
+                LogMtimeUtc = TryGetDate(root, "unity_log_mtime_utc")
+            };
+            return sample;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static long? TryGetLong(System.Text.Json.JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var prop))
+        {
+            return null;
+        }
+        if (prop.ValueKind == System.Text.Json.JsonValueKind.Number && prop.TryGetInt64(out var value))
+        {
+            return value;
+        }
+        if (prop.ValueKind == System.Text.Json.JsonValueKind.String && long.TryParse(prop.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+        return null;
+    }
+
+    private static DateTime? TryGetDate(System.Text.Json.JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var prop))
+        {
+            return null;
+        }
+        if (prop.ValueKind == System.Text.Json.JsonValueKind.String && DateTime.TryParse(prop.GetString(), out var parsed))
+        {
+            return parsed.ToUniversalTime();
+        }
+        return null;
     }
 
     private static void AppendFileStat(StringBuilder sb, string label, string path)
