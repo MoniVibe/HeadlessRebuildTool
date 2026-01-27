@@ -22,6 +22,9 @@ internal static class Program
     private const string EditorLogName = "editor.log";
     private const string EditorPrevLogName = "editor-prev.log";
     private const string EditorLogMissingName = "editor_log_missing.txt";
+    private const string HeartbeatName = "heartbeat.jsonl";
+    private const string ProgressName = "build_progress.json";
+    private const int HeartbeatIntervalSeconds = 30;
     private const string UnityProjectLockSignature = "another unity instance is running with this project open";
     private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ProjectLockTimeout = TimeSpan.FromSeconds(30);
@@ -330,6 +333,35 @@ internal static class Program
             ReleaseProjectMutex(projectMutex, logger);
             throw new InvalidOperationException("Failed to start Unity process.");
         }
+        var heartbeatPath = Path.Combine(logsDir, HeartbeatName);
+        var progressPath = Path.Combine(logsDir, ProgressName);
+        var heartbeatStop = new ManualResetEventSlim(false);
+        WriteBuildStart(Path.Combine(logsDir, "build_start.json"), options, process, unityLog, stdoutPath, stderrPath, args, logger);
+        WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "start", logger);
+        var heartbeatThread = new Thread(() =>
+        {
+            try
+            {
+                while (!heartbeatStop.Wait(TimeSpan.FromSeconds(HeartbeatIntervalSeconds)))
+                {
+                    if (process.HasExited)
+                    {
+                        break;
+                    }
+
+                    WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "tick", logger);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warn($"heartbeat_loop_failed err={ex.Message}");
+            }
+        })
+        {
+            IsBackground = true,
+            Name = $"heartbeat_{options.BuildId}"
+        };
+        heartbeatThread.Start();
         using var stdoutWriter = new StreamWriter(stdoutPath, false, Encoding.UTF8) { AutoFlush = true };
         using var stderrWriter = new StreamWriter(stderrPath, false, Encoding.UTF8) { AutoFlush = true };
         var stdoutLock = new object();
@@ -370,14 +402,159 @@ internal static class Program
             TryKillProcess(process);
             WaitForProcessExit(process, TimeSpan.FromSeconds(2), logger);
             KillStrayUnityProcesses(unityLog, artifactRoot, options.ExecuteMethod, logger);
+            heartbeatStop.Set();
+            WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "timeout", logger);
+            WriteUnityExit(Path.Combine(logsDir, "unity_exit.json"), process, timedOut, logger);
             ReleaseProjectMutex(projectMutex, logger);
             return new UnityRunResult(process.HasExited ? process.ExitCode : 124, timedOut);
         }
 
         process.WaitForExit();
         logger.Info($"unity_exit pid={process.Id} exit={process.ExitCode}");
+        heartbeatStop.Set();
+        WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "exit", logger);
+        WriteUnityExit(Path.Combine(logsDir, "unity_exit.json"), process, timedOut, logger);
         ReleaseProjectMutex(projectMutex, logger);
         return new UnityRunResult(process.ExitCode, timedOut);
+    }
+
+    private static void WriteBuildStart(
+        string path,
+        Options options,
+        Process process,
+        string unityLog,
+        string stdoutPath,
+        string stderrPath,
+        IReadOnlyList<string> args,
+        Logger logger)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.Append("{");
+            AppendJsonField(sb, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
+            AppendJsonField(sb, "build_id", options.BuildId, prependComma: true);
+            AppendJsonField(sb, "commit", options.Commit, prependComma: true);
+            AppendJsonField(sb, "project_path", options.ProjectPath, prependComma: true);
+            AppendJsonField(sb, "unity_exe", options.UnityExe, prependComma: true);
+            AppendJsonField(sb, "pid", process.Id.ToString(), prependComma: true);
+            AppendJsonField(sb, "args", FormatArgsForLog(args), prependComma: true);
+            AppendJsonField(sb, "unity_log", unityLog, prependComma: true);
+            AppendJsonField(sb, "stdout_log", stdoutPath, prependComma: true);
+            AppendJsonField(sb, "stderr_log", stderrPath, prependComma: true);
+            sb.Append("}");
+            File.WriteAllText(path, sb.ToString(), Encoding.ASCII);
+            logger.Info($"build_start_written path={path}");
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"build_start_write_failed err={ex.Message}");
+        }
+    }
+
+    private static void WriteUnityExit(string path, Process process, bool timedOut, Logger logger)
+    {
+        try
+        {
+            var hasExited = process.HasExited;
+            var exitCode = hasExited ? process.ExitCode.ToString() : string.Empty;
+            var sb = new StringBuilder();
+            sb.Append("{");
+            AppendJsonField(sb, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
+            AppendJsonField(sb, "pid", process.Id.ToString(), prependComma: true);
+            AppendJsonField(sb, "has_exited", hasExited ? "true" : "false", prependComma: true);
+            AppendJsonField(sb, "exit_code", exitCode, prependComma: true);
+            AppendJsonField(sb, "timed_out", timedOut ? "true" : "false", prependComma: true);
+            sb.Append("}");
+            File.WriteAllText(path, sb.ToString(), Encoding.ASCII);
+            logger.Info($"unity_exit_written path={path}");
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_exit_write_failed err={ex.Message}");
+        }
+    }
+
+    private static void WriteHeartbeatSample(
+        string heartbeatPath,
+        string progressPath,
+        Process process,
+        string unityLog,
+        string stdoutPath,
+        string stderrPath,
+        string state,
+        Logger logger)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.Append("{");
+            AppendJsonField(sb, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
+            AppendJsonField(sb, "state", state ?? string.Empty, prependComma: true);
+            AppendJsonField(sb, "pid", process.Id.ToString(), prependComma: true);
+
+            var hasExited = false;
+            string exitCode = string.Empty;
+            try
+            {
+                process.Refresh();
+                hasExited = process.HasExited;
+                if (hasExited)
+                {
+                    exitCode = process.ExitCode.ToString();
+                }
+                AppendJsonField(sb, "has_exited", hasExited ? "true" : "false", prependComma: true);
+                AppendJsonField(sb, "exit_code", exitCode, prependComma: true);
+                AppendJsonField(sb, "cpu_total_ms", ((long)process.TotalProcessorTime.TotalMilliseconds).ToString(), prependComma: true);
+                AppendJsonField(sb, "working_set_bytes", process.WorkingSet64.ToString(), prependComma: true);
+                AppendJsonField(sb, "private_bytes", process.PrivateMemorySize64.ToString(), prependComma: true);
+                AppendJsonField(sb, "handles", process.HandleCount.ToString(), prependComma: true);
+                AppendJsonField(sb, "threads", process.Threads.Count.ToString(), prependComma: true);
+            }
+            catch (Exception ex)
+            {
+                AppendJsonField(sb, "process_error", ex.GetType().Name, prependComma: true);
+            }
+
+            AppendFileStat(sb, "unity_log", unityLog);
+            AppendFileStat(sb, "stdout_log", stdoutPath);
+            AppendFileStat(sb, "stderr_log", stderrPath);
+            sb.Append("}");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(heartbeatPath) ?? ".");
+            File.AppendAllText(heartbeatPath, sb + Environment.NewLine, Encoding.ASCII);
+            File.WriteAllText(progressPath, sb.ToString(), Encoding.ASCII);
+
+            if (!string.Equals(state, "tick", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.Info($"heartbeat_{state} path={heartbeatPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"heartbeat_write_failed err={ex.Message}");
+        }
+    }
+
+    private static void AppendFileStat(StringBuilder sb, string label, string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                AppendJsonField(sb, $"{label}_exists", "false", prependComma: true);
+                return;
+            }
+
+            var info = new FileInfo(path);
+            AppendJsonField(sb, $"{label}_exists", "true", prependComma: true);
+            AppendJsonField(sb, $"{label}_bytes", info.Length.ToString(), prependComma: true);
+            AppendJsonField(sb, $"{label}_mtime_utc", info.LastWriteTimeUtc.ToString("O"), prependComma: true);
+        }
+        catch
+        {
+            AppendJsonField(sb, $"{label}_exists", "unknown", prependComma: true);
+        }
     }
 
     private static string FormatArgsForLog(IReadOnlyList<string> args)
