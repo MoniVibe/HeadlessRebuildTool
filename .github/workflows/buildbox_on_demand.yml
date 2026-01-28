@@ -128,6 +128,11 @@ jobs:
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
             }
           }
+          if (Test-Path (Join-Path $puredotsTarget ".git")) {
+            & git -C $puredotsTarget fetch --all --prune
+            & git -C $puredotsTarget reset --hard origin/fix/ai-stubs-guard
+            & git -C $puredotsTarget clean -fd
+          }
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
           $puredotsDupes = @(
             "Packages\\com.moni.puredots\\Runtime\\Runtime\\AI\\ConceptStubBehaviourTree.cs",
