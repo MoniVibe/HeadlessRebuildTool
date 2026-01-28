@@ -155,11 +155,15 @@ jobs:
           & $pipeline @args 2>&1 | Tee-Object -FilePath $log
           # Determine success from pipeline_smoke summary to avoid leaked native exit codes.
           $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
+          $summaryCopy = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke_summary_latest.md"
           if (Test-Path $summary) {
-            $summaryText = Get-Content $summary -Raw
+            Copy-Item -Path $summary -Destination $summaryCopy -Force
+            $summaryText = Get-Content $summaryCopy -Raw
             if ($summaryText -match '(?m)^\\* status: FAIL') {
-              throw "pipeline_smoke reported FAIL (see $summary)"
+              throw "pipeline_smoke reported FAIL (see $summaryCopy)"
             }
+          } else {
+            throw "pipeline_smoke summary missing: $summary"
           }
           # Clear any leaked native exit code so the workflow reflects the pipeline result.
           $global:LASTEXITCODE = 0
