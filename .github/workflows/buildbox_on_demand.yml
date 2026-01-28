@@ -154,30 +154,50 @@ jobs:
           $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
           if (Test-Path $summary) { Copy-Item $summary -Destination $diagRoot -Force }
 
+          $zipPaths = New-Object System.Collections.Generic.List[string]
+          if (Test-Path $pipelineLog) {
+            $artifactLines = Select-String -Path $pipelineLog -Pattern 'artifact=([A-Za-z]:\\\\[^\\s]+\\.zip)' -AllMatches
+            foreach ($line in $artifactLines) {
+              foreach ($m in $line.Matches) {
+                $zipPaths.Add($m.Groups[1].Value)
+              }
+            }
+          }
+
           $resultsDir = Join-Path $queueRoot "results"
           if (Test-Path $resultsDir) {
-            $zips = Get-ChildItem -Path $resultsDir -Filter "result_*.zip" -ErrorAction SilentlyContinue |
+            $z = Get-ChildItem -Path $resultsDir -Filter "result_*.zip" -ErrorAction SilentlyContinue |
               Sort-Object LastWriteTime -Descending | Select-Object -First 3
-            $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            foreach ($zip in $zips) {
-              $zipName = [IO.Path]::GetFileNameWithoutExtension($zip.Name)
-              $dest = Join-Path $diagRoot ("results\\" + $zipName)
-              New-Item -ItemType Directory -Path $dest -Force | Out-Null
-              $archive = $null
-              try {
-                $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
-                foreach ($entry in $archive.Entries) {
-                  if ($wanted -contains $entry.FullName) {
-                    $outPath = Join-Path $dest ($entry.FullName -replace '/', '\\')
-                    $outDir = Split-Path $outPath -Parent
-                    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
-                    $entry.ExtractToFile($outPath, $true)
-                  }
+            foreach ($zip in $z) { $zipPaths.Add($zip.FullName) }
+          }
+
+          $artifactsDir = Join-Path $queueRoot "artifacts"
+          if (Test-Path $artifactsDir) {
+            $z = Get-ChildItem -Path $artifactsDir -Filter "artifact_*.zip" -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 3
+            foreach ($zip in $z) { $zipPaths.Add($zip.FullName) }
+          }
+
+          $zipPaths = $zipPaths | Where-Object { Test-Path $_ } | Sort-Object -Unique
+          $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($zipPath in $zipPaths) {
+            $zipName = [IO.Path]::GetFileNameWithoutExtension($zipPath)
+            $dest = Join-Path $diagRoot ("results\\" + $zipName)
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            $archive = $null
+            try {
+              $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
+              foreach ($entry in $archive.Entries) {
+                if ($wanted -contains $entry.FullName) {
+                  $outPath = Join-Path $dest ($entry.FullName -replace '/', '\\')
+                  $outDir = Split-Path $outPath -Parent
+                  if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+                  $entry.ExtractToFile($outPath, $true)
                 }
-              } finally {
-                if ($archive) { $archive.Dispose() }
               }
+            } finally {
+              if ($archive) { $archive.Dispose() }
             }
           }
 

@@ -23,3 +23,7 @@ Remote triage:
 1) gh run list -R MoniVibe/HeadlessRebuildTool --workflow buildbox_on_demand.yml --limit 5
 2) gh run download <RUN_ID> -R MoniVibe/HeadlessRebuildTool -n buildbox_diag_<title>_<RUN_ID>
 3) Inspect buildbox_diag/results/*/meta.json and out/*.json for failure_signature + exit_reason
+
+Notes:
+- The workflow looks for zips in both queue\results (result_*.zip) and queue\artifacts (artifact_*.zip).
+- It also parses pipeline_smoke.log for explicit artifact paths to extract diagnostics.
