@@ -107,7 +107,8 @@ jobs:
               throw "Worktree path exists but is not a git worktree: $wt"
             }
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'fetch', '--all', '--tags')) -Context "fetch worktree"
-            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', $refToCheckout)) -Context "checkout $refToCheckout"
+            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard (pre-checkout)"
+            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', '-f', $refToCheckout)) -Context "checkout $refToCheckout"
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
           }
 
