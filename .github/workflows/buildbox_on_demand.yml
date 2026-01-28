@@ -131,10 +131,86 @@ jobs:
           & $pipeline @args 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Collect diagnostics (always)
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Continue"
+
+          $title = '${{ inputs.title }}'
+          $queueRoot = '${{ inputs.queue_root }}'
+          if ([string]::IsNullOrWhiteSpace($queueRoot)) {
+            $queueRoot = "C:\\polish\\anviloop\\$title\\queue"
+          }
+
+          $diagRoot = Join-Path $env:GITHUB_WORKSPACE "buildbox_diag"
+          New-Item -ItemType Directory -Path $diagRoot -Force | Out-Null
+
+          $pipelineLog = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke.log"
+          if (Test-Path $pipelineLog) { Copy-Item $pipelineLog -Destination $diagRoot -Force }
+
+          $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
+          if (Test-Path $summary) { Copy-Item $summary -Destination $diagRoot -Force }
+
+          $resultsDir = Join-Path $queueRoot "results"
+          if (Test-Path $resultsDir) {
+            $zips = Get-ChildItem -Path $resultsDir -Filter "result_*.zip" -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 3
+            $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            foreach ($zip in $zips) {
+              $zipName = [IO.Path]::GetFileNameWithoutExtension($zip.Name)
+              $dest = Join-Path $diagRoot ("results\\" + $zipName)
+              New-Item -ItemType Directory -Path $dest -Force | Out-Null
+              $archive = $null
+              try {
+                $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+                foreach ($entry in $archive.Entries) {
+                  if ($wanted -contains $entry.FullName) {
+                    $outPath = Join-Path $dest ($entry.FullName -replace '/', '\\')
+                    $outDir = Split-Path $outPath -Parent
+                    if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+                    $entry.ExtractToFile($outPath, $true)
+                  }
+                }
+              } finally {
+                if ($archive) { $archive.Dispose() }
+              }
+            }
+          }
+
+          $logsRoot = "C:\\polish\\anviloop\\logs"
+          $logNames = @(
+            "watchdog_heartbeat.log",
+            "watch_daemon_${title}.log",
+            "wsl_runner_${title}.log",
+            "intel_${title}.log"
+          )
+          foreach ($ln in $logNames) {
+            $path = Join-Path $logsRoot $ln
+            if (Test-Path $path) {
+              $dest = Join-Path $diagRoot ("logs\\" + $ln)
+              $destDir = Split-Path $dest -Parent
+              if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+              Get-Content -Path $path -Tail 500 | Set-Content -Path $dest
+            }
+          }
+
       - name: Upload pipeline log
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: pipeline_log
           path: pipeline_smoke.log
+
+      - name: Upload diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildbox_diag_${{ inputs.title }}_${{ github.run_id }}
+          path: buildbox_diag
+          retention-days: 14
 
 # noop touch for workflow_dispatch registration
