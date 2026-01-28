@@ -190,6 +190,7 @@ jobs:
 
           $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
           $wantedNames = @("meta.json", "watchdog.json", "run_summary.json", "invariants.json", "out_watchdog.json", "out_run_summary.json", "out_invariants.json")
+          $wantedRegex = "(?i)(meta|run_summary|watchdog|invariants)"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           foreach ($zipFile in $zipFiles) {
             $zipPath = $zipFile.FullName
@@ -202,7 +203,8 @@ jobs:
               foreach ($entry in $archive.Entries) {
                 $matchFull = $wanted -contains $entry.FullName
                 $matchName = $wantedNames -contains $entry.Name
-                if ($matchFull -or $matchName) {
+                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex)
+                if ($matchFull -or $matchName -or $matchRegex) {
                   $relative = if ($matchFull) { ($entry.FullName -replace '/', '\\') } else { ("flat\\" + $entry.Name) }
                   $outPath = Join-Path $dest $relative
                   $outDir = Split-Path $outPath -Parent
