@@ -188,23 +188,34 @@ jobs:
           $zipFiles = $zipFiles | Sort-Object LastWriteTime -Descending
           Write-Host ("diag: found {0} zip(s)" -f $zipFiles.Count)
 
+          $summaryPath = Join-Path $diagRoot "diag_summary.txt"
+          $summaryLines = @()
+          $summaryLines += "zip_count=$($zipFiles.Count)"
+
           $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
           $wantedNames = @("meta.json", "watchdog.json", "run_summary.json", "invariants.json", "out_watchdog.json", "out_run_summary.json", "out_invariants.json")
           $wantedRegex = "(?i)(meta|run_summary|watchdog|invariants)"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          foreach ($zipFile in $zipFiles) {
+          $zipSample = $zipFiles | Select-Object -First 2
+          $zipIndex = 0
+          foreach ($zipFile in $zipSample) {
+            $zipIndex++
             $zipPath = $zipFile.FullName
             $zipName = [IO.Path]::GetFileNameWithoutExtension($zipPath)
             $dest = Join-Path $diagRoot ("results\\" + $zipName)
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
             $archive = $null
+            $jsonEntries = New-Object System.Collections.Generic.List[string]
+            $matchEntries = New-Object System.Collections.Generic.List[string]
             try {
               $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
               foreach ($entry in $archive.Entries) {
+                if ($entry.Name -match "(?i)\\.json$") { $jsonEntries.Add($entry.FullName) }
                 $matchFull = $wanted -contains $entry.FullName
                 $matchName = $wantedNames -contains $entry.Name
                 $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex)
                 if ($matchFull -or $matchName -or $matchRegex) {
+                  $matchEntries.Add($entry.FullName)
                   $relative = if ($matchFull) { ($entry.FullName -replace '/', '\\') } else { ("flat\\" + $entry.Name) }
                   $outPath = Join-Path $dest $relative
                   $outDir = Split-Path $outPath -Parent
@@ -215,10 +226,10 @@ jobs:
             } finally {
               if ($archive) { $archive.Dispose() }
             }
+            $summaryLines += ("zip[{0}]={1} json_count={2} match_count={3}" -f $zipIndex, $zipFile.Name, $jsonEntries.Count, $matchEntries.Count)
+            foreach ($name in ($jsonEntries | Select-Object -First 10)) { $summaryLines += ("  json: " + $name) }
+            foreach ($name in ($matchEntries | Select-Object -First 10)) { $summaryLines += ("  match: " + $name) }
           }
-
-          $summaryPath = Join-Path $diagRoot "diag_summary.txt"
-          "zip_count=$($zipFiles.Count)" | Set-Content -Path $summaryPath
 
           $reportsDir = Join-Path $queueRoot "reports"
           if (Test-Path $reportsDir) {
@@ -228,6 +239,8 @@ jobs:
               Sort-Object LastWriteTime -Descending | Select-Object -First 5 |
               Copy-Item -Destination $reportsOut -Force
           }
+
+          $summaryLines | Set-Content -Path $summaryPath
 
           $logsRoot = "C:\\polish\\anviloop\\logs"
           $logNames = @(
