@@ -201,6 +201,8 @@ jobs:
             "out/stderr.log",
             "out/player.log",
             "out/unity.log",
+            "out/diag_stdout_tail.txt",
+            "out/diag_stderr_tail.txt",
             "logs/stdout.log",
             "logs/stderr.log",
             "logs/player.log",
@@ -217,9 +219,11 @@ jobs:
             "stdout.log",
             "stderr.log",
             "player.log",
-            "unity.log"
+            "unity.log",
+            "diag_stdout_tail.txt",
+            "diag_stderr_tail.txt"
           )
-          $wantedRegex = "(?i)(meta|run_summary|watchdog|invariants|stdout|stderr|player|unity|crash)"
+          $wantedRegex = "(?i)(^|/)crash/.*\\.log$"
           $logNameRegex = "(?i)(stdout|stderr|player|unity)\\.log$"
           $logPathRegex = "(?i)(^|/)(stdout|stderr|player|unity)\\.log$"
           $crashLogRegex = "(?i)(^|/)crash/.*\\.log$"
@@ -256,7 +260,7 @@ jobs:
                     if (-not (Test-Path $tailDir)) { New-Item -ItemType Directory -Path $tailDir -Force | Out-Null }
                     $tailBase = ($entry.FullName -replace '[\\\\/:*?\"<>|]', '_')
                     $tailPath = Join-Path $tailDir ($tailBase + ".tail.log")
-                    Get-Content -Path $outPath -Tail 400 | Set-Content -Path $tailPath
+                    Get-Content -Path $outPath -Tail 400 -ErrorAction SilentlyContinue | Set-Content -Path $tailPath
                   }
                 }
               }
