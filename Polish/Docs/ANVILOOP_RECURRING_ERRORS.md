@@ -90,7 +90,7 @@ ERR-20260122-007
 ERR-20260122-008
 - FirstSeen: 2026-01-22
 - Stage: RUNNER
-- Symptom: TEST_FAIL space4x_collision_micro seed=7 exit_code=10 runtime_sec=7.0 telemetry_bytes=0 telemetry_summary=missing
+- Symptom: TEST_FAIL space4x_collision_micro seed=7 exit_code=10 (also seen as space4x seed=7)
 - Signature: 9af157abb7a115bb738f99c20bffe635c0fa6bf1bf9a7c21b745b4096e5f6377
 - RawSignature: TEST_FAIL|space4x_collision_micro|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
 - RootCause: TBD
@@ -98,18 +98,6 @@ ERR-20260122-008
 - Prevention: TBD
 - Verification: TBD
 - Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
-- Commit: TBD
-
-ERR-20260128-001
-- FirstSeen: 2026-01-28
-- Stage: RUNNER
-- Symptom: TEST_FAIL space4x seed=7 exit_code=10 runtime_sec=36.0
-- Signature: 5c5140e3d9296eca47fac70617dbedd6b224b747a5d2af5feb1a62e4e99f591f
-- RawSignature: TEST_FAIL|space4x|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
-- RootCause: TBD
-- Fix: TBD
-- Prevention: TBD
-- Verification: TBD
 - Evidence: build_id=20260128_061826_349_29972412 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21427439803
 - Commit: TBD
 

@@ -192,9 +192,37 @@ jobs:
           $summaryLines = @()
           $summaryLines += "zip_count=$($zipFiles.Count)"
 
-          $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
-          $wantedNames = @("meta.json", "watchdog.json", "run_summary.json", "invariants.json", "out_watchdog.json", "out_run_summary.json", "out_invariants.json")
-          $wantedRegex = "(?i)(meta|run_summary|watchdog|invariants)"
+          $wanted = @(
+            "meta.json",
+            "out/watchdog.json",
+            "out/run_summary.json",
+            "out/invariants.json",
+            "out/stdout.log",
+            "out/stderr.log",
+            "out/player.log",
+            "out/unity.log",
+            "logs/stdout.log",
+            "logs/stderr.log",
+            "logs/player.log",
+            "logs/unity.log"
+          )
+          $wantedNames = @(
+            "meta.json",
+            "watchdog.json",
+            "run_summary.json",
+            "invariants.json",
+            "out_watchdog.json",
+            "out_run_summary.json",
+            "out_invariants.json",
+            "stdout.log",
+            "stderr.log",
+            "player.log",
+            "unity.log"
+          )
+          $wantedRegex = "(?i)(meta|run_summary|watchdog|invariants|stdout|stderr|player|unity|crash)"
+          $logNameRegex = "(?i)(stdout|stderr|player|unity)\\.log$"
+          $logPathRegex = "(?i)(^|/)(stdout|stderr|player|unity)\\.log$"
+          $crashLogRegex = "(?i)(^|/)crash/.*\\.log$"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zipSample = $zipFiles | Select-Object -First 2
           $zipIndex = 0
@@ -221,6 +249,15 @@ jobs:
                   $outDir = Split-Path $outPath -Parent
                   if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
                   [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $outPath, $true)
+
+                  $isLog = ($entry.Name -match $logNameRegex) -or ($entry.FullName -match $logPathRegex) -or ($entry.FullName -match $crashLogRegex)
+                  if ($isLog -and (Test-Path $outPath)) {
+                    $tailDir = Join-Path $dest "log_tails"
+                    if (-not (Test-Path $tailDir)) { New-Item -ItemType Directory -Path $tailDir -Force | Out-Null }
+                    $tailBase = ($entry.FullName -replace '[\\\\/:*?\"<>|]', '_')
+                    $tailPath = Join-Path $tailDir ($tailBase + ".tail.log")
+                    Get-Content -Path $outPath -Tail 400 | Set-Content -Path $tailPath
+                  }
                 }
               }
             } finally {
