@@ -1,51 +1,49 @@
-- Disk gate + cleanup:
-  - Gate: `pwsh -NoProfile -Command "'C_free_GB=' + [math]::Round((Get-PSDrive C).Free/1GB,1)"` and stop if < 40 GB.
-  - Queue cleanup (from repo root): `pwsh -NoProfile -File Polish/cleanup_queue.ps1 -QueueRoot "C:\polish\queue" -RetentionDays 7 -KeepLastPerScenario 3 -Apply`.
-  - Trim after each cycle: keep `staging_*` last 5, `_inspect` last 10, Space4X worktrees last 2.
-- Required daemons:
-  - WSL runner: `./Polish/WSL/wsl_runner.sh --queue /mnt/c/polish/queue --daemon --print-summary --status-interval 60`.
-  - Intel sidecar ingest: `Polish/Intel/anviloop_intel.py` (ingests result zips, writes `reports/intel/explain_*.json` and `questions_*.json`).
-  - Scoreboard/headline: `Polish/Goals/scoreboard.py` (writes `nightly_headline_YYYYMMDD.md`).
-  - Reward logging: uses `out/polish_score_v0.json` produced by the analyzer.
-- Session lock:
-  - Lock file: `$TRI_STATE_DIR/ops/locks/nightly_session.lock`.
-  - Claim is atomic with ownership metadata (run_id/pid/host/started_utc).
-  - TTL reclaim defaults to 90 minutes; stale locks are renamed to `*.stale.<timestamp>` before claiming.
-  - CLI helpers:
-    - Claim: `python3 Tools/Headless/headlessctl.py claim_session_lock --ttl 5400 --purpose nightly_runner`
-    - Show: `python3 Tools/Headless/headlessctl.py show_session_lock`
-    - Cleanup stale: `python3 Tools/Headless/headlessctl.py cleanup_locks --ttl 5400`
-- Nightly structure:
-  - Cycle 0 sentinel: EngineerTick FTL once; proof in `out/player.log` contains `[Anviloop][FTL] FTL_JUMP` with `tick >= 30`.
-  - Concept goal: exactly one per night (default ARC); no scenario + code changes in the same cycle; code-only first.
-  - Nightly gate: `nightly_runner.py --gate` runs S2/S3 first and skips them if last green < 24h.
-- Validity gate:
-  - If telemetry is missing/truncated, invariants missing, or required oracle keys missing, mark INVALID and fix instrumentation/infra first.
-- Commit/proof policy:
-  - Only keep a commit if a headless proof exists (log or telemetry).
-  - Mechanic proofs must be real: BANK PASS or validate_metric_keys + thresholds, not just “telemetry exists”.
-  - Chain-of-custody: commit in artifact manifest must match `meta.json` in the result zip.
-  - If a run passes but proves nothing, do not keep changing code; move to the next goal.
-  - Branch naming: `nightly/dev_<goal>_<YYYYMMDD_HHMM>`.
-  - Commit message must include `scenario_id` and `goal_id`.
-  - Assets/.meta edits are daytime-only; nightly agents may only queue requests in `headless_asset_queue.md`.
-- Stop/switch rules:
-  - If the same failure signature repeats twice, stop and consult the ledger.
-  - If disk drops below the gate, switch to analysis/doc only (no builds).
-  - Treat `OK_WITH_WARNINGS` as PASS for pipeline health but record counts.
-- Where to look for proof:
-  - Logs: `out/player.log` (proof markers).
-  - Analysis: `out/run_summary.json` and `out/polish_score_v0.json`.
-  - Intel: `reports/intel/explain_*.json` and `questions_*.json`.
-  - Ledger: `Polish/Docs/ANVILOOP_RECURRING_ERRORS.md`.
-- Reporting:
-  - Write `C:\polish\queue\reports\nightly_cycle_<utc>_<cycle>.json`.
-  - Append `C:\polish\queue\reports\nightly_timeline.log` key=value line with goal_id, build_id, artifact, job_id(s), result zip, proof snippet, exit_reason, failure_signature, disk before/after, cleanup counts, ledger action.
-  - Cleanup runs in state dir if disk pressure rises:
-    - `python3 Tools/Headless/headlessctl.py cleanup_runs --days 7 --keep-per-task 5 --max-bytes 5000000000`
+# Nightly Protocol (Current)
 
-- Scenario vs simulation principle:
-  - Scenarios stay small/deterministic; the simulation inside them is real and dynamic.
-  - Primary metrics must be emergent from the sim (acquire → solve → align → fire → hit), not computed by a flat formula.
-  - Use templates/spawners for crewed/autonomous/hive ships to keep scenario JSON small but expressive.
+## 0) Disk gate + cleanup
+- Gate: `pwsh -NoProfile -Command "'C_free_GB=' + [math]::Round((Get-PSDrive C).Free/1GB,1)"` and stop if < 40 GB.
+- Queue cleanup (desktop): `pwsh -NoProfile -File Polish/cleanup_queue.ps1 -QueueRoot "C:\polish\anviloop\space4x\queue" -RetentionDays 7 -KeepLastPerScenario 3 -Apply` (repeat for godgame).
+- Trim after each cycle: keep `staging_*` last 5, `_inspect` last 10, worktrees last 2.
+
+## 1) Required daemons (desktop buildbox)
+- WSL runner (per title): `./Polish/WSL/wsl_runner.sh --queue /mnt/c/polish/anviloop/<title>/queue --daemon --print-summary --status-interval 60`.
+- Intel sidecar ingest: `Polish/Intel/anviloop_intel.py` (writes `reports/intel/explain_*.json` and `questions_*.json`).
+- Watch daemons (Windows): `Polish/pipeline_watch_daemon.ps1 -Title <title> -QueueRoot C:\polish\anviloop\<title>\queue`.
+- Scoreboard/headline (optional): `Polish/Goals/scoreboard.py`.
+
+## 2) Primary execution path (remote)
+- **Buildbox on-demand** is the default loop:
+  1) Push a branch/SHA.
+  2) Trigger `buildbox_on_demand.yml` with `title` + `ref`.
+  3) Buildbox runs `pipeline_smoke.ps1`, builds artifact, enqueues jobs.
+  4) WSL runner consumes jobs and writes result zips.
+  5) Download `buildbox_diag_*` artifacts and summarize with `Polish/Ops/diag_summarize.ps1`.
+
+## 3) Optional nightly (CI)
+- `nightly-evals.yml` uses runner label `headless-e2e`. If no runner has this label, runs stay queued (expected).
+- `unity-tests` job is gated by `UNITY_TESTS_ENABLED == '1'` and is skipped by default.
+
+## 4) Validity gate
+- If telemetry is missing/truncated, invariants missing, or required oracle keys missing, mark INVALID and fix instrumentation/infra first.
+
+## 5) Commit/proof policy
+- Only keep a commit if a headless proof exists (log or telemetry).
+- Mechanic proofs must be real: BANK PASS or validate_metric_keys + thresholds, not just “telemetry exists”.
+- Chain-of-custody: commit in artifact manifest must match `meta.json` in the result zip.
+- Assets/.meta edits are daytime-only; nightly agents may only queue requests.
+
+## 6) Stop/switch rules
+- If the same failure signature repeats twice, stop and consult the ledger.
+- If disk drops below the gate, switch to analysis/doc only (no builds).
+- Treat `OK_WITH_WARNINGS` as PASS for pipeline health but record counts.
+
+## 7) Where to look for proof
+- Buildbox diagnostics: `buildbox_diag_*` artifact (meta/run_summary/watchdog/log tails).
+- Queue results: `C:\polish\anviloop\<title>\queue\results\result_*.zip`.
+- Intel: `reports/intel/explain_*.json` and `questions_*.json`.
+- Ledger: `Polish/Docs/ANVILOOP_RECURRING_ERRORS.md`.
+
+## 8) Principles
+- Scenarios stay small/deterministic; the simulation inside them is real and dynamic.
+- Primary metrics must be emergent from the sim, not computed by a flat formula.
 - Simulation template contract: `Polish/Docs/ENTITY_SIM_TEMPLATE_CONTRACT.md`.

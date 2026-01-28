@@ -1,15 +1,22 @@
 # Morning View (Anviloop)
 
-Use this order every morning to decide next actions quickly.
+Use this order to decide next actions quickly.
 
-1) `C:\polish\queue\reports\nightly_headline_YYYYMMDD.md`
-   - Quick overview with per-job cards and NEXT actions.
+1) Buildbox diagnostics (primary)
+   - `C:\polish\queue\reports\_diag_downloads\<run_id>\buildbox_diag_*`
+   - Summaries (if generated): `diag_*.md` in the same folder.
 
-2) `C:\polish\queue\reports\scoreboard.json`
-   - Machine summary with validity counts, top invalid reasons, and top failing questions.
+2) Pipeline logs
+   - `pipeline_smoke.log` artifact from the GitHub Actions run.
 
-3) `C:\polish\queue\reports\intel\explain_<job_id>.json`
-   - Per-job validity block, oracle question summary, and suggested fix/prevention.
+3) Queue results (desktop)
+   - `C:\polish\anviloop\<title>\queue\results\result_*.zip`
+   - Inspect: `out/run_summary.json`, `out/watchdog.json`, `out/player.log`
 
-4) `C:\Dev\unity_clean\headlessrebuildtool\Polish\Docs\ANVILOOP_RECURRING_ERRORS.md`
+4) Intel summaries (if enabled)
+   - `C:\polish\queue\reports\intel\explain_<job_id>.json`
+   - `C:\polish\queue\reports\intel\questions_<job_id>.json`
+
+5) Recurring error ledger
+   - `C:\Dev\unity_clean\headlessrebuildtool\Polish\Docs\ANVILOOP_RECURRING_ERRORS.md`
    - If failure signature repeats, apply the documented fix first.
