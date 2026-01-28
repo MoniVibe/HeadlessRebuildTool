@@ -106,6 +106,14 @@ jobs:
             if (-not (Test-Path (Join-Path $wt '.git'))) {
               throw "Worktree path exists but is not a git worktree: $wt"
             }
+            $headlessManifest = Join-Path $wt "Packages\\manifest.headless.json"
+            $headlessLock = Join-Path $wt "Packages\\packages-lock.headless.json"
+            if (Test-Path $headlessManifest) {
+              Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', '--', 'Packages/manifest.headless.json')) -Context "reset manifest.headless.json"
+            }
+            if (Test-Path $headlessLock) {
+              Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', '--', 'Packages/packages-lock.headless.json')) -Context "reset packages-lock.headless.json"
+            }
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'fetch', '--all', '--tags')) -Context "fetch worktree"
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard (pre-checkout)"
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', '-f', $refToCheckout)) -Context "checkout $refToCheckout"
