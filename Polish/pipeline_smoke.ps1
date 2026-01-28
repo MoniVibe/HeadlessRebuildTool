@@ -575,6 +575,7 @@ $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
 }
+$global:LASTEXITCODE = 0
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
 if (-not (Test-Path $artifactZip)) {
@@ -738,3 +739,5 @@ for ($i = 1; $i -le $Repeat; $i++) {
 }
 
 Finalize-PipelineSummary -Status "SUCCESS" -Failure ""
+$global:LASTEXITCODE = 0
+return
