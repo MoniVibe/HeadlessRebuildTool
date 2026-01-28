@@ -145,8 +145,10 @@ jobs:
 
           if ($clean) {
             $paths = @(
+              "Library",
               "Library\\Bee",
               "Library\\ScriptAssemblies",
+              "Temp",
               "Temp\\BeeArtifacts",
               "Temp\\UnityLockfile",
               "Library\\UnityLockfile"
