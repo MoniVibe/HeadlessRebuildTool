@@ -220,7 +220,7 @@ jobs:
                   $outPath = Join-Path $dest $relative
                   $outDir = Split-Path $outPath -Parent
                   if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
-                  $entry.ExtractToFile($outPath, $true)
+                  [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $outPath, $true)
                 }
               }
             } finally {
