@@ -120,9 +120,9 @@ jobs:
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
           }
 
-          # Ensure local PureDOTS package path resolves inside the worktree
+          # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
-          $puredotsLink = Join-Path $wt "puredots"
+          $puredotsLink = Join-Path $wtRoot "puredots"
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
