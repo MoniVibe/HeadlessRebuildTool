@@ -68,6 +68,9 @@ jobs:
 
           # Local tools expected at: TRI_ROOT\Tools\HeadlessRebuildTool\Polish\pipeline_smoke.ps1
           $pipeline = Join-Path $tri "Tools\\HeadlessRebuildTool\\Polish\\pipeline_smoke.ps1"
+          if (-not (Test-Path $pipeline)) {
+            $pipeline = Join-Path $tri "Tools\\Polish\\pipeline_smoke.ps1"
+          }
           if (-not (Test-Path $pipeline)) { throw "pipeline_smoke.ps1 not found: $pipeline" }
 
           # Worktree for the requested ref (keeps caches stable between runs)
