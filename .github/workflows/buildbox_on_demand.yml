@@ -136,6 +136,9 @@ jobs:
           }
           if ($wait) { $args.WaitForResult = $true }
 
+          $env:GIT_COMMIT = $ref
+          $env:GIT_BRANCH = $ref
+
           $log = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke.log"
           & $pipeline @args 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
