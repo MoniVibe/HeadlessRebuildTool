@@ -153,7 +153,14 @@ jobs:
 
           $log = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke.log"
           & $pipeline @args 2>&1 | Tee-Object -FilePath $log
-          # If pipeline_smoke.ps1 truly failed it would have exited/terminated this step already.
+          # Determine success from pipeline_smoke summary to avoid leaked native exit codes.
+          $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
+          if (Test-Path $summary) {
+            $summaryText = Get-Content $summary -Raw
+            if ($summaryText -match '(?m)^\\* status: FAIL') {
+              throw "pipeline_smoke reported FAIL (see $summary)"
+            }
+          }
           # Clear any leaked native exit code so the workflow reflects the pipeline result.
           $global:LASTEXITCODE = 0
 
