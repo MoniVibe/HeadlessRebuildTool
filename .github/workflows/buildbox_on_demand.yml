@@ -189,6 +189,7 @@ jobs:
           Write-Host ("diag: found {0} zip(s)" -f $zipFiles.Count)
 
           $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
+          $wantedNames = @("meta.json", "watchdog.json", "run_summary.json", "invariants.json", "out_watchdog.json", "out_run_summary.json", "out_invariants.json")
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           foreach ($zipFile in $zipFiles) {
             $zipPath = $zipFile.FullName
@@ -199,8 +200,11 @@ jobs:
             try {
               $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
               foreach ($entry in $archive.Entries) {
-                if ($wanted -contains $entry.FullName) {
-                  $outPath = Join-Path $dest ($entry.FullName -replace '/', '\\')
+                $matchFull = $wanted -contains $entry.FullName
+                $matchName = $wantedNames -contains $entry.Name
+                if ($matchFull -or $matchName) {
+                  $relative = if ($matchFull) { ($entry.FullName -replace '/', '\\') } else { ("flat\\" + $entry.Name) }
+                  $outPath = Join-Path $dest $relative
                   $outDir = Split-Path $outPath -Parent
                   if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
                   $entry.ExtractToFile($outPath, $true)
