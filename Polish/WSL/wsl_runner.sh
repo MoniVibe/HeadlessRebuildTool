@@ -1433,6 +1433,12 @@ run_job() {
 
   if [ -z "$scenario_rel" ] && [ -n "$scenario_id" ]; then
     scenario_rel="$(map_scenario_id_to_rel "$scenario_id")"
+    if [ -z "$scenario_rel" ]; then
+      case "$scenario_id" in
+        space4x_collision_micro) scenario_rel="Assets/Scenarios/space4x_collision_micro.json" ;;
+        godgame_smoke) scenario_rel="Assets/Scenarios/Godgame/godgame_smoke.json" ;;
+      esac
+    fi
   fi
   if [ -n "$scenario_rel" ]; then
     scenario_rel="$(normalize_rel_path "$scenario_rel")"
@@ -1571,6 +1577,19 @@ run_job() {
       fi
     elif [ -n "$scenario_id" ]; then
       scenario_arg_value="$scenario_id"
+    fi
+
+    if [ -n "$scenario_arg_value" ]; then
+      log "scenario_arg_value=${scenario_arg_value} (id=${scenario_id} rel=${scenario_rel})"
+    fi
+
+    if [ -n "$scenario_arg_value" ] && [[ "$scenario_arg_value" == *".json"* ]]; then
+      if ! is_absolute_path "$scenario_arg_value" && [ -n "$repo_root" ]; then
+        scenario_arg_value="${repo_root%/}/$(normalize_rel_path "$scenario_arg_value")"
+      fi
+      if [ ! -f "$scenario_arg_value" ]; then
+        error_context="scenario_path_missing:${scenario_arg_value}"
+      fi
     fi
 
     if [ -n "$error_context" ]; then
