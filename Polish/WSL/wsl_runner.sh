@@ -1686,6 +1686,8 @@ run_job() {
     orig_dir="$(pwd)"
     cd "$build_dir" || true
     setsid -- env \
+      ${repo_root:+TRI_ROOT=$repo_root} \
+      ${repo_root:+TRI_REPO_ROOT=$repo_root} \
       TRI_PARAM_OVERRIDES="$param_overrides_json" \
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
