@@ -34,6 +34,7 @@ function Sync-PureDots {
     $ref = $env:PUREDOTS_REF
     try {
         & git -c "safe.directory=$source" -C $source fetch --all --tags | Out-Null
+        & git -c "safe.directory=$source" -C $source reset --hard | Out-Null
         if (-not [string]::IsNullOrWhiteSpace($ref)) {
             & git -c "safe.directory=$source" -C $source checkout $ref | Out-Null
         } else {
