@@ -77,8 +77,8 @@ jobs:
           $wt = Join-Path $wtRoot $safe
 
           function Invoke-Git {
-            param([string[]]$Args, [string]$Context)
-            & git @Args
+            param([string[]]$GitArgs, [string]$Context)
+            & git @GitArgs
             if ($LASTEXITCODE -ne 0) { throw "git failed: $Context (exit $LASTEXITCODE)" }
           }
 
