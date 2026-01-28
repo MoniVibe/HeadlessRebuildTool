@@ -1579,6 +1579,21 @@ run_job() {
       scenario_arg_value="$scenario_id"
     fi
 
+    if [ -n "$scenario_id" ] && { [ -z "$scenario_rel" ] || [ "$scenario_arg_value" = "$scenario_id" ]; }; then
+      local mapped_rel=""
+      mapped_rel="$(map_scenario_id_to_rel "$scenario_id")"
+      if [ -z "$mapped_rel" ]; then
+        case "$scenario_id" in
+          space4x_collision_micro) mapped_rel="Assets/Scenarios/space4x_collision_micro.json" ;;
+          godgame_smoke) mapped_rel="Assets/Scenarios/Godgame/godgame_smoke.json" ;;
+        esac
+      fi
+      if [ -n "$mapped_rel" ]; then
+        scenario_rel="$mapped_rel"
+        scenario_arg_value="$(resolve_scenario_path "$scenario_rel" "$repo_root")"
+      fi
+    fi
+
     if [ -n "$scenario_arg_value" ]; then
       log "scenario_arg_value=${scenario_arg_value} (id=${scenario_id} rel=${scenario_rel})"
     fi
