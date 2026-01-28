@@ -93,12 +93,13 @@ ERR-20260122-008
 - Symptom: TEST_FAIL space4x_collision_micro seed=7 exit_code=10 (also seen as space4x seed=7)
 - Signature: 9af157abb7a115bb738f99c20bffe635c0fa6bf1bf9a7c21b745b4096e5f6377
 - RawSignature: TEST_FAIL|space4x_collision_micro|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
-- RootCause: HeadlessExitSystem requests exit_code=10 on normal scenario-duration completion; runner treats nonzero as TEST_FAIL and signature latches onto stdout memory config tail.
-- Fix: Normalize exit_code=10 to OK when player.log shows "Scenario duration reached" and invariants are clean (or change HeadlessExitSystem to exit 0 on normal completion).
-- Prevention: Always capture player.log tail in diagnostics and use it for signature/primary failure selection.
-- Verification: space4x buildbox run 21428962925 succeeded (exit_code=0) after fix/dig-gate-opt-in; player.log shows quit code=0 at tick=1800 with no DigGate fail.
+- RootCause: TBD (exit_code=10 persists; telemetry missing; no invariants; DigGate now opt-in and not firing).
+- Fix: TBD (add explicit exit-request logging to identify which system requests TestFailExitCode).
+- Prevention: Always capture player.log tail in diagnostics and include exit-request source in logs.
+- Verification: Repro persists: buildbox run 21450290817 commit 2ecc8ae exit_code=10, telemetry missing, no invariants.
 - Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
 - Evidence: build_id=20260128_061826_349_29972412 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21427439803
+- Evidence: build_id=20260128_181831_329_2ecc8ae8 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21450290817
 - Commit: TBD
 
 ERR-20260122_102459
