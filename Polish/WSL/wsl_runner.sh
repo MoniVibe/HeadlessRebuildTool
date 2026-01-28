@@ -478,6 +478,30 @@ strip_diagnostic_args() {
   done
 }
 
+strip_scenario_args() {
+  local -n in_args="$1"
+  local -n out_args="$2"
+  out_args=()
+  local skip_next=0
+  local arg
+  for arg in "${in_args[@]}"; do
+    if [ "$skip_next" -eq 1 ]; then
+      skip_next=0
+      continue
+    fi
+    case "$arg" in
+      --scenario)
+        skip_next=1
+        continue
+        ;;
+      --scenario=*)
+        continue
+        ;;
+    esac
+    out_args+=("$arg")
+  done
+}
+
 args_include_flag() {
   local flag="$1"
   shift
@@ -1549,7 +1573,9 @@ run_job() {
     mapfile -t job_args < <(read_json_array_field "$lease_path" "args")
     strip_logfile_args default_args default_args_stripped
     strip_diagnostic_args default_args_stripped default_args_stripped
+    strip_scenario_args default_args_stripped default_args_stripped
     strip_diagnostic_args job_args job_args_stripped
+    strip_scenario_args job_args_stripped job_args_stripped
 
     local logfile_override=0
     if args_include_logfile "${job_args[@]}"; then
