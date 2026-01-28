@@ -19,6 +19,14 @@
   4) WSL runner consumes jobs and writes result zips.
   5) Download `buildbox_diag_*` artifacts and summarize with `Polish/Ops/diag_summarize.ps1`.
 
+## 2b) Fallback (desktop unavailable)
+- Use local rebuilds only when buildbox is offline.
+- Keep runs minimal:
+  - `Repeat = 1`, single seed.
+  - Prefer `space4x_collision_micro` or `godgame_smoke`.
+- Use local queue root: `C:\polish\queue`.
+- After the run, clean up local staging to avoid disk pressure.
+
 ## 3) Optional nightly (CI)
 - `nightly-evals.yml` uses runner label `headless-e2e`. If no runner has this label, runs stay queued (expected).
 - `unity-tests` job is gated by `UNITY_TESTS_ENABLED == '1'` and is skipped by default.

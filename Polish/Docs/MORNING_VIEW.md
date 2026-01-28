@@ -13,6 +13,10 @@ Use this order to decide next actions quickly.
    - `C:\polish\anviloop\<title>\queue\results\result_*.zip`
    - Inspect: `out/run_summary.json`, `out/watchdog.json`, `out/player.log`
 
+3b) Queue results (fallback/local)
+   - `C:\polish\queue\results\result_*.zip`
+   - Keep local runs minimal; verify artifacts match local commit SHA.
+
 4) Intel summaries (if enabled)
    - `C:\polish\queue\reports\intel\explain_<job_id>.json`
    - `C:\polish\queue\reports\intel\questions_<job_id>.json`

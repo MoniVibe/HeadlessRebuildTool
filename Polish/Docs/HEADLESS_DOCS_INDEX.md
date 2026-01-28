@@ -10,6 +10,12 @@
 - `nightly-evals.yml` uses runner label `headless-e2e`. If no runner with that label is online, it will stay queued. This is not a failure.
 - EngineerTick (laptop) is optional for local smoke; buildbox is the main remote iteration path.
 
+## Fallback (desktop unavailable)
+- Local rebuilds are allowed if the desktop runner is offline:
+  - Run `Polish/pipeline_smoke.ps1` against the local repo with a small scenario.
+  - Use the legacy local queue root (`C:\polish\queue`) to avoid mixing with desktop queues.
+  - Expect slower runs; keep seeds low and repeats = 1.
+
 ## Key Outputs (where to look)
 - Buildbox diagnostics: `C:\polish\queue\reports\_diag_downloads\<run_id>\buildbox_diag_*`
 - Diag summaries: `diag_*.md` in the same folder
