@@ -146,6 +146,7 @@ jobs:
           }
 
           $diagRoot = Join-Path $env:GITHUB_WORKSPACE "buildbox_diag"
+          if (Test-Path $diagRoot) { Remove-Item -Recurse -Force $diagRoot }
           New-Item -ItemType Directory -Path $diagRoot -Force | Out-Null
 
           $pipelineLog = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke.log"
