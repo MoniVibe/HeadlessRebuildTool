@@ -96,7 +96,7 @@ ERR-20260122-008
 - RootCause: HeadlessExitSystem requests exit_code=10 on normal scenario-duration completion; runner treats nonzero as TEST_FAIL and signature latches onto stdout memory config tail.
 - Fix: Normalize exit_code=10 to OK when player.log shows "Scenario duration reached" and invariants are clean (or change HeadlessExitSystem to exit 0 on normal completion).
 - Prevention: Always capture player.log tail in diagnostics and use it for signature/primary failure selection.
-- Verification: player.log shows "[Space4XHeadlessScenarioQuitSystem] Scenario duration reached" followed by "[HeadlessExitSystem] Quit requested (code=10, tick=1800)" for build_id=20260128_064634_491_29972412.
+- Verification: space4x buildbox run 21428962925 succeeded (exit_code=0) after fix/dig-gate-opt-in; player.log shows quit code=0 at tick=1800 with no DigGate fail.
 - Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
 - Evidence: build_id=20260128_061826_349_29972412 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21427439803
 - Commit: TBD
