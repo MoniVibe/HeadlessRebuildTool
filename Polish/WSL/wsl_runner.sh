@@ -1620,6 +1620,19 @@ run_job() {
       fi
     fi
 
+    if [ -n "$scenario_id" ] && [ "$scenario_arg_value" = "$scenario_id" ] && [ -n "$repo_root" ]; then
+      local candidate=""
+      for candidate in \
+        "${repo_root%/}/Assets/Scenarios/${scenario_id}.json" \
+        "${repo_root%/}/Assets/Scenarios/Godgame/${scenario_id}.json"; do
+        if [ -f "$candidate" ]; then
+          scenario_arg_value="$candidate"
+          scenario_rel="$(normalize_rel_path "${candidate#${repo_root%/}/}")"
+          break
+        fi
+      done
+    fi
+
     if [ -n "$scenario_arg_value" ]; then
       log "scenario_arg_value=${scenario_arg_value} (id=${scenario_id} rel=${scenario_rel})"
     fi
@@ -1637,6 +1650,7 @@ run_job() {
       :
     else
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
+    strip_scenario_args final_args final_args
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
       if [ -n "$scenario_arg_value" ]; then
         final_args+=("--scenario" "$scenario_arg_value")
