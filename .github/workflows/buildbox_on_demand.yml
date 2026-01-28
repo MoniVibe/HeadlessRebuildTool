@@ -210,11 +210,8 @@ jobs:
             }
           }
 
-          $zipOutDir = Join-Path $diagRoot "zips"
-          New-Item -ItemType Directory -Path $zipOutDir -Force | Out-Null
-          foreach ($zipFile in ($zipFiles | Select-Object -First 2)) {
-            Copy-Item -LiteralPath $zipFile.FullName -Destination (Join-Path $zipOutDir $zipFile.Name) -Force
-          }
+          $summaryPath = Join-Path $diagRoot "diag_summary.txt"
+          "zip_count=$($zipFiles.Count)" | Set-Content -Path $summaryPath
 
           $reportsDir = Join-Path $queueRoot "reports"
           if (Test-Path $reportsDir) {

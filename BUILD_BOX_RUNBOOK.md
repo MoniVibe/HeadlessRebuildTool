@@ -19,7 +19,7 @@ Diagnostics bundle contents (when available):
 - logs/wsl_runner_<title>.log (tail)
 - logs/intel_<title>.log (tail)
 - reports/triage_*.json (latest 5)
-- zips/artifact_*.zip or zips/result_*.zip (latest 1-2)
+- diag_summary.txt (zip_count + extraction notes)
 
 Remote triage:
 1) gh run list -R MoniVibe/HeadlessRebuildTool --workflow buildbox_on_demand.yml --limit 5
@@ -29,3 +29,4 @@ Remote triage:
 Notes:
 - The workflow looks for zips in both queue\results (result_*.zip) and queue\artifacts (artifact_*.zip).
 - It also parses pipeline_smoke.log for explicit artifact paths to extract diagnostics.
+- Raw zips are not uploaded to keep artifacts small; only extracted JSONs are included.
