@@ -18,6 +18,8 @@ Diagnostics bundle contents (when available):
 - logs/watch_daemon_<title>.log (tail)
 - logs/wsl_runner_<title>.log (tail)
 - logs/intel_<title>.log (tail)
+- reports/triage_*.json (latest 5)
+- zips/artifact_*.zip or zips/result_*.zip (latest 1-2)
 
 Remote triage:
 1) gh run list -R MoniVibe/HeadlessRebuildTool --workflow buildbox_on_demand.yml --limit 5

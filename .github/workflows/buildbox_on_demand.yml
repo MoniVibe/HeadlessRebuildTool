@@ -179,9 +179,18 @@ jobs:
           }
 
           $zipPaths = $zipPaths | Where-Object { Test-Path $_ } | Sort-Object -Unique
+          $zipFiles = @()
+          foreach ($p in $zipPaths) {
+            $fi = Get-Item -LiteralPath $p -ErrorAction SilentlyContinue
+            if ($fi) { $zipFiles += $fi }
+          }
+          $zipFiles = $zipFiles | Sort-Object LastWriteTime -Descending
+          Write-Host ("diag: found {0} zip(s)" -f $zipFiles.Count)
+
           $wanted = @("meta.json", "out/watchdog.json", "out/run_summary.json", "out/invariants.json")
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          foreach ($zipPath in $zipPaths) {
+          foreach ($zipFile in $zipFiles) {
+            $zipPath = $zipFile.FullName
             $zipName = [IO.Path]::GetFileNameWithoutExtension($zipPath)
             $dest = Join-Path $diagRoot ("results\\" + $zipName)
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
@@ -199,6 +208,21 @@ jobs:
             } finally {
               if ($archive) { $archive.Dispose() }
             }
+          }
+
+          $zipOutDir = Join-Path $diagRoot "zips"
+          New-Item -ItemType Directory -Path $zipOutDir -Force | Out-Null
+          foreach ($zipFile in ($zipFiles | Select-Object -First 2)) {
+            Copy-Item -LiteralPath $zipFile.FullName -Destination (Join-Path $zipOutDir $zipFile.Name) -Force
+          }
+
+          $reportsDir = Join-Path $queueRoot "reports"
+          if (Test-Path $reportsDir) {
+            $reportsOut = Join-Path $diagRoot "reports"
+            New-Item -ItemType Directory -Path $reportsOut -Force | Out-Null
+            Get-ChildItem -Path $reportsDir -Filter "triage_*.json" -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 5 |
+              Copy-Item -Destination $reportsOut -Force
           }
 
           $logsRoot = "C:\\polish\\anviloop\\logs"
