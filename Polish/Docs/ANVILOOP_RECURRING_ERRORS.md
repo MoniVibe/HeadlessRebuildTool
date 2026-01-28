@@ -100,6 +100,19 @@ ERR-20260122-008
 - Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
 - Commit: TBD
 
+ERR-20260128-001
+- FirstSeen: 2026-01-28
+- Stage: RUNNER
+- Symptom: TEST_FAIL space4x seed=7 exit_code=10 runtime_sec=36.0
+- Signature: 5c5140e3d9296eca47fac70617dbedd6b224b747a5d2af5feb1a62e4e99f591f
+- RawSignature: TEST_FAIL|space4x|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
+- RootCause: TBD
+- Fix: TBD
+- Prevention: TBD
+- Verification: TBD
+- Evidence: build_id=20260128_061826_349_29972412 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21427439803
+- Commit: TBD
+
 ERR-20260122_102459
 - FirstSeen: 2026-01-22
 - Symptom: [Space4XHeadlessBuilder] Build failed. Details written to C:\polish\queue\artifacts\staging_20260122_093123_022_b67ce739_20260122_093127\build\Space4X_HeadlessBuildFailure.log
