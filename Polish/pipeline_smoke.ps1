@@ -433,7 +433,25 @@ function Write-PipelineSummary {
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
+$triRoot = $env:TRI_ROOT
+if ([string]::IsNullOrWhiteSpace($triRoot) -or -not (Test-Path $triRoot)) {
+    $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
+} else {
+    $triRoot = (Resolve-Path $triRoot).Path
+}
+
+function Resolve-FirstExisting {
+    param(
+        [string[]]$Candidates,
+        [string]$Description
+    )
+    foreach ($candidate in $Candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+    }
+    $attempts = ($Candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`r`n- "
+    throw "Missing $Description. Tried:`r`n- $attempts"
+}
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
 if (-not (Test-Path $defaultsPath)) {
     throw "Missing defaults file: $defaultsPath"
@@ -459,14 +477,16 @@ if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
 }
 
-$syncScript = Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"
-$swapScript = Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"
-if (-not (Test-Path $syncScript)) {
-    throw "Missing headless manifest sync script: $syncScript"
-}
-if (-not (Test-Path $swapScript)) {
-    throw "Missing headless manifest swap script: $swapScript"
-}
+$syncScript = Resolve-FirstExisting -Candidates @(
+    (Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"),
+    (Join-Path $triRoot "sync_headless_manifest.ps1")
+) -Description "headless manifest sync script"
+
+$swapScript = Resolve-FirstExisting -Candidates @(
+    (Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"),
+    (Join-Path $triRoot "Tools\\use_headless_manifest_windows.ps1"),
+    (Join-Path $triRoot "use_headless_manifest_windows.ps1")
+) -Description "headless manifest swap script"
 
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
 $scenarioRelValue = if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $ScenarioRel } else { $titleDefaults.scenario_rel }
@@ -545,10 +565,10 @@ function Finalize-PipelineSummary {
         -ResultZips $summaryResultZips.ToArray()
 }
 
-$supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
-if (-not (Test-Path $supervisorProject)) {
-    throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
-}
+$supervisorProject = Resolve-FirstExisting -Candidates @(
+    (Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"),
+    (Join-Path $triRoot "HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj")
+) -Description "HeadlessBuildSupervisor.csproj"
 
 $supervisorArgs = @(
     "run", "--project", $supervisorProject, "--",
