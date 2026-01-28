@@ -17,6 +17,19 @@
 
 ## Entries (ERR-*)
 
+ERR-20260128-001
+- FirstSeen: 2026-01-28
+- Stage: RUNNER
+- Symptom: TEST_FAIL godgame_smoke seed=42 exit_code=10; telemetry missing.
+- Signature: ef6333bb8a141c03774ae0bdfb2e552c27f2f5bb154199efe94cfaf7fa9c67fc
+- RawSignature: TEST_FAIL|godgame_smoke|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
+- RootCause: TBD (no invariants; telemetry missing; stdout tail is memory config).
+- Fix: TBD (identify exit-request source; add explicit exit logging).
+- Prevention: Always capture player.log tail and include exit-request source in diagnostics.
+- Verification: TBD
+- Evidence: C:\polish\queue\reports\_diag_downloads\21449057793\buildbox_diag_godgame_21449057793\results\result_20260128_174031_042_b6c656ba_godgame_smoke_42 (meta/run_summary/watchdog)
+- Commit: TBD
+
 ERR-20260122-001
 - FirstSeen: 2026-01-22
 - Symptom: Start-Process redirect error when stdout/stderr point to the same file.
