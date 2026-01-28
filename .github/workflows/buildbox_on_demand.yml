@@ -76,6 +76,12 @@ jobs:
           New-Item -ItemType Directory -Path $wtRoot -Force | Out-Null
           $wt = Join-Path $wtRoot $safe
 
+          function Invoke-Git {
+            param([string[]]$Args, [string]$Context)
+            & git @Args
+            if ($LASTEXITCODE -ne 0) { throw "git failed: $Context (exit $LASTEXITCODE)" }
+          }
+
           $gitRepoArgs = @('-c', "safe.directory=$repoPath")
           $gitWtArgs = @('-c', "safe.directory=$wt")
 
@@ -84,19 +90,22 @@ jobs:
           if ($LASTEXITCODE -eq 0) { $refExists = $true }
 
           if (-not $refExists) {
-            & git @gitRepoArgs -C $repoPath fetch --all --tags 2>$null
+            Invoke-Git -Args ($gitRepoArgs + @('-C', $repoPath, 'fetch', '--all', '--tags')) -Context "fetch repo"
           }
 
+          $refToCheckout = $ref
+          & git @gitRepoArgs -C $repoPath show-ref --verify --quiet "refs/remotes/origin/$ref"
+          if ($LASTEXITCODE -eq 0) { $refToCheckout = "origin/$ref" }
+
           if (-not (Test-Path $wt)) {
-            $worktreeAdd = & git @gitRepoArgs -C $repoPath worktree add $wt $ref 2>&1
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "worktree add failed: $worktreeAdd"
-              $wt = $repoPath
-            }
+            Invoke-Git -Args ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'add', $wt, $refToCheckout)) -Context "worktree add $refToCheckout"
           } else {
-            & git @gitWtArgs -C $wt fetch --all --tags 2>$null
-            & git @gitWtArgs -C $wt checkout $ref
-            & git @gitWtArgs -C $wt reset --hard
+            if (-not (Test-Path (Join-Path $wt '.git'))) {
+              throw "Worktree path exists but is not a git worktree: $wt"
+            }
+            Invoke-Git -Args ($gitWtArgs + @('-C', $wt, 'fetch', '--all', '--tags')) -Context "fetch worktree"
+            Invoke-Git -Args ($gitWtArgs + @('-C', $wt, 'checkout', $refToCheckout)) -Context "checkout $refToCheckout"
+            Invoke-Git -Args ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
           }
 
           if ($clean) {
