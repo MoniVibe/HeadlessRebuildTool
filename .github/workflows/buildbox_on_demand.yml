@@ -93,7 +93,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) { $refExists = $true }
 
           if (-not $refExists) {
-            Invoke-Git -Args ($gitRepoArgs + @('-C', $repoPath, 'fetch', '--all', '--tags')) -Context "fetch repo"
+            Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'fetch', '--all', '--tags')) -Context "fetch repo"
           }
 
           $refToCheckout = $ref
@@ -101,14 +101,14 @@ jobs:
           if ($LASTEXITCODE -eq 0) { $refToCheckout = "origin/$ref" }
 
           if (-not (Test-Path $wt)) {
-            Invoke-Git -Args ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'add', $wt, $refToCheckout)) -Context "worktree add $refToCheckout"
+            Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'add', $wt, $refToCheckout)) -Context "worktree add $refToCheckout"
           } else {
             if (-not (Test-Path (Join-Path $wt '.git'))) {
               throw "Worktree path exists but is not a git worktree: $wt"
             }
-            Invoke-Git -Args ($gitWtArgs + @('-C', $wt, 'fetch', '--all', '--tags')) -Context "fetch worktree"
-            Invoke-Git -Args ($gitWtArgs + @('-C', $wt, 'checkout', $refToCheckout)) -Context "checkout $refToCheckout"
-            Invoke-Git -Args ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
+            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'fetch', '--all', '--tags')) -Context "fetch worktree"
+            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', $refToCheckout)) -Context "checkout $refToCheckout"
+            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
           }
 
           if ($clean) {
