@@ -1,0 +1,26 @@
+{
+  "queue_root": "C:/polish/queue",
+  "poll_sec": 60,
+  "pending_grace_sec": 600,
+  "max_minutes": 120,
+  "jobs": [
+    {
+      "title": "space4x",
+      "scenario_id": "space4x_collision_micro",
+      "scenario_rel": "Assets/Scenarios/space4x_collision_micro.json",
+      "seed": 7,
+      "timeout_sec": 90,
+      "repeat": 1,
+      "args": ["--telemetryEnabled", "1"]
+    },
+    {
+      "title": "godgame",
+      "scenario_id": "godgame_smoke",
+      "scenario_rel": "Assets/Scenarios/Godgame/godgame_smoke.json",
+      "seed": 42,
+      "timeout_sec": 120,
+      "repeat": 1,
+      "args": ["--telemetryEnabled", "1"]
+    }
+  ]
+}

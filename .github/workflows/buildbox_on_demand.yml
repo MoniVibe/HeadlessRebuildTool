@@ -281,6 +281,19 @@ jobs:
               Copy-Item -Destination $reportsOut -Force
           }
 
+          $summarizer = Join-Path $env:TRI_ROOT "Tools\\HeadlessRebuildTool\\Polish\\Ops\\diag_summarize.ps1"
+          if (Test-Path $summarizer) {
+            $resultRoots = Get-ChildItem -Path (Join-Path $diagRoot "results") -Directory -ErrorAction SilentlyContinue
+            foreach ($root in $resultRoots) {
+              if (Test-Path (Join-Path $root.FullName "meta.json")) {
+                try {
+                  & $summarizer -ResultDir $root.FullName | Out-Null
+                } catch {
+                }
+              }
+            }
+          }
+
           $summaryLines | Set-Content -Path $summaryPath
 
           $logsRoot = "C:\\polish\\anviloop\\logs"
