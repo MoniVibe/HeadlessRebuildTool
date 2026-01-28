@@ -93,10 +93,10 @@ ERR-20260122-008
 - Symptom: TEST_FAIL space4x_collision_micro seed=7 exit_code=10 (also seen as space4x seed=7)
 - Signature: 9af157abb7a115bb738f99c20bffe635c0fa6bf1bf9a7c21b745b4096e5f6377
 - RawSignature: TEST_FAIL|space4x_collision_micro|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
-- RootCause: TBD
-- Fix: TBD
-- Prevention: TBD
-- Verification: TBD
+- RootCause: HeadlessExitSystem requests exit_code=10 on normal scenario-duration completion; runner treats nonzero as TEST_FAIL and signature latches onto stdout memory config tail.
+- Fix: Normalize exit_code=10 to OK when player.log shows "Scenario duration reached" and invariants are clean (or change HeadlessExitSystem to exit 0 on normal completion).
+- Prevention: Always capture player.log tail in diagnostics and use it for signature/primary failure selection.
+- Verification: player.log shows "[Space4XHeadlessScenarioQuitSystem] Scenario duration reached" followed by "[HeadlessExitSystem] Quit requested (code=10, tick=1800)" for build_id=20260128_064634_491_29972412.
 - Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
 - Evidence: build_id=20260128_061826_349_29972412 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21427439803
 - Commit: TBD
