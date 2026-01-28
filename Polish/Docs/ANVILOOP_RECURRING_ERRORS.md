@@ -30,6 +30,20 @@ ERR-20260128-001
 - Evidence: C:\polish\queue\reports\_diag_downloads\21449057793\buildbox_diag_godgame_21449057793\results\result_20260128_174031_042_b6c656ba_godgame_smoke_42 (meta/run_summary/watchdog)
 - Commit: TBD
 
+ERR-20260128-002
+- FirstSeen: 2026-01-28
+- Stage: RUNNER
+- Symptom: Scenario file not found; ScenarioEntryPoint exits with exit_code=1 despite job scenario_rel.
+- Signature: Scenario file not found (space4x_collision_micro / godgame_smoke).
+- RawSignature: TEST_FAIL|*|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
+- RootCause: scenario_arg resolves to scenario_id instead of an absolute path in WSL runner.
+- Fix: Ensure scenario_rel is resolved to an absolute path (fallback map + repo_root); validate and log scenario_arg_value before launch.
+- Prevention: Always log scenario_arg_value and fail fast if scenario_path_missing.
+- Verification: TBD (rerun shows ScenarioEntryPoint uses resolved path, exit_code!=1).
+- Evidence: C:\polish\queue\reports\_diag_downloads\21451850412\buildbox_diag_space4x_21451850412\results\result_20260128_190740_990_257a38e6_space4x_collision_micro_7\out\player.log (Scenario not found)
+- Evidence: C:\polish\queue\reports\_diag_downloads\21452652903\buildbox_diag_godgame_21452652903\results\result_20260128_193321_093_3974b046_godgame_smoke_42\out\player.log (Scenario file not found)
+- Commit: 29fa30a
+
 ERR-20260122-001
 - FirstSeen: 2026-01-22
 - Symptom: Start-Process redirect error when stdout/stderr point to the same file.
