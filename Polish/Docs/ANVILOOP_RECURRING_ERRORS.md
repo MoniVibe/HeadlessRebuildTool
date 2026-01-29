@@ -120,14 +120,13 @@ ERR-20260122-008
 - Symptom: TEST_FAIL space4x_collision_micro seed=7 exit_code=10 (also seen as space4x seed=7)
 - Signature: 9af157abb7a115bb738f99c20bffe635c0fa6bf1bf9a7c21b745b4096e5f6377
 - RawSignature: TEST_FAIL|space4x_collision_micro|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=10
-- RootCause: TBD (exit_code=10 persists; telemetry missing; no invariants; DigGate now opt-in and not firing).
-- Fix: TBD (add explicit exit-request logging to identify which system requests TestFailExitCode).
-- Prevention: Always capture player.log tail in diagnostics and include exit-request source in logs.
-- Verification: Repro persists: buildbox run 21450290817 commit 2ecc8ae exit_code=10, telemetry missing, no invariants.
-- Evidence: /mnt/c/polish/queue/results/result_20260121_101755_201_b3ade9f0_space4x_collision_micro_7.zip (meta.json, out/watchdog.json, out/run_summary.json)
-- Evidence: build_id=20260128_061826_349_29972412 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21427439803
-- Evidence: build_id=20260128_181831_329_2ecc8ae8 (meta.json, out/watchdog.json, out/run_summary.json) from buildbox_diag_space4x_21450290817
-- Commit: TBD
+- RootCause: Space4XHeadlessAsteroidDigGateSystem default-enabled; requests TestFailExitCode=10 at scenario end if no terrain dig occurred, overwriting normal scenario quit.
+- Fix: Make DigGate opt-in (require SPACE4X_HEADLESS_MINING_PROOF=1) and log explicit FAIL before requesting exit.
+- Prevention: Default-off DigGate for non-mining scenarios + explicit log for exit-request source.
+- Verification: buildbox run 21495328334 (space4x_collision_micro) exit_reason=SUCCESS exit_code=0 (commit 2ecc8ae).
+- Evidence: C:\polish\queue\reports\_diag_downloads\21494041113\buildbox_diag_space4x_21494041113\results\result_20260129_204325_310_9a566b8f_space4x_collision_micro_7 (exit_code=10 trace to DigGate)
+- Evidence: C:\polish\queue\reports\_diag_downloads\21495328334\buildbox_diag_space4x_21495328334\results\result_20260129_212743_198_2ecc8ae8_space4x_collision_micro_7 (SUCCESS)
+- Commit: 2ecc8ae
 
 ERR-20260122_102459
 - FirstSeen: 2026-01-22
