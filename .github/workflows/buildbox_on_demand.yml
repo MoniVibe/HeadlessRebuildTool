@@ -291,6 +291,7 @@ jobs:
             "logs/stderr.log",
             "logs/player.log",
             "logs/unity.log",
+            "logs/primary_error_snippet.txt",
             "logs/unity_build_tail.txt",
             "build_outcome.json"
           )

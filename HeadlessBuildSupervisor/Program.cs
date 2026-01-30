@@ -173,6 +173,7 @@ internal static class Program
         if (!success)
         {
             WriteLogTail(unityLog, Path.Combine(logsDir, "unity_build_tail.txt"), options.TailLines, logger);
+            WritePrimaryErrorSnippet(unityLog, Path.Combine(logsDir, "primary_error_snippet.txt"), logger);
             WriteProcessSnapshot(Path.Combine(logsDir, "process_snapshot.txt"), logger);
             CopyCrashArtifacts(options.ProjectPath, Path.Combine(logsDir, "crash"), logger);
         }
@@ -2027,6 +2028,81 @@ internal static class Program
 
         File.WriteAllText(tailPath, tail, Encoding.ASCII);
         logger.Info("unity_log_tail_written");
+    }
+
+    private static void WritePrimaryErrorSnippet(string unityLog, string snippetPath, Logger logger)
+    {
+        if (!File.Exists(unityLog))
+        {
+            File.WriteAllText(snippetPath, "unity_log_missing", Encoding.ASCII);
+            return;
+        }
+
+        var context = new Queue<string>(5);
+        var matched = false;
+        var capture = new List<string>();
+        var remaining = 0;
+
+        try
+        {
+            using var stream = new FileStream(unityLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream, Encoding.UTF8, true);
+            while (!reader.EndOfStream)
+            {
+                var line = reader.ReadLine() ?? string.Empty;
+                if (context.Count == 5)
+                {
+                    context.Dequeue();
+                }
+                context.Enqueue(line);
+
+                if (!matched && IsPrimaryErrorLine(line))
+                {
+                    matched = true;
+                    capture.AddRange(context);
+                    capture.Add(line);
+                    remaining = 25;
+                    continue;
+                }
+
+                if (matched && remaining > 0)
+                {
+                    capture.Add(line);
+                    remaining--;
+                }
+
+                if (matched && remaining == 0)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"primary_error_snippet_failed err={ex.GetType().Name}");
+        }
+
+        if (capture.Count == 0)
+        {
+            File.WriteAllText(snippetPath, "primary_error_not_found", Encoding.ASCII);
+            return;
+        }
+
+        File.WriteAllLines(snippetPath, capture, Encoding.ASCII);
+        logger.Info("primary_error_snippet_written");
+    }
+
+    private static bool IsPrimaryErrorLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        return line.IndexOf("error CS", StringComparison.OrdinalIgnoreCase) >= 0
+            || line.IndexOf("PPtr cast failed", StringComparison.OrdinalIgnoreCase) >= 0
+            || line.IndexOf("Bee.BeeException", StringComparison.OrdinalIgnoreCase) >= 0
+            || line.IndexOf("executeMethod", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static string ReadTail(string unityLog, int maxLines, Logger logger, out bool logLocked)
