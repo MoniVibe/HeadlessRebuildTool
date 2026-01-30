@@ -2092,19 +2092,6 @@ internal static class Program
         logger.Info("primary_error_snippet_written");
     }
 
-    private static bool IsPrimaryErrorLine(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return false;
-        }
-
-        return line.IndexOf("error CS", StringComparison.OrdinalIgnoreCase) >= 0
-            || line.IndexOf("PPtr cast failed", StringComparison.OrdinalIgnoreCase) >= 0
-            || line.IndexOf("Bee.BeeException", StringComparison.OrdinalIgnoreCase) >= 0
-            || line.IndexOf("executeMethod", StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
     private static string ReadTail(string unityLog, int maxLines, Logger logger, out bool logLocked)
     {
         logLocked = false;
