@@ -310,10 +310,11 @@ jobs:
             "diag_stderr_tail.txt"
           )
           $wantedRegex = "(?i)(^|/)crash/.*\\.log$"
+          $extraLogRegex = "(?i)(^|/)(unity_full_.*\\.log|unity_build\\.log|unity_stdout_.*\\.log|unity_stderr_.*\\.log)$"
           $buildReportRegex = "(?i)(^|/)build/.*HeadlessBuildReport.*\\.log$"
           $buildFailureRegex = "(?i)(^|/)build/.*HeadlessBuildFailure.*\\.log$"
-          $logNameRegex = "(?i)(stdout|stderr|player|unity)\\.log$"
-          $logPathRegex = "(?i)(^|/)(stdout|stderr|player|unity)\\.log$"
+          $logNameRegex = "(?i)(stdout|stderr|player|unity|unity_full_.*|unity_build|unity_stdout_.*|unity_stderr_.*)\\.log$"
+          $logPathRegex = "(?i)(^|/)(stdout|stderr|player|unity|unity_full_.*|unity_build|unity_stdout_.*|unity_stderr_.*)\\.log$"
           $crashLogRegex = "(?i)(^|/)crash/.*\\.log$"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zipSample = $zipFiles | Select-Object -First 2
@@ -333,7 +334,7 @@ jobs:
                 if ($entry.Name -match "(?i)\\.json$") { $jsonEntries.Add($entry.FullName) }
                 $matchFull = $wanted -contains $entry.FullName
                 $matchName = $wantedNames -contains $entry.Name
-                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex) -or ($entry.FullName -match $buildReportRegex) -or ($entry.Name -match $buildReportRegex) -or ($entry.FullName -match $buildFailureRegex) -or ($entry.Name -match $buildFailureRegex)
+                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex) -or ($entry.FullName -match $extraLogRegex) -or ($entry.Name -match $extraLogRegex) -or ($entry.FullName -match $buildReportRegex) -or ($entry.Name -match $buildReportRegex) -or ($entry.FullName -match $buildFailureRegex) -or ($entry.Name -match $buildFailureRegex)
                 if ($matchFull -or $matchName -or $matchRegex) {
                   $matchEntries.Add($entry.FullName)
                   $relative = if ($matchFull) { ($entry.FullName -replace '/', '\\') } else { ("flat\\" + $entry.Name) }
