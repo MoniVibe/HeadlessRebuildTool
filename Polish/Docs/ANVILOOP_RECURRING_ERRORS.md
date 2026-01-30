@@ -254,3 +254,14 @@ ERR-20260130-002
 - Prevention: compile gate for stub systems after adding new generic interfaces; ensure templates include needed usings.
 - Verification: TBD (rerun buildbox space4x/godgame with puredots feature/prod-loop-v0).
 - Commit: 38eb5b2
+
+ERR-20260130-003
+- FirstSeen: 2026-01-30
+- Stage: BUILD
+- Symptom: MorphingDeformApplySystem.cs(31,36) error CS0246: The type or namespace name 'TickTimeState' could not be found
+- Signature: CS0246 TickTimeState missing in MorphingDeformApplySystem
+- RootCause: missing using PureDOTS.Runtime.Components for TickTimeState.
+- Fix: add using PureDOTS.Runtime.Components to MorphingDeformApplySystem.cs.
+- Prevention: include core component usings in stub templates; compile stub set after edits.
+- Verification: TBD (rerun buildbox space4x/godgame with puredots feature/prod-loop-v0).
+- Commit: e9e7390
