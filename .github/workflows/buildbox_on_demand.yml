@@ -304,6 +304,7 @@ jobs:
           )
           $wantedRegex = "(?i)(^|/)crash/.*\\.log$"
           $buildReportRegex = "(?i)(^|/)build/.*HeadlessBuildReport.*\\.log$"
+          $buildFailureRegex = "(?i)(^|/)build/.*HeadlessBuildFailure.*\\.log$"
           $logNameRegex = "(?i)(stdout|stderr|player|unity)\\.log$"
           $logPathRegex = "(?i)(^|/)(stdout|stderr|player|unity)\\.log$"
           $crashLogRegex = "(?i)(^|/)crash/.*\\.log$"
@@ -325,7 +326,7 @@ jobs:
                 if ($entry.Name -match "(?i)\\.json$") { $jsonEntries.Add($entry.FullName) }
                 $matchFull = $wanted -contains $entry.FullName
                 $matchName = $wantedNames -contains $entry.Name
-                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex) -or ($entry.FullName -match $buildReportRegex) -or ($entry.Name -match $buildReportRegex)
+                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex) -or ($entry.FullName -match $buildReportRegex) -or ($entry.Name -match $buildReportRegex) -or ($entry.FullName -match $buildFailureRegex) -or ($entry.Name -match $buildFailureRegex)
                 if ($matchFull -or $matchName -or $matchRegex) {
                   $matchEntries.Add($entry.FullName)
                   $relative = if ($matchFull) { ($entry.FullName -replace '/', '\\') } else { ("flat\\" + $entry.Name) }
@@ -374,6 +375,8 @@ jobs:
                 Get-ChildItem -Path (Join-Path $staging.FullName "logs") -Filter "unity_build_tail.txt" -ErrorAction SilentlyContinue |
                   Copy-Item -Destination $stagingOut -Force
                 Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*HeadlessBuildReport*.log" -ErrorAction SilentlyContinue |
+                  Copy-Item -Destination $stagingOut -Force
+                Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*HeadlessBuildFailure*.log" -ErrorAction SilentlyContinue |
                   Copy-Item -Destination $stagingOut -Force
               }
             }
