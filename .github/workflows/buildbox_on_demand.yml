@@ -264,11 +264,13 @@ jobs:
           $buildReportPath = $null
           $missingScriptsPath = $null
           $pptrScanPath = $null
+          $pptrFileIdReport = $null
           if (Test-Path $summary) {
             $summaryText = Get-Content $summary -Raw
             if ($summaryText -match '(?m)^\\* build_id:\\s*(\\S+)') { $buildId = $matches[1] }
             if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+HeadlessMissingScripts\\.log)') { $missingScriptsPath = $matches[1] }
             if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+PPtrCastScan\\.log)') { $pptrScanPath = $matches[1] }
+            if ($summaryText -match '(?m)^\\* pptr_scan_report:\\s*([A-Za-z]:\\\\[^\\r\\n]+)') { $pptrFileIdReport = $matches[1] }
             if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+\\.log)') { $buildReportPath = $matches[1] }
           }
           if ($buildReportPath -and (Test-Path $buildReportPath)) {
@@ -304,6 +306,12 @@ jobs:
             if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
             $pptrCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($pptrScanPath))
             Copy-Item -Path $pptrScanPath -Destination $pptrCopy -Force
+          }
+          if ($pptrFileIdReport -and (Test-Path $pptrFileIdReport)) {
+            $buildOutDir = Join-Path $diagRoot "build"
+            if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
+            $fileIdCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($pptrFileIdReport))
+            Copy-Item -Path $pptrFileIdReport -Destination $fileIdCopy -Force
           }
 
           $zipPaths = New-Object System.Collections.Generic.List[string]

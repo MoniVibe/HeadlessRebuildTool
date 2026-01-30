@@ -374,7 +374,8 @@ function Write-PipelineSummary {
         [string]$Status,
         [string]$Failure,
         [string[]]$JobPaths,
-        [string[]]$ResultZips
+        [string[]]$ResultZips,
+        [string[]]$ExtraLines
     )
     if ([string]::IsNullOrWhiteSpace($ReportsDir)) { return }
     Ensure-Directory $ReportsDir
@@ -396,6 +397,9 @@ function Write-PipelineSummary {
     if ($Seed) { $lines.Add("* seed: $Seed") }
     if ($TimeoutSec) { $lines.Add("* timeout_sec: $TimeoutSec") }
     if ($Args -and $Args.Count -gt 0) { $lines.Add("* args: " + ([string]::Join(" ", $Args))) }
+    if ($ExtraLines -and $ExtraLines.Count -gt 0) {
+        foreach ($line in $ExtraLines) { $lines.Add($line) }
+    }
 
     if ($ArtifactZip -and (Test-Path $ArtifactZip)) {
         $artifactSummary = Get-ArtifactSummary -ZipPath $ArtifactZip
@@ -430,6 +434,41 @@ function Write-PipelineSummary {
     Set-Content -Path $outPath -Value ($lines -join "`r`n") -Encoding ascii
     $latestPath = Join-Path $ReportsDir "pipeline_smoke_summary_latest.md"
     Copy-Item -Path $outPath -Destination $latestPath -Force
+}
+
+function Invoke-PPtrFileIdScan {
+    param(
+        [string]$FirstError,
+        [string]$ProjectPath,
+        [string]$ReportsDir,
+        [string]$TriRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($FirstError)) { return $null }
+    if ($FirstError -notmatch 'FileID\\s+(\\d+)') { return $null }
+
+    $fileId = $matches[1]
+    if ([string]::IsNullOrWhiteSpace($fileId)) { return $null }
+
+    $scanScript = $null
+    $candidates = @(
+        (Join-Path $TriRoot "Tools\\HeadlessRebuildTool\\Polish\\Ops\\find_unity_fileid_reference.ps1"),
+        (Join-Path $TriRoot "Tools\\Polish\\Ops\\find_unity_fileid_reference.ps1"),
+        (Join-Path $TriRoot "Polish\\Ops\\find_unity_fileid_reference.ps1")
+    )
+    foreach ($cand in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($cand)) { continue }
+        if (Test-Path $cand) { $scanScript = $cand; break }
+    }
+    if (-not $scanScript) { return $null }
+
+    Ensure-Directory $ReportsDir
+    $outPath = Join-Path $ReportsDir ("pptr_fileid_{0}.log" -f $fileId)
+    try {
+        & $scanScript -FileId $fileId -Root $ProjectPath -IncludePackages -OutFile $outPath | Out-Null
+    } catch {
+    }
+    if (Test-Path $outPath) { return $outPath }
+    return $null
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -533,6 +572,7 @@ Ensure-Directory $reportsDir
 
 $summaryJobPaths = New-Object System.Collections.Generic.List[string]
 $summaryResultZips = New-Object System.Collections.Generic.List[string]
+$summaryExtraLines = New-Object System.Collections.Generic.List[string]
 $summaryStatus = "SUCCESS"
 $summaryFailure = ""
 $summaryWritten = $false
@@ -562,7 +602,8 @@ function Finalize-PipelineSummary {
         -Status $summaryStatus `
         -Failure $summaryFailure `
         -JobPaths $summaryJobPaths.ToArray() `
-        -ResultZips $summaryResultZips.ToArray()
+        -ResultZips $summaryResultZips.ToArray() `
+        -ExtraLines $summaryExtraLines.ToArray()
 }
 
 $supervisorProject = Resolve-FirstExisting -Candidates @(
@@ -606,6 +647,15 @@ if (-not (Test-Path $artifactZip)) {
 
 $preflight = Get-ArtifactPreflight -ZipPath $artifactZip
 if (-not $preflight.ok) {
+    $artifactSummary = Get-ArtifactSummary -ZipPath $artifactZip
+    $firstErrorLine = ""
+    if ($artifactSummary -and $artifactSummary.Contains("first_error")) { $firstErrorLine = $artifactSummary["first_error"] }
+    if ($firstErrorLine -and $firstErrorLine -match 'PPtr cast failed') {
+        $pptrReport = Invoke-PPtrFileIdScan -FirstError $firstErrorLine -ProjectPath $projectPath -ReportsDir $reportsDir -TriRoot $triRoot
+        if ($pptrReport) {
+            $summaryExtraLines.Add("* pptr_scan_report: $pptrReport") | Out-Null
+        }
+    }
     $summary = "BUILD_FAIL reason={0}" -f $preflight.reason
     if ($preflight.result) { $summary += " result=$($preflight.result)" }
     if ($preflight.message) { $summary += " message=$($preflight.message)" }
