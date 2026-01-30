@@ -273,6 +273,15 @@ jobs:
             $buildReportCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($buildReportPath))
             Copy-Item -Path $buildReportPath -Destination $buildReportCopy -Force
             Get-Content -Path $buildReportCopy -Tail 400 | Set-Content -Path ($buildReportCopy + ".tail.log")
+
+            $buildDir = Split-Path $buildReportPath -Parent
+            if (Test-Path $buildDir) {
+              Get-ChildItem -Path $buildDir -Filter "*HeadlessBuildFailure*.log" -ErrorAction SilentlyContinue | ForEach-Object {
+                $failureCopy = Join-Path $buildOutDir $_.Name
+                Copy-Item -Path $_.FullName -Destination $failureCopy -Force
+                Get-Content -Path $failureCopy -Tail 400 | Set-Content -Path ($failureCopy + ".tail.log")
+              }
+            }
           }
 
           $zipPaths = New-Object System.Collections.Generic.List[string]
@@ -488,6 +497,42 @@ jobs:
             $compileLines | Set-Content -Path $compileOut
           } else {
             "no compiler errors found" | Set-Content -Path $compileOut
+          }
+
+          # Extract first meaningful build error signature for quick triage.
+          $errorSummary = Join-Path $diagRoot "build_error_summary.txt"
+          $sigPatterns = @(
+            "PPtr cast failed",
+            "Missing (Mono)?Script",
+            "error\s+CS\d{4,5}",
+            "Bee\.\w+Exception",
+            "ScriptCompilation",
+            "Build failed",
+            "ExecuteMethod",
+            "UnityException"
+          )
+          $firstHit = $null
+          foreach ($pattern in $sigPatterns) {
+            foreach ($log in $candidateLogs) {
+              try {
+                $hit = Select-String -Path $log.FullName -Pattern $pattern -Context 3,6 -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) {
+                  $firstHit = @(
+                    "pattern=$pattern",
+                    "file=$($log.FullName)",
+                    $hit.ToString()
+                  )
+                  break
+                }
+              } catch {
+              }
+            }
+            if ($firstHit) { break }
+          }
+          if ($firstHit) {
+            $firstHit | Set-Content -Path $errorSummary
+          } else {
+            "no build error signature found" | Set-Content -Path $errorSummary
           }
 
       - name: Upload pipeline log
