@@ -179,6 +179,7 @@ internal static class Program
 
         var hangSummaryPath = Path.Combine(logsDir, HangSummaryName);
         WriteHangSummary(hangSummaryPath, Path.Combine(logsDir, HeartbeatName), Path.Combine(logsDir, "unity_exit.json"), outcomePath, success, logger);
+        CopyBuildLogs(buildDir, logsDir, logger);
 
         var zipTemp = Path.Combine(options.ArtifactDir, $"artifact_{options.BuildId}.zip.tmp");
         var zipFinal = Path.Combine(options.ArtifactDir, $"artifact_{options.BuildId}.zip");
@@ -2197,6 +2198,44 @@ internal static class Program
         }
 
         logger.Info($"zip_created files={files.Length}");
+    }
+
+    private static void CopyBuildLogs(string buildDir, string logsDir, Logger logger)
+    {
+        if (string.IsNullOrWhiteSpace(buildDir) || string.IsNullOrWhiteSpace(logsDir))
+        {
+            return;
+        }
+
+        if (!Directory.Exists(buildDir))
+        {
+            return;
+        }
+
+        var targets = new[]
+        {
+            "*HeadlessBuildReport*.log",
+            "*HeadlessBuildFailure*.log"
+        };
+
+        var destDir = Path.Combine(logsDir, "build");
+        Directory.CreateDirectory(destDir);
+
+        foreach (var pattern in targets)
+        {
+            foreach (var file in Directory.GetFiles(buildDir, pattern, SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    var dest = Path.Combine(destDir, Path.GetFileName(file));
+                    File.Copy(file, dest, true);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn($"build_log_copy_failed path={file} err={ex.GetType().Name}");
+                }
+            }
+        }
     }
     private enum FailureSignature
     {
