@@ -82,6 +82,18 @@ jobs:
           }
           if (-not (Test-Path $pipeline)) { throw "pipeline_smoke.ps1 not found: $pipeline" }
 
+          # Ensure tools repo is up-to-date on buildbox so diagnostics scripts are current.
+          $toolsRepo = Split-Path -Parent (Split-Path -Parent $pipeline)
+          if (Test-Path $toolsRepo) {
+            try {
+              git -C $toolsRepo fetch --all --prune | Out-Null
+              git -C $toolsRepo checkout main | Out-Null
+              git -C $toolsRepo pull --ff-only | Out-Null
+            } catch {
+              Write-Warning "Failed to update tools repo: $($_.Exception.Message)"
+            }
+          }
+
           $toolsRepo = Split-Path -Parent $pipeline
           $toolsRepo = Split-Path -Parent $toolsRepo
           if (Test-Path (Join-Path $toolsRepo ".git")) {
