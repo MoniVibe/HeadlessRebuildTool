@@ -85,6 +85,20 @@ jobs:
             $pipeline = Join-Path $toolsRepo "Polish\\pipeline_smoke.ps1"
           }
 
+          $supervisorSrc = Join-Path $toolsRepo "HeadlessBuildSupervisor"
+          $supervisorDest = Join-Path $tri "Tools\\HeadlessBuildSupervisor"
+          if (Test-Path $supervisorDest) {
+            if (Test-Path (Join-Path $supervisorDest ".git")) {
+              try {
+                & git -c "safe.directory=$supervisorDest" -C $supervisorDest fetch --all --prune
+                & git -c "safe.directory=$supervisorDest" -C $supervisorDest reset --hard origin/main
+              } catch {
+              }
+            } elseif (Test-Path $supervisorSrc) {
+              Copy-Item -Path (Join-Path $supervisorSrc "*") -Destination $supervisorDest -Recurse -Force
+            }
+          }
+
           # Worktree for the requested ref (keeps caches stable between runs)
           $safe = ($ref -replace '[^A-Za-z0-9_.-]', '_')
           $wtRoot = Join-Path $tri ".tri\\worktrees\\$title"
