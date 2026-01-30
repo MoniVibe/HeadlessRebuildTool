@@ -263,10 +263,12 @@ jobs:
           $buildId = $null
           $buildReportPath = $null
           $missingScriptsPath = $null
+          $pptrScanPath = $null
           if (Test-Path $summary) {
             $summaryText = Get-Content $summary -Raw
             if ($summaryText -match '(?m)^\\* build_id:\\s*(\\S+)') { $buildId = $matches[1] }
-            if ($summaryText -match '(?m)([A-Za-z]:\\[^\r\n]+HeadlessMissingScripts\.log)') { $missingScriptsPath = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+HeadlessMissingScripts\\.log)') { $missingScriptsPath = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+PPtrCastScan\\.log)') { $pptrScanPath = $matches[1] }
             if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+\\.log)') { $buildReportPath = $matches[1] }
           }
           if ($buildReportPath -and (Test-Path $buildReportPath)) {
@@ -282,12 +284,6 @@ jobs:
                 $failureCopy = Join-Path $buildOutDir $_.Name
                 Copy-Item -Path $_.FullName -Destination $failureCopy -Force
                 Get-Content -Path $failureCopy -Tail 400 | Set-Content -Path ($failureCopy + ".tail.log")
-          if ($missingScriptsPath -and (Test-Path $missingScriptsPath)) {
-            $buildOutDir = Join-Path $diagRoot "build"
-            if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
-            $missingCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($missingScriptsPath))
-            Copy-Item -Path $missingScriptsPath -Destination $missingCopy -Force
-          }
               }
               Get-ChildItem -Path $buildDir -Filter "*HeadlessEditor.log" -ErrorAction SilentlyContinue | ForEach-Object {
                 $editorCopy = Join-Path $buildOutDir $_.Name
@@ -295,6 +291,19 @@ jobs:
                 Get-Content -Path $editorCopy -Tail 800 | Set-Content -Path ($editorCopy + ".tail.log")
               }
             }
+          }
+
+          if ($missingScriptsPath -and (Test-Path $missingScriptsPath)) {
+            $buildOutDir = Join-Path $diagRoot "build"
+            if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
+            $missingCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($missingScriptsPath))
+            Copy-Item -Path $missingScriptsPath -Destination $missingCopy -Force
+          }
+          if ($pptrScanPath -and (Test-Path $pptrScanPath)) {
+            $buildOutDir = Join-Path $diagRoot "build"
+            if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
+            $pptrCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($pptrScanPath))
+            Copy-Item -Path $pptrScanPath -Destination $pptrCopy -Force
           }
 
           $zipPaths = New-Object System.Collections.Generic.List[string]
@@ -446,6 +455,8 @@ jobs:
                 Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*HeadlessBuildFailure*.log" -ErrorAction SilentlyContinue |
                   Copy-Item -Destination $stagingOut -Force
                 Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*HeadlessMissingScripts.log" -ErrorAction SilentlyContinue |
+                  Copy-Item -Destination $stagingOut -Force
+                Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*PPtrCastScan*.log" -ErrorAction SilentlyContinue |
                   Copy-Item -Destination $stagingOut -Force
                 $stagingLogs = Join-Path $staging.FullName "logs"
                 $logPatterns = @("unity_full_*.log", "unity_stdout_*.log", "unity_stderr_*.log", "unity_build.log")
