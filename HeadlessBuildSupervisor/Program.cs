@@ -1333,6 +1333,13 @@ internal static class Program
                 targets.Add(Path.Combine(projectPath, "Library", "Artifacts"));
                 targets.Add(Path.Combine(projectPath, "Library", "AssetImportState"));
                 break;
+            case FailureSignature.PPtrCast:
+                targets.Add(Path.Combine(projectPath, "Library", "Artifacts"));
+                targets.Add(Path.Combine(projectPath, "Library", "SourceAssetDB"));
+                targets.Add(Path.Combine(projectPath, "Library", "ScriptAssemblies"));
+                targets.Add(Path.Combine(projectPath, "Library", "AssetImportState"));
+                targets.Add(Path.Combine(projectPath, "Temp"));
+                break;
             default:
                 return;
         }
@@ -1358,7 +1365,7 @@ internal static class Program
 
     private static bool ShouldRetry(FailureSignature signature, UnityRunResult result)
     {
-        if (signature == FailureSignature.BeeStall || signature == FailureSignature.ImportLoop)
+        if (signature == FailureSignature.BeeStall || signature == FailureSignature.ImportLoop || signature == FailureSignature.PPtrCast)
         {
             return true;
         }
@@ -1394,6 +1401,11 @@ internal static class Program
             if (ContainsStrictLicenseFailure(text))
             {
                 return FailureSignature.LicenseError;
+            }
+
+            if (ContainsIgnoreCase(text, "PPtr cast failed"))
+            {
+                return FailureSignature.PPtrCast;
             }
 
             if (Regex.IsMatch(text, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
@@ -2000,6 +2012,7 @@ internal static class Program
             FailureSignature.InfraFail => "INFRA_FAIL",
             FailureSignature.LogLocked => "LOG_LOCKED",
             FailureSignature.UnityProjectLock => "UNITY_PROJECT_LOCK",
+            FailureSignature.PPtrCast => "PPTR_CAST",
             _ => "UNKNOWN"
         };
     }
@@ -2327,6 +2340,7 @@ internal static class Program
         InfraFail,
         LogLocked,
         UnityProjectLock,
+        PPtrCast,
         Unknown
     }
 
