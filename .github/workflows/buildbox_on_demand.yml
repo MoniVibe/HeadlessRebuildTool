@@ -78,6 +78,11 @@ jobs:
           if (Test-Path (Join-Path $toolsRepo ".git")) {
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard origin/main
+          } else {
+            $toolsRepo = Join-Path $env:GITHUB_WORKSPACE "tools_repo"
+            if (Test-Path $toolsRepo) { Remove-Item -Recurse -Force $toolsRepo }
+            & git clone "https://github.com/MoniVibe/HeadlessRebuildTool.git" $toolsRepo
+            $pipeline = Join-Path $toolsRepo "Polish\\pipeline_smoke.ps1"
           }
 
           # Worktree for the requested ref (keeps caches stable between runs)
