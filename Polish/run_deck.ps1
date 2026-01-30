@@ -4,6 +4,7 @@ param(
     [string]$DeckPath,
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
+    [switch]$AllowLocalBuild,
     [string]$QueueRoot,
     [ValidateSet("run", "enqueue", "monitor")]
     [string]$Mode = "run",
@@ -15,6 +16,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if (-not $AllowLocalBuild)
+{
+    throw "Local build execution is disabled by default. Use buildbox_on_demand.yml on desktop, or re-run with -AllowLocalBuild for emergency local runs."
+}
 
 function Ensure-Directory {
     param([string]$Path)

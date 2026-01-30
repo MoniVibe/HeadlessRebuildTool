@@ -18,6 +18,7 @@
   3) Buildbox runs `pipeline_smoke.ps1`, builds artifact, enqueues jobs.
   4) WSL runner consumes jobs and writes result zips.
   5) Download `buildbox_diag_*` artifacts and summarize with `Polish/Ops/diag_summarize.ps1`.
+- Local deck runs are **blocked by default** in `run_deck.ps1`. Use `-AllowLocalBuild` only for emergency local rebuilds.
 
 ## 2b) Fallback (desktop unavailable)
 - Use local rebuilds only when buildbox is offline.
@@ -25,6 +26,7 @@
   - `Repeat = 1`, single seed.
   - Prefer `space4x_collision_micro` or `godgame_smoke`.
 - Use local queue root: `C:\polish\queue`.
+- You must explicitly pass `-AllowLocalBuild` to `run_deck.ps1` when doing this.
 - After the run, clean up local staging to avoid disk pressure.
 
 ## 3) Optional nightly (CI)
