@@ -262,9 +262,11 @@ jobs:
 
           $buildId = $null
           $buildReportPath = $null
+          $missingScriptsPath = $null
           if (Test-Path $summary) {
             $summaryText = Get-Content $summary -Raw
             if ($summaryText -match '(?m)^\\* build_id:\\s*(\\S+)') { $buildId = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\[^\r\n]+HeadlessMissingScripts\.log)') { $missingScriptsPath = $matches[1] }
             if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+\\.log)') { $buildReportPath = $matches[1] }
           }
           if ($buildReportPath -and (Test-Path $buildReportPath)) {
@@ -280,6 +282,12 @@ jobs:
                 $failureCopy = Join-Path $buildOutDir $_.Name
                 Copy-Item -Path $_.FullName -Destination $failureCopy -Force
                 Get-Content -Path $failureCopy -Tail 400 | Set-Content -Path ($failureCopy + ".tail.log")
+          if ($missingScriptsPath -and (Test-Path $missingScriptsPath)) {
+            $buildOutDir = Join-Path $diagRoot "build"
+            if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
+            $missingCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($missingScriptsPath))
+            Copy-Item -Path $missingScriptsPath -Destination $missingCopy -Force
+          }
               }
               Get-ChildItem -Path $buildDir -Filter "*HeadlessEditor.log" -ErrorAction SilentlyContinue | ForEach-Object {
                 $editorCopy = Join-Path $buildOutDir $_.Name
