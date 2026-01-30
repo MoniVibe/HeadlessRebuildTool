@@ -17,6 +17,19 @@
 
 ## Entries (ERR-*)
 
+ERR-20260130-005
+- FirstSeen: 2026-01-30
+- Stage: BUILD
+- Symptom: Space4x headless build fails with "Missing scripts detected" during preflight.
+- Signature: Missing scripts detected (Space4XHeadlessBuilder preflight)
+- RawSignature: BUILD_FAIL|Missing scripts detected
+- RootCause: TBD (likely missing MonoScript reference in prefab or ScriptableObject).
+- Fix: TBD (identify asset paths from Space4X_HeadlessMissingScripts.log, remove/repair missing scripts).
+- Prevention: Headless preflight scan + capture missing scripts log in buildbox diagnostics.
+- Verification: TBD
+- Evidence: C:\polish\queue\reports\_diag_downloads\21529286417\buildbox_diag_space4x_21529286417\pipeline_smoke_summary_latest.md
+- Commit: a078a37 / 55eeb48
+
 ERR-20260128-001
 - FirstSeen: 2026-01-28
 - Stage: RUNNER
