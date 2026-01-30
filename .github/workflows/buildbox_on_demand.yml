@@ -73,6 +73,13 @@ jobs:
           }
           if (-not (Test-Path $pipeline)) { throw "pipeline_smoke.ps1 not found: $pipeline" }
 
+          $toolsRepo = Split-Path -Parent $pipeline
+          $toolsRepo = Split-Path -Parent $toolsRepo
+          if (Test-Path (Join-Path $toolsRepo ".git")) {
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard origin/main
+          }
+
           # Worktree for the requested ref (keeps caches stable between runs)
           $safe = ($ref -replace '[^A-Za-z0-9_.-]', '_')
           $wtRoot = Join-Path $tri ".tri\\worktrees\\$title"
