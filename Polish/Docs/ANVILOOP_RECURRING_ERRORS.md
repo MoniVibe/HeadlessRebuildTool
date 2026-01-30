@@ -232,3 +232,25 @@ Library\PackageCache\com.unity.test-framework@0b7a23ab2e1d\UnityEngine.TestRunne
 - Prevention: TBD
 - Verification: TBD
 - Commit: TBD
+
+ERR-20260130-001
+- FirstSeen: 2026-01-30
+- Stage: BUILD
+- Symptom: InventorySpawnSystem.cs(139,5) error CS1519: Invalid token '}' in class, record, struct, or interface member declaration
+- Signature: CS1519 Invalid token '}' (InventorySpawnSystem)
+- RootCause: stray [BurstCompile] attribute left before the InventorySpawnSystem closing brace.
+- Fix: remove orphan [BurstCompile] attribute in InventorySpawnSystem.
+- Prevention: add a lint/CI check that rejects dangling attributes before type closing braces; keep compile guard scenario in buildbox.
+- Verification: TBD (rerun buildbox space4x/godgame with puredots feature/prod-loop-v0).
+- Commit: 33e7d43
+
+ERR-20260130-002
+- FirstSeen: 2026-01-30
+- Stage: BUILD
+- Symptom: MorphingDeformApplySystem.cs(20,42) error CS0246: The type or namespace name 'IComparer<>' could not be found
+- Signature: CS0246 IComparer missing in MorphingDeformApplySystem
+- RootCause: missing using System.Collections.Generic for IComparer in stub system.
+- Fix: add using System.Collections.Generic to MorphingDeformApplySystem.cs.
+- Prevention: compile gate for stub systems after adding new generic interfaces; ensure templates include needed usings.
+- Verification: TBD (rerun buildbox space4x/godgame with puredots feature/prod-loop-v0).
+- Commit: 38eb5b2
