@@ -217,6 +217,21 @@ jobs:
           $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
           if (Test-Path $summary) { Copy-Item $summary -Destination $diagRoot -Force }
 
+          $buildId = $null
+          $buildReportPath = $null
+          if (Test-Path $summary) {
+            $summaryText = Get-Content $summary -Raw
+            if ($summaryText -match '(?m)^\\* build_id:\\s*(\\S+)') { $buildId = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+\\.log)') { $buildReportPath = $matches[1] }
+          }
+          if ($buildReportPath -and (Test-Path $buildReportPath)) {
+            $buildOutDir = Join-Path $diagRoot "build"
+            if (-not (Test-Path $buildOutDir)) { New-Item -ItemType Directory -Path $buildOutDir -Force | Out-Null }
+            $buildReportCopy = Join-Path $buildOutDir ([IO.Path]::GetFileName($buildReportPath))
+            Copy-Item -Path $buildReportPath -Destination $buildReportCopy -Force
+            Get-Content -Path $buildReportCopy -Tail 400 | Set-Content -Path ($buildReportCopy + ".tail.log")
+          }
+
           $zipPaths = New-Object System.Collections.Generic.List[string]
           if (Test-Path $pipelineLog) {
             $artifactLines = Select-String -Path $pipelineLog -Pattern 'artifact=([A-Za-z]:\\\\[^\\s]+\\.zip)' -AllMatches
@@ -268,7 +283,9 @@ jobs:
             "logs/stdout.log",
             "logs/stderr.log",
             "logs/player.log",
-            "logs/unity.log"
+            "logs/unity.log",
+            "logs/unity_build_tail.txt",
+            "build_outcome.json"
           )
           $wantedNames = @(
             "meta.json",
@@ -286,6 +303,7 @@ jobs:
             "diag_stderr_tail.txt"
           )
           $wantedRegex = "(?i)(^|/)crash/.*\\.log$"
+          $buildReportRegex = "(?i)(^|/)build/.*HeadlessBuildReport.*\\.log$"
           $logNameRegex = "(?i)(stdout|stderr|player|unity)\\.log$"
           $logPathRegex = "(?i)(^|/)(stdout|stderr|player|unity)\\.log$"
           $crashLogRegex = "(?i)(^|/)crash/.*\\.log$"
@@ -307,7 +325,7 @@ jobs:
                 if ($entry.Name -match "(?i)\\.json$") { $jsonEntries.Add($entry.FullName) }
                 $matchFull = $wanted -contains $entry.FullName
                 $matchName = $wantedNames -contains $entry.Name
-                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex)
+                $matchRegex = ($entry.FullName -match $wantedRegex) -or ($entry.Name -match $wantedRegex) -or ($entry.FullName -match $buildReportRegex) -or ($entry.Name -match $buildReportRegex)
                 if ($matchFull -or $matchName -or $matchRegex) {
                   $matchEntries.Add($entry.FullName)
                   $relative = if ($matchFull) { ($entry.FullName -replace '/', '\\') } else { ("flat\\" + $entry.Name) }
@@ -341,6 +359,24 @@ jobs:
             Get-ChildItem -Path $reportsDir -Filter "triage_*.json" -ErrorAction SilentlyContinue |
               Sort-Object LastWriteTime -Descending | Select-Object -First 5 |
               Copy-Item -Destination $reportsOut -Force
+          }
+
+          if ($buildId) {
+            $stagingRoot = Join-Path $queueRoot "artifacts"
+            if (Test-Path $stagingRoot) {
+              $staging = Get-ChildItem -Path $stagingRoot -Directory -Filter ("staging_" + $buildId + "*") -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              if ($staging) {
+                $stagingOut = Join-Path $diagRoot "staging"
+                New-Item -ItemType Directory -Path $stagingOut -Force | Out-Null
+                Get-ChildItem -Path $staging.FullName -Recurse -Filter "build_outcome.json" -ErrorAction SilentlyContinue |
+                  Copy-Item -Destination $stagingOut -Force
+                Get-ChildItem -Path (Join-Path $staging.FullName "logs") -Filter "unity_build_tail.txt" -ErrorAction SilentlyContinue |
+                  Copy-Item -Destination $stagingOut -Force
+                Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*HeadlessBuildReport*.log" -ErrorAction SilentlyContinue |
+                  Copy-Item -Destination $stagingOut -Force
+              }
+            }
           }
 
           $summarizer = Join-Path $env:TRI_ROOT "Tools\\HeadlessRebuildTool\\Polish\\Ops\\diag_summarize.ps1"
