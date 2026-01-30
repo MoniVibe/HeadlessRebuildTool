@@ -30,6 +30,10 @@ on:
         description: "Optional override queue root (blank = default C:\\polish\\anviloop\\<title>\\queue)"
         required: false
         default: ""
+      puredots_ref:
+        description: "Optional PureDOTS ref/branch/SHA (blank = origin/fix/ai-stubs-guard)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -155,8 +159,15 @@ jobs:
             }
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
+            $puredotsRef = '${{ inputs.puredots_ref }}'
             & git -C $puredotsTarget fetch --all --prune
-            & git -C $puredotsTarget reset --hard origin/fix/ai-stubs-guard
+            $puredotsCheckout = "origin/fix/ai-stubs-guard"
+            if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
+              $puredotsCheckout = $puredotsRef
+              & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" }
+            }
+            & git -C $puredotsTarget reset --hard $puredotsCheckout
             & git -C $puredotsTarget clean -fd
           }
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
