@@ -281,6 +281,11 @@ jobs:
                 Copy-Item -Path $_.FullName -Destination $failureCopy -Force
                 Get-Content -Path $failureCopy -Tail 400 | Set-Content -Path ($failureCopy + ".tail.log")
               }
+              Get-ChildItem -Path $buildDir -Filter "*HeadlessEditor.log" -ErrorAction SilentlyContinue | ForEach-Object {
+                $editorCopy = Join-Path $buildOutDir $_.Name
+                Copy-Item -Path $_.FullName -Destination $editorCopy -Force
+                Get-Content -Path $editorCopy -Tail 800 | Set-Content -Path ($editorCopy + ".tail.log")
+              }
             }
           }
 
