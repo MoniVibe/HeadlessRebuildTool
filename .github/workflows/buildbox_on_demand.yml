@@ -540,6 +540,26 @@ jobs:
             "no build error signature found" | Set-Content -Path $errorSummary
           }
 
+          # Missing script triage: extract asset paths from logs.
+          $missingScriptsOut = Join-Path $diagRoot "missing_scripts.txt"
+          $missingLines = @()
+          foreach ($log in $candidateLogs) {
+            try {
+              $hits = Select-String -Path $log.FullName -Pattern "Missing script asset:" -AllMatches -ErrorAction SilentlyContinue
+              if ($hits) {
+                foreach ($hit in $hits) {
+                  $missingLines += $hit.ToString()
+                }
+              }
+            } catch {
+            }
+          }
+          if ($missingLines.Count -gt 0) {
+            $missingLines | Set-Content -Path $missingScriptsOut
+          } else {
+            "no missing script assets found in logs" | Set-Content -Path $missingScriptsOut
+          }
+
       - name: Upload pipeline log
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
