@@ -265,3 +265,14 @@ ERR-20260130-003
 - Prevention: include core component usings in stub templates; compile stub set after edits.
 - Verification: TBD (rerun buildbox space4x/godgame with puredots feature/prod-loop-v0).
 - Commit: e9e7390
+
+ERR-20260130-004
+- FirstSeen: 2026-01-30
+- Stage: BUILD
+- Symptom: CombatMvpDamageQueueSystem.cs(27,47) error CS0246: The type or namespace name 'IComparer<>' could not be found
+- Signature: CS0246 IComparer missing in CombatMvpDamageQueueSystem
+- RootCause: missing using System.Collections.Generic for IComparer in combat MVP system.
+- Fix: add using System.Collections.Generic to CombatMvpDamageQueueSystem.cs.
+- Prevention: include generic usings in MVP template; compile check after new queue systems.
+- Verification: TBD (rerun buildbox space4x/godgame with puredots feature/prod-loop-v0).
+- Commit: b74c5df
