@@ -386,6 +386,15 @@ jobs:
                   Copy-Item -Destination $stagingOut -Force
                 Get-ChildItem -Path (Join-Path $staging.FullName "build") -Filter "*HeadlessBuildFailure*.log" -ErrorAction SilentlyContinue |
                   Copy-Item -Destination $stagingOut -Force
+                $stagingLogs = Join-Path $staging.FullName "logs"
+                $logPatterns = @("unity_full_*.log", "unity_stdout_*.log", "unity_stderr_*.log", "unity_build.log")
+                foreach ($pattern in $logPatterns) {
+                  Get-ChildItem -Path $stagingLogs -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+                    $dest = Join-Path $stagingOut $_.Name
+                    Copy-Item -Path $_.FullName -Destination $dest -Force
+                    Get-Content -Path $dest -Tail 400 -ErrorAction SilentlyContinue | Set-Content -Path ($dest + ".tail.log")
+                  }
+                }
               }
             }
           }
