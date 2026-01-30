@@ -2056,7 +2056,7 @@ internal static class Program
                 }
                 context.Enqueue(line);
 
-                if (!matched && IsPrimaryErrorLine(line))
+                if (!matched && IsPrimaryErrorSnippetLine(line))
                 {
                     matched = true;
                     capture.AddRange(context);
@@ -2090,6 +2090,23 @@ internal static class Program
 
         File.WriteAllLines(snippetPath, capture, Encoding.ASCII);
         logger.Info("primary_error_snippet_written");
+    }
+
+    private static bool IsPrimaryErrorSnippetLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        if (Regex.IsMatch(line, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        return line.IndexOf("[Error]", StringComparison.OrdinalIgnoreCase) >= 0
+            || line.IndexOf("PPtr cast failed", StringComparison.OrdinalIgnoreCase) >= 0
+            || line.IndexOf("Bee.BeeException", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static string ReadTail(string unityLog, int maxLines, Logger logger, out bool logLocked)
