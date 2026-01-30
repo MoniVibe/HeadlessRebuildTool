@@ -462,6 +462,28 @@ jobs:
             }
           }
 
+          # Extract compiler errors into a single easy-to-scan file.
+          $compileOut = Join-Path $diagRoot "compiler_errors.txt"
+          $compileLines = @()
+          $compileLines += "compiler_error_scan_root=$diagRoot"
+          $compileLines += "pattern=error CS#### (case-insensitive)"
+          $candidateLogs = Get-ChildItem -Path $diagRoot -Recurse -File -Include *.log,*.txt -ErrorAction SilentlyContinue
+          foreach ($log in $candidateLogs) {
+            try {
+              $hits = Select-String -Path $log.FullName -Pattern 'error\\s+CS\\d{4,5}' -AllMatches -Context 2,2 -ErrorAction SilentlyContinue
+              if ($hits) {
+                $compileLines += "file=" + $log.FullName
+                foreach ($hit in $hits) { $compileLines += $hit.ToString() }
+              }
+            } catch {
+            }
+          }
+          if ($compileLines.Count -gt 2) {
+            $compileLines | Set-Content -Path $compileOut
+          } else {
+            "no compiler errors found" | Set-Content -Path $compileOut
+          }
+
       - name: Upload pipeline log
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
