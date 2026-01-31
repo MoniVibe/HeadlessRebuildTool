@@ -471,6 +471,23 @@ function Invoke-PPtrFileIdScan {
     return $null
 }
 
+function Get-FirstPPtrErrorFromArtifact {
+    param([string]$ZipPath)
+    if (-not (Test-Path $ZipPath)) { return "" }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $pptrText = Read-ZipEntryText -Archive $archive -EntryPath "logs/primary_error_snippet.txt"
+        if (-not $pptrText) {
+            $pptrText = Read-ZipEntryText -Archive $archive -EntryPath "logs/unity_build_tail.txt"
+        }
+        return Get-FirstErrorLine -Text $pptrText
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $triRoot = $env:TRI_ROOT
 if ([string]::IsNullOrWhiteSpace($triRoot) -or -not (Test-Path $triRoot)) {
@@ -647,9 +664,7 @@ if (-not (Test-Path $artifactZip)) {
 
 $preflight = Get-ArtifactPreflight -ZipPath $artifactZip
 if (-not $preflight.ok) {
-    $artifactSummary = Get-ArtifactSummary -ZipPath $artifactZip
-    $firstErrorLine = ""
-    if ($artifactSummary -and $artifactSummary.Contains("first_error")) { $firstErrorLine = $artifactSummary["first_error"] }
+    $firstErrorLine = Get-FirstPPtrErrorFromArtifact -ZipPath $artifactZip
     if ($firstErrorLine -and $firstErrorLine -match 'PPtr cast failed') {
         $pptrReport = Invoke-PPtrFileIdScan -FirstError $firstErrorLine -ProjectPath $projectPath -ReportsDir $reportsDir -TriRoot $triRoot
         if ($pptrReport) {
