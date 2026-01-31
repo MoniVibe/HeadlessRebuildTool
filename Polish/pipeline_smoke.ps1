@@ -53,6 +53,14 @@ function Normalize-ScenarioRel {
     return $normalized.TrimStart("./")
 }
 
+function Get-ScenarioIdFromRel {
+    param([string]$ScenarioRel)
+    if ([string]::IsNullOrWhiteSpace($ScenarioRel)) { return "" }
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($ScenarioRel)
+    if ([string]::IsNullOrWhiteSpace($name)) { return "" }
+    return $name
+}
+
 function Normalize-GoalSpecPath {
     param(
         [string]$GoalSpecPath,
@@ -572,6 +580,12 @@ if (-not $scenarioRelValue) {
 if ($scenarioRelValue) {
     $scenarioRelValue = Normalize-ScenarioRel $scenarioRelValue
     $argsValue = Strip-ScenarioArgs $argsValue
+}
+if (-not $PSBoundParameters.ContainsKey("ScenarioId") -and $scenarioRelValue) {
+    $derivedScenarioId = Get-ScenarioIdFromRel $scenarioRelValue
+    if ($derivedScenarioId) {
+        $scenarioIdValue = $derivedScenarioId
+    }
 }
 if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
