@@ -9,10 +9,10 @@
         "PUREDOTS_TELEMETRY_LOD": "minimal",
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "30",
         "PUREDOTS_TELEMETRY_MAX_EVENTS_PER_TICK": "64",
-        "PUREDOTS_TELEMETRY_MAX_BYTES": "50000000"
+        "PUREDOTS_TELEMETRY_MAX_BYTES": "100000000"
       },
       "caps": {
-        "max_bytes": 50000000,
+        "max_bytes": 100000000,
         "max_events_per_tick": 64,
         "cadence_ticks": 30
       },
