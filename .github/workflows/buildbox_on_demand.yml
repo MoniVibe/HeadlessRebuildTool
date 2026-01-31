@@ -52,6 +52,16 @@ jobs:
     timeout-minutes: 240
 
     steps:
+      - name: Preflight guard (runner paths/flags)
+        shell: pwsh
+        run: |
+          $guard = Join-Path $env:TRI_ROOT "Tools\HeadlessRebuildTool\Polish\Ops\preflight_guard.ps1"
+          if (-not (Test-Path $guard)) {
+            $guard = Join-Path $env:TRI_ROOT "Tools\Polish\Ops\preflight_guard.ps1"
+          }
+          if (-not (Test-Path $guard)) { throw "preflight_guard.ps1 not found on buildbox tools repo" }
+          & $guard
+
       - name: Run pipeline on desktop (local Tri install)
         shell: pwsh
         run: |
@@ -628,7 +638,8 @@ jobs:
             $proof = Join-Path $env:TRI_ROOT "Tools\Polish\Ops\artifact_proof.ps1"
           }
           if (Test-Path $proof) {
-            & $proof -RunId $env:GITHUB_RUN_ID -Title '${{ inputs.title }}'
+            $outFile = Join-Path $env:GITHUB_WORKSPACE "buildbox_diag\\proof.txt"
+            & $proof -RunId $env:GITHUB_RUN_ID -Title '${{ inputs.title }}' -OutFile $outFile
           } else {
             Write-Host "artifact_proof not found on buildbox tools repo"
           }
