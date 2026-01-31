@@ -479,7 +479,21 @@ function Get-FirstPPtrErrorFromArtifact {
     try {
         $pptrText = Read-ZipEntryText -Archive $archive -EntryPath "logs/primary_error_snippet.txt"
         if (-not $pptrText) {
+            $entry = $archive.Entries | Where-Object { $_.Name -ieq "primary_error_snippet.txt" } | Select-Object -First 1
+            if ($entry) {
+                $reader = New-Object System.IO.StreamReader($entry.Open())
+                try { $pptrText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            }
+        }
+        if (-not $pptrText) {
             $pptrText = Read-ZipEntryText -Archive $archive -EntryPath "logs/unity_build_tail.txt"
+            if (-not $pptrText) {
+                $entry = $archive.Entries | Where-Object { $_.Name -ieq "unity_build_tail.txt" } | Select-Object -First 1
+                if ($entry) {
+                    $reader = New-Object System.IO.StreamReader($entry.Open())
+                    try { $pptrText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                }
+            }
         }
         return Get-FirstErrorLine -Text $pptrText
     }
