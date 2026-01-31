@@ -17,6 +17,19 @@
 
 ## Entries (ERR-*)
 
+ERR-20260131-001
+- FirstSeen: 2026-01-31
+- Stage: RUNNER
+- Symptom: Godgame smoke run SUCCESS but telemetry indicates truncation (telemetryTruncated).
+- Signature: 6e1d25cf7883d194d49ffc9475a578f81bcfd404ca08ad6d165be5f70cc694b8
+- RawSignature: SUCCESS|godgame_smoke|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=0
+- RootCause: TBD (telemetry pipeline flagged truncation while exit_reason=SUCCESS).
+- Fix: TBD (verify telemetry writer flush + size limits; inspect out/telemetry.ndjson size and writer settings).
+- Prevention: Add explicit telemetry truncation threshold logging + emit warning to operator_report.
+- Verification: TBD (rerun godgame_smoke; telemetry_summary lacks telemetryTruncated and event_total stable).
+- Evidence: C:\polish\queue\reports\_diag_downloads\21538360575\buildbox_diag_godgame_21538360575\results\result_20260131_034305_558_b6c656ba_godgame_smoke_42
+- Commit: TBD
+
 ERR-20260130-005
 - FirstSeen: 2026-01-30
 - Stage: BUILD
