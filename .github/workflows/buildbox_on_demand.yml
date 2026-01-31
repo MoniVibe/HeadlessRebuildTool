@@ -618,4 +618,19 @@ jobs:
           path: buildbox_diag
           retention-days: 14
 
+      - name: Emit quick proof (if available)
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $proof = Join-Path $env:TRI_ROOT "Tools\HeadlessRebuildTool\Polish\Ops\artifact_proof.ps1"
+          if (-not (Test-Path $proof)) {
+            $proof = Join-Path $env:TRI_ROOT "Tools\Polish\Ops\artifact_proof.ps1"
+          }
+          if (Test-Path $proof) {
+            & $proof -RunId $env:GITHUB_RUN_ID -Title '${{ inputs.title }}'
+          } else {
+            Write-Host "artifact_proof not found on buildbox tools repo"
+          }
+
 # noop touch for workflow_dispatch registration
