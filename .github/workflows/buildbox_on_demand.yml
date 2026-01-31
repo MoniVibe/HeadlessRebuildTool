@@ -257,6 +257,7 @@ jobs:
           }
           # Clear any leaked native exit code so the workflow reflects the pipeline result.
           $global:LASTEXITCODE = 0
+          exit 0
 
       - name: Collect diagnostics (always)
         if: ${{ always() }}
