@@ -45,24 +45,26 @@ function Show-SshHealth {
     Write-Section "Buildbox SSH Health"
     $ssh = @("ssh","-i",$SshKey,"-o","IdentitiesOnly=yes","-o","StrictHostKeyChecking=accept-new",("{0}@{1}" -f $SshUser,$SshHost))
 
-    $script = @()
-    $script += 'hostname'
-    $script += 'whoami'
-    $script += 'powershell -NoProfile -Command "Get-PSDrive C | Select Used,Free | Format-List"'
-    $script += 'powershell -NoProfile -Command "Get-Service sshd, actions.runner.MoniVibe-HeadlessRebuildTool.buildbox | Select Name,Status,StartType | Format-Table -Auto"'
-    $script += 'powershell -NoProfile -Command "Get-ScheduledTask | Where-Object {$_.TaskName -like ''Buildbox.*''} | Select TaskName,State | Sort TaskName | Format-Table -Auto"'
+    $scriptLines = @()
+    $scriptLines += 'hostname'
+    $scriptLines += 'whoami'
+    $scriptLines += 'Get-PSDrive C | Select Used,Free | Format-List'
+    $scriptLines += 'Get-Service sshd, actions.runner.MoniVibe-HeadlessRebuildTool.buildbox | Select Name,Status,StartType | Format-Table -Auto'
+    $scriptLines += 'Get-ScheduledTask | Where-Object {$_.TaskName -like ''Buildbox.*''} | Select TaskName,State | Sort TaskName | Format-Table -Auto'
 
     foreach ($title in $Titles) {
         $jobs = Join-Path $QueueRoot "$title\\queue\\jobs"
         $leases = Join-Path $QueueRoot "$title\\queue\\leases"
         $results = Join-Path $QueueRoot "$title\\queue\\results"
         $artifacts = Join-Path $QueueRoot "$title\\queue\\artifacts"
-        $script += ('powershell -NoProfile -Command "{0}"' -f (
-            "Write-Host '--- {0} ---'; " +
-            "@(\"$jobs\",\"$leases\",\"$results\",\"$artifacts\") | ForEach-Object { if (Test-Path $_) { '{0}=' -f (Split-Path $_ -Leaf); (Get-ChildItem -Path $_ -File | Measure-Object).Count } else { '{0}=MISSING' -f (Split-Path $_ -Leaf) } }" -f $title))
+        $scriptLines += ("Write-Host '--- {0} ---'" -f $title)
+        $scriptLines += ('$dirs = @(' + ("'{0}','{1}','{2}','{3}'" -f $jobs,$leases,$results,$artifacts) + ')')
+        $scriptLines += 'foreach ($d in $dirs) { if (Test-Path $d) { $count=(Get-ChildItem -Path $d -File | Measure-Object).Count; Write-Host (\"{0}={1}\" -f (Split-Path $d -Leaf), $count) } else { Write-Host (\"{0}=MISSING\" -f (Split-Path $d -Leaf)) } }'
     }
 
-    $remote = $script -join '; '
+    $remoteScript = $scriptLines -join "`n"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
+    $remote = "powershell -NoProfile -EncodedCommand $encoded"
     try {
         & $ssh $remote
     } catch {
