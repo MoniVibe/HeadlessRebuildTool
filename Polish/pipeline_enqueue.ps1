@@ -200,8 +200,26 @@ function Read-BuildOutcome {
     }
 }
 
+function Resolve-TriRoot {
+    param(
+        [string]$StartPath,
+        [string]$ProjectName
+    )
+    if ([string]::IsNullOrWhiteSpace($StartPath)) { return $null }
+    $current = (Resolve-Path $StartPath).Path
+    for ($i = 0; $i -lt 8; $i++) {
+        if ($ProjectName) {
+            $candidate = Join-Path $current $ProjectName
+            if (Test-Path $candidate) { return $current }
+        }
+        $parent = Split-Path -Parent $current
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    return $null
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
 if (-not (Test-Path $defaultsPath)) {
     throw "Missing defaults file: $defaultsPath"
@@ -212,6 +230,16 @@ $titleKey = $Title.ToLowerInvariant()
 $titleDefaults = $defaults.titles.$titleKey
 if (-not $titleDefaults) {
     throw "Unknown title '$Title'. Check pipeline_defaults.json."
+}
+
+$triRoot = $env:TRI_ROOT
+if ([string]::IsNullOrWhiteSpace($triRoot) -or -not (Test-Path $triRoot)) {
+    $triRoot = Resolve-TriRoot -StartPath $scriptRoot -ProjectName $titleDefaults.project_path
+}
+if ([string]::IsNullOrWhiteSpace($triRoot)) {
+    $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
+} else {
+    $triRoot = (Resolve-Path $triRoot).Path
 }
 
 $projectPath = Join-Path $triRoot $titleDefaults.project_path
