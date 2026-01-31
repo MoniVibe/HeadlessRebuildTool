@@ -74,6 +74,14 @@ jobs:
           $wait   = '${{ inputs.wait_for_result }}' -eq 'true'
           $clean  = '${{ inputs.clean_cache }}' -eq 'true'
           $scenarioRel = '${{ inputs.scenario_rel }}'
+          $scenarioId = ""
+          if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) {
+            try {
+              $scenarioId = [IO.Path]::GetFileNameWithoutExtension($scenarioRel)
+            } catch {
+              $scenarioId = ""
+            }
+          }
 
           if ([string]::IsNullOrWhiteSpace($env:TRI_ROOT)) { throw "Missing TRI_ROOT env var on desktop." }
           if ([string]::IsNullOrWhiteSpace($env:UNITY_EXE)) { throw "Missing UNITY_EXE env var on desktop." }
@@ -237,6 +245,7 @@ jobs:
           }
           if ($wait) { $args.WaitForResult = $true }
           if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) { $args.ScenarioRel = $scenarioRel }
+          if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
 
           $env:GIT_COMMIT = $ref
           $env:GIT_BRANCH = $ref
