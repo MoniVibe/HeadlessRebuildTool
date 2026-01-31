@@ -1,5 +1,5 @@
 param(
-    [int]$RunId,
+    [string]$RunId,
     [string]$Title = "",
     [string]$DiagRoot = "C:\\polish\\queue\\reports\\_diag_downloads",
     [string]$OutFile = ""
@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Find-DiagPath {
-    param([int]$RunId)
+    param([string]$RunId)
     $runRoot = Join-Path $DiagRoot $RunId
     if (-not (Test-Path $runRoot)) { return $null }
     if ($Title) {
@@ -26,7 +26,7 @@ function Read-JsonSafe {
     try { return (Get-Content -Raw -Path $Path | ConvertFrom-Json) } catch { return $null }
 }
 
-if (-not $RunId) { throw "RunId required" }
+if ([string]::IsNullOrWhiteSpace($RunId)) { throw "RunId required" }
 $diag = Find-DiagPath -RunId $RunId
 if (-not $diag) { Write-Host "artifact_proof: diag not found for run $RunId"; exit 1 }
 
@@ -60,3 +60,4 @@ if ($OutFile) {
 } else {
     $lines | ForEach-Object { Write-Host $_ }
 }
+
