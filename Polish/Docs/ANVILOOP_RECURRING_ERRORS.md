@@ -23,12 +23,12 @@ ERR-20260131-001
 - Symptom: Godgame smoke run SUCCESS but telemetry indicates truncation (telemetryTruncated).
 - Signature: 6e1d25cf7883d194d49ffc9475a578f81bcfd404ca08ad6d165be5f70cc694b8
 - RawSignature: SUCCESS|godgame_smoke|    "memorysetup-temp-allocator-size-gfx=262144"|exit_code=0
-- RootCause: TBD (telemetry pipeline flagged truncation while exit_reason=SUCCESS).
-- Fix: TBD (verify telemetry writer flush + size limits; inspect out/telemetry.ndjson size and writer settings).
-- Prevention: Add explicit telemetry truncation threshold logging + emit warning to operator_report.
-- Verification: TBD (rerun godgame_smoke; telemetry_summary lacks telemetryTruncated and event_total stable).
+- RootCause: WSL runner hard default cap (50MB) overrides headless pack intent, so telemetry hits cap even on SUCCESS.
+- Fix: raise WSL runner DEFAULT_TELEMETRY_MAX_BYTES to 100MB and allow PUREDOTS_TELEMETRY_MAX_BYTES env to override.
+- Prevention: keep cap centralized in runner defaults; only override via env flag.
+- Verification: TBD (rerun godgame_smoke; telemetry_summary lacks telemetryTruncated and bytes_total < cap).
 - Evidence: C:\polish\queue\reports\_diag_downloads\21538360575\buildbox_diag_godgame_21538360575\results\result_20260131_034305_558_b6c656ba_godgame_smoke_42
-- Commit: TBD
+- Commit: 6ed545b + pending
 
 ERR-20260130-005
 - FirstSeen: 2026-01-30

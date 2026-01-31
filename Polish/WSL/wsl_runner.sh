@@ -32,7 +32,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
 DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
-DEFAULT_TELEMETRY_MAX_BYTES=52428800
+  DEFAULT_TELEMETRY_MAX_BYTES="${PUREDOTS_TELEMETRY_MAX_BYTES:-104857600}"
 SCENARIO_MAP_FILE="${TOOLS_ROOT}/Polish/WSL/scenario_map.json"
 log() {
   echo "wsl_runner: $*" >&2
