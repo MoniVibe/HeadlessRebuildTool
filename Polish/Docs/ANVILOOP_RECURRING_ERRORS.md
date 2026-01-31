@@ -26,9 +26,10 @@ ERR-20260131-001
 - RootCause: WSL runner hard default cap (50MB) overrides headless pack intent, so telemetry hits cap even on SUCCESS.
 - Fix: raise WSL runner DEFAULT_TELEMETRY_MAX_BYTES to 100MB and allow PUREDOTS_TELEMETRY_MAX_BYTES env to override.
 - Prevention: keep cap centralized in runner defaults; only override via env flag.
-- Verification: TBD (rerun godgame_smoke; telemetry_summary lacks telemetryTruncated and bytes_total < cap).
+- Verification: buildbox run 21545283685 (godgame_smoke) telemetry_summary has no telemetryTruncated; bytes_total below cap.
 - Evidence: C:\polish\queue\reports\_diag_downloads\21538360575\buildbox_diag_godgame_21538360575\results\result_20260131_034305_558_b6c656ba_godgame_smoke_42
-- Commit: 6ed545b + pending
+- Evidence: C:\polish\queue\reports\_diag_downloads\21545283685\buildbox_diag_godgame_21545283685\results\result_20260131_132858_259_b6c656ba_godgame_smoke_42
+- Commit: c0440fe + buildbox runner cmd update (wsl_runner_*.cmd)
 
 ERR-20260130-005
 - FirstSeen: 2026-01-30
