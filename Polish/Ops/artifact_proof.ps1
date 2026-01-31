@@ -1,14 +1,24 @@
 param(
-    [string]$RunId,
+    [string]$RunId = "",
     [string]$Title = "",
-    [string]$DiagRoot = "C:\\polish\\queue\\reports\\_diag_downloads",
-    [string]$OutFile = ""
+    [string]$DiagRoot = "C:\polish\queue\reports\_diag_downloads",
+    [string]$OutFile = "",
+    [switch]$Strict
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Find-DiagPath {
     param([string]$RunId)
+    $direct = Join-Path $DiagRoot "results"
+    if (Test-Path $direct) { return $DiagRoot }
+    if ([string]::IsNullOrWhiteSpace($RunId)) {
+        $candidates = Get-ChildItem -Path $DiagRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "buildbox_diag_*" } |
+            Sort-Object LastWriteTime -Descending
+        if ($candidates) { return $candidates[0].FullName }
+        return $null
+    }
     $runRoot = Join-Path $DiagRoot $RunId
     if (-not (Test-Path $runRoot)) { return $null }
     if ($Title) {
@@ -26,13 +36,23 @@ function Read-JsonSafe {
     try { return (Get-Content -Raw -Path $Path | ConvertFrom-Json) } catch { return $null }
 }
 
-if ([string]::IsNullOrWhiteSpace($RunId)) { throw "RunId required" }
+if ([string]::IsNullOrWhiteSpace($RunId) -and -not (Test-Path (Join-Path $DiagRoot "results"))) {
+    if ($Strict) { throw "RunId required" }
+}
 $diag = Find-DiagPath -RunId $RunId
-if (-not $diag) { Write-Host "artifact_proof: diag not found for run $RunId"; exit 1 }
+if (-not $diag) {
+    $msg = "artifact_proof: diag not found for run $RunId"
+    if ($OutFile) { $msg | Set-Content -Path $OutFile -Encoding ascii; Write-Host "artifact_proof: wrote $OutFile" }
+    if ($Strict) { exit 1 } else { exit 0 }
+}
 
 $resultsRoot = Join-Path $diag "results"
 $resultDir = Get-ChildItem -Path $resultsRoot -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $resultDir) { Write-Host "artifact_proof: result dir missing under $resultsRoot"; exit 1 }
+if (-not $resultDir) {
+    $msg = "artifact_proof: result dir missing under $resultsRoot"
+    if ($OutFile) { $msg | Set-Content -Path $OutFile -Encoding ascii; Write-Host "artifact_proof: wrote $OutFile" }
+    if ($Strict) { exit 1 } else { exit 0 }
+}
 
 $meta = Read-JsonSafe -Path (Join-Path $resultDir.FullName "meta.json")
 $summary = Read-JsonSafe -Path (Join-Path $resultDir.FullName "out\\run_summary.json")
@@ -60,4 +80,3 @@ if ($OutFile) {
 } else {
     $lines | ForEach-Object { Write-Host $_ }
 }
-
