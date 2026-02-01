@@ -42,9 +42,8 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: buildbox-${{ inputs.title }}
-  cancel-in-progress: false
+# NOTE: No explicit concurrency group so queued workflow_dispatch runs are not auto-cancelled.
+# The self-hosted buildbox runner will serialize jobs naturally.
 
 jobs:
   run:
