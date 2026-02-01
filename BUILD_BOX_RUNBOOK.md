@@ -30,3 +30,4 @@ Notes:
 - The workflow looks for zips in both queue\results (result_*.zip) and queue\artifacts (artifact_*.zip).
 - It also parses pipeline_smoke.log for explicit artifact paths to extract diagnostics.
 - Raw zips are not uploaded to keep artifacts small; only extracted JSONs are included.
+- "Queue" paths refer to the desktop/buildbox machine (for example C:\polish\anviloop\<title>\queue), not this laptop.
