@@ -187,6 +187,12 @@ jobs:
           # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          if (-not (Test-Path $puredotsTarget)) {
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+          } elseif (-not (Test-Path (Join-Path $puredotsTarget ".git"))) {
+            Remove-Item -Recurse -Force $puredotsTarget
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+          }
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
@@ -194,15 +200,15 @@ jobs:
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
-            & git -C $puredotsTarget fetch --all --prune
+            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget fetch --all --prune
             $puredotsCheckout = "origin/fix/oracle-probe-smoke"
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
-              & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+              & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
               if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" }
             }
-            & git -C $puredotsTarget reset --hard $puredotsCheckout
-            & git -C $puredotsTarget clean -fd
+            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget reset --hard $puredotsCheckout
+            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget clean -fd
           }
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
           $puredotsDupes = @(
