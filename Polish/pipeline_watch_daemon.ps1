@@ -156,7 +156,18 @@ while ($true) {
         if ($WaitForResult) { $invokeArgs.WaitForResult = $true }
         if ($PSBoundParameters.ContainsKey("WaitTimeoutSec")) { $invokeArgs.WaitTimeoutSec = $WaitTimeoutSec }
 
-        & $enqueueScript @invokeArgs
+        $enqueueOk = $false
+        try {
+            & $enqueueScript @invokeArgs
+            $enqueueOk = $true
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            Write-Warning ("enqueue_failed build_id={0} artifact={1} error={2}" -f $buildId, $artifact.FullName, $errorMessage)
+            $state.last_error = $errorMessage
+            $state.last_error_utc = (Get-Date).ToUniversalTime().ToString("o")
+            $state.last_error_artifact = $artifact.FullName
+        }
 
         $state.last_build_id = $buildId
         $state.last_artifact = $artifact.FullName

@@ -1330,6 +1330,10 @@ PY
 requeue_stale_leases() {
   local queue_dir="$1"
   local ttl_sec="$2"
+  local max_requeues="${TRI_STALE_REQUEUE_MAX:-3}"
+  if ! [[ "$max_requeues" =~ ^[0-9]+$ ]]; then
+    max_requeues=3
+  fi
   local now
   now="$(date -u +%s)"
   local leases_dir="${queue_dir}/leases"
@@ -1365,7 +1369,48 @@ requeue_stale_leases() {
       continue
     fi
     local result_zip="${queue_dir}/results/result_${job_id}.zip"
+    local requeue_count_path="${leases_dir}/${job_id}.requeue"
     if [ -f "$result_zip" ]; then
+      rm -f "$requeue_count_path" 2>/dev/null || true
+      continue
+    fi
+    local requeue_count=0
+    if [ -f "$requeue_count_path" ]; then
+      requeue_count="$(tr -d '[:space:]' < "$requeue_count_path" 2>/dev/null || echo 0)"
+      if ! [[ "$requeue_count" =~ ^[0-9]+$ ]]; then
+        requeue_count=0
+      fi
+    fi
+    requeue_count=$((requeue_count + 1))
+    printf '%s' "$requeue_count" > "$requeue_count_path"
+    if [ "$max_requeues" -gt 0 ] && [ "$requeue_count" -gt "$max_requeues" ]; then
+      local raw_signature="stale_lease_timeout|${job_id}"
+      local failure_signature
+      failure_signature="$(hash_signature "$raw_signature")"
+      local tmp_dir="${queue_dir}/results/.tmp/stale_${job_id}"
+      mkdir -p "${tmp_dir}/out"
+      "$PYTHON_BIN" - "${tmp_dir}/meta.json" "$job_id" "$EXIT_REASON_INFRA" "$EXIT_CODE_INFRA_FAIL" "$failure_signature" <<'PY'
+import json,sys
+path=sys.argv[1]
+job_id=sys.argv[2]
+reason=sys.argv[3]
+exit_code=int(sys.argv[4])
+signature=sys.argv[5]
+payload={
+  "job_id": job_id,
+  "exit_reason": reason,
+  "exit_code": exit_code,
+  "failure_signature": signature
+}
+with open(path,"w",encoding="utf-8") as handle:
+  json.dump(payload, handle, indent=2, sort_keys=True)
+PY
+      write_watchdog_json "${tmp_dir}/out" "$job_id" "$EXIT_REASON_INFRA" "$EXIT_CODE_INFRA_FAIL" "$EXIT_CODE_INFRA_FAIL" "$raw_signature"
+      mkdir -p "${queue_dir}/results"
+      create_zip_from_dir "${queue_dir}/results/result_${job_id}.zip" "$tmp_dir"
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      archive_lease "$lease_path" "$meta_path" "$queue_dir" "$job_id"
+      log "stale_lease_fail job_id=${job_id} count=${requeue_count}"
       continue
     fi
     local dest="${jobs_dir}/${job_id}.json"
