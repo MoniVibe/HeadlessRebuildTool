@@ -9,6 +9,8 @@ param(
     [int]$PollSeconds = 10,
     [int]$MaxWaitSeconds = 0,
     [switch]$Refresh,
+    [switch]$ShowSummary,
+    [switch]$ReportBurst,
     [switch]$IncludeWarnings,
     [switch]$IncludeMissing,
     [switch]$ListRuns
@@ -103,3 +105,34 @@ if ($IncludeWarnings) { $collectorArgs.IncludeWarnings = $true }
 if ($IncludeMissing) { $collectorArgs.IncludeMissing = $true }
 
 & $collector @collectorArgs
+
+$diagDir = Get-ChildItem -Path $dest -Directory -Filter 'buildbox_diag_*' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($ShowSummary -and $diagDir)
+{
+    $summary = Join-Path $diagDir.FullName "pipeline_smoke_summary_latest.md"
+    if (Test-Path $summary)
+    {
+        Write-Host ""
+        Write-Host "--- Pipeline Summary ---"
+        Get-Content $summary
+    }
+}
+
+if ($ReportBurst -and $diagDir)
+{
+    $targets = Get-ChildItem -Path $diagDir.FullName -Recurse -File -Include 'pipeline_smoke_summary_latest.md','primary_error_snippet.txt','unity_build_tail.txt' -ErrorAction SilentlyContinue
+    if ($targets)
+    {
+        $pattern = 'Burst error|BC\\d{4}'
+        $matches = Select-String -Path $targets.FullName -Pattern $pattern -ErrorAction SilentlyContinue
+        if ($matches)
+        {
+            Write-Host ""
+            Write-Host "--- Burst Errors ---"
+            foreach ($m in $matches)
+            {
+                Write-Host ($m.Path + ":" + $m.LineNumber + " " + $m.Line)
+            }
+        }
+    }
+}
