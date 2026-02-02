@@ -5,6 +5,7 @@ param(
     [string]$Workflow = "buildbox_on_demand.yml",
     [string]$Status = "completed",
     [int]$Limit = 20,
+    [switch]$Refresh,
     [switch]$IncludeWarnings,
     [switch]$IncludeMissing,
     [switch]$ListRuns
@@ -43,10 +44,19 @@ if ([string]::IsNullOrWhiteSpace($RunId))
 }
 
 $dest = Join-Path $Root "buildbox_$RunId"
-New-Item -ItemType Directory -Force -Path $dest | Out-Null
-Push-Location $dest
-  gh run download $RunId -R $Repo | Out-Null
-Pop-Location
+if ($Refresh -and (Test-Path $dest))
+{
+    Remove-Item -Recurse -Force -Path $dest
+}
+
+$hasDiag = Test-Path (Join-Path $dest "buildbox_diag_*")
+if (-not $hasDiag)
+{
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    Push-Location $dest
+      gh run download $RunId -R $Repo | Out-Null
+    Pop-Location
+}
 
 $collector = Join-Path $PSScriptRoot "collect_compile_errors.ps1"
 if (-not (Test-Path $collector))
@@ -55,14 +65,11 @@ if (-not (Test-Path $collector))
     exit 1
 }
 
-$collectorArgs = @('-Root',$Root,'-RunId',$RunId)
-if ($IncludeWarnings)
-{
-    $collectorArgs += '-IncludeWarnings'
+$collectorArgs = @{
+    Root = $Root
+    RunId = $RunId
 }
-if ($IncludeMissing)
-{
-    $collectorArgs += '-IncludeMissing'
-}
+if ($IncludeWarnings) { $collectorArgs.IncludeWarnings = $true }
+if ($IncludeMissing) { $collectorArgs.IncludeMissing = $true }
 
 & $collector @collectorArgs
