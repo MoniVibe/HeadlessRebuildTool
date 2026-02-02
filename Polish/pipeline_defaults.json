@@ -1,7 +1,7 @@
 {
   "titles": {
     "space4x": {
-      "project_path": "..\\space4x",
+      "project_path": "C:\\dev\\tri\\space4x",
       "scenario_id": "space4x_collision_micro",
       "scenario_rel": "Assets/Scenarios/space4x_collision_micro.json",
       "seed": 7,
@@ -12,7 +12,7 @@
       ]
     },
     "godgame": {
-      "project_path": "..\\godgame",
+      "project_path": "C:\\dev\\tri\\godgame",
       "scenario_id": "godgame_smoke",
       "scenario_rel": "Assets/Scenarios/Godgame/godgame_smoke.json",
       "seed": 42,
