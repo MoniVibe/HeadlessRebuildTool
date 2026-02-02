@@ -184,30 +184,43 @@ jobs:
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
           }
 
-          # Ensure local PureDOTS package path resolves under worktrees/<title>
+          # Ensure local PureDOTS package path resolves under worktrees/<title>.
+          # Use shallow init if the repo is missing to avoid heavy clones.
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          $puredotsNeedsInit = $false
           if (-not (Test-Path $puredotsTarget)) {
-            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+            New-Item -ItemType Directory -Force -Path $puredotsTarget | Out-Null
+            $puredotsNeedsInit = $true
           } elseif (-not (Test-Path (Join-Path $puredotsTarget ".git"))) {
-            Remove-Item -Recurse -Force $puredotsTarget
-            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+            $puredotsNeedsInit = $true
           }
-          if (Test-Path $puredotsTarget) {
-            if (-not (Test-Path $puredotsLink)) {
-              New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
-            }
+          if (-not (Test-Path $puredotsLink)) {
+            New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
           }
+
+          if ($puredotsNeedsInit) {
+            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget init | Out-Null
+            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget remote remove origin 2>$null
+            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget remote add origin "https://github.com/MoniVibe/PureDOTS.git"
+          }
+
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
-            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget fetch --all --prune
             $puredotsCheckout = "origin/fix/oracle-probe-smoke"
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
               & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
               if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" }
             }
-            & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget reset --hard $puredotsCheckout
+
+            if ($puredotsNeedsInit) {
+              & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget fetch --depth 1 origin $puredotsCheckout
+              & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget checkout -f FETCH_HEAD
+            } else {
+              & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget fetch --all --prune
+              & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget reset --hard $puredotsCheckout
+            }
             & git -c "safe.directory=$puredotsTarget" -C $puredotsTarget clean -fd
           }
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
