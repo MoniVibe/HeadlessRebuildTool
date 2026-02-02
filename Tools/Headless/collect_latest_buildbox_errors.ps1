@@ -5,6 +5,9 @@ param(
     [string]$Workflow = "buildbox_on_demand.yml",
     [string]$Status = "completed",
     [int]$Limit = 20,
+    [switch]$Wait,
+    [int]$PollSeconds = 10,
+    [int]$MaxWaitSeconds = 0,
     [switch]$Refresh,
     [switch]$IncludeWarnings,
     [switch]$IncludeMissing,
@@ -27,7 +30,7 @@ if ($ListRuns)
 if ([string]::IsNullOrWhiteSpace($RunId))
 {
     $jsonArgs = @('run','list','-R',$Repo,'--workflow',$Workflow,'--limit',$Limit,'--json','databaseId,status,conclusion,createdAt,displayTitle')
-    if (-not [string]::IsNullOrWhiteSpace($Status))
+    if (-not $Wait -and -not [string]::IsNullOrWhiteSpace($Status))
     {
         $jsonArgs += @('--status',$Status)
     }
@@ -43,13 +46,40 @@ if ([string]::IsNullOrWhiteSpace($RunId))
     $RunId = $runs[0].databaseId
 }
 
+$waited = 0
+if ($Wait)
+{
+    while ($true)
+    {
+        $view = gh run view $RunId -R $Repo --json status,conclusion | ConvertFrom-Json
+        if ($view.status -eq "completed")
+        {
+            break
+        }
+        if ($MaxWaitSeconds -gt 0 -and $waited -ge $MaxWaitSeconds)
+        {
+            Write-Error "Run $RunId did not complete within $MaxWaitSeconds seconds."
+            exit 1
+        }
+        Start-Sleep -Seconds $PollSeconds
+        $waited += $PollSeconds
+    }
+}
+
 $dest = Join-Path $Root "buildbox_$RunId"
 if ($Refresh -and (Test-Path $dest))
 {
     Remove-Item -Recurse -Force -Path $dest
 }
 
-$hasDiag = Test-Path (Join-Path $dest "buildbox_diag_*")
+if (Test-Path $dest)
+{
+    $hasDiag = Get-ChildItem -Path $dest -Directory -Filter 'buildbox_diag_*' -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+else
+{
+    $hasDiag = $null
+}
 if (-not $hasDiag)
 {
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
