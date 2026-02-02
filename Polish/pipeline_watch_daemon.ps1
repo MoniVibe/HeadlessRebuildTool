@@ -92,6 +92,39 @@ function Get-ArtifactTitle {
     }
 }
 
+function Test-BuildAlreadyQueued {
+    param(
+        [string]$QueueRoot,
+        [string]$BuildId
+    )
+    if ([string]::IsNullOrWhiteSpace($QueueRoot) -or [string]::IsNullOrWhiteSpace($BuildId)) { return $false }
+    $jobsDir = Join-Path $QueueRoot "jobs"
+    $leasesDir = Join-Path $QueueRoot "leases"
+    $resultsDir = Join-Path $QueueRoot "results"
+    $archiveDir = Join-Path $leasesDir "archive"
+
+    $jobPattern = ("{0}_*.json" -f $BuildId)
+    $resultPattern = ("result_{0}_*.zip" -f $BuildId)
+
+    if (Test-Path $jobsDir) {
+        $hit = Get-ChildItem -Path $jobsDir -Filter $jobPattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $true }
+    }
+    if (Test-Path $leasesDir) {
+        $hit = Get-ChildItem -Path $leasesDir -Filter $jobPattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $true }
+    }
+    if (Test-Path $archiveDir) {
+        $hit = Get-ChildItem -Path $archiveDir -Filter $jobPattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $true }
+    }
+    if (Test-Path $resultsDir) {
+        $hit = Get-ChildItem -Path $resultsDir -Filter $resultPattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $true }
+    }
+    return $false
+}
+
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $artifactsDir = Join-Path $queueRootFull "artifacts"
 $reportsDir = Join-Path $queueRootFull "reports"
@@ -138,6 +171,15 @@ while ($true) {
 
         $buildId = $outcome.build_id
         if ([string]::IsNullOrWhiteSpace($buildId)) { continue }
+
+        if (Test-BuildAlreadyQueued -QueueRoot $queueRootFull -BuildId $buildId) {
+            Write-Host ("skip_existing build_id={0} artifact={1}" -f $buildId, $artifact.FullName)
+            $state.last_build_id = $buildId
+            $state.last_artifact = $artifact.FullName
+            $state.updated_utc = (Get-Date).ToUniversalTime().ToString("o")
+            Write-JsonFile -Path $StatePath -Value $state
+            break
+        }
 
         Write-Host ("enqueue_detected build_id={0} artifact={1}" -f $buildId, $artifact.FullName)
 
