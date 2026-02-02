@@ -679,6 +679,59 @@ PY
   tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
 }
 
+shutdown_exit_request_present() {
+  local out_dir="$1"
+  local inv_path="${out_dir}/invariants.json"
+  local progress_path="${out_dir}/progress.json"
+  if [ -z "$PYTHON_BIN" ]; then
+    return 1
+  fi
+  if [ ! -f "$inv_path" ] && [ ! -f "$progress_path" ]; then
+    return 1
+  fi
+  "$PYTHON_BIN" - "$inv_path" "$progress_path" <<'PY'
+import json,sys,os
+inv_path=sys.argv[1]
+progress_path=sys.argv[2]
+
+def load(path):
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path,"r",encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+def has_exit_request(data):
+    if not isinstance(data, dict):
+        return False
+    progress=data.get("progress")
+    if isinstance(progress, dict):
+        last_phase=str(progress.get("last_phase","")).lower()
+        last_checkpoint=str(progress.get("last_checkpoint","")).lower()
+        if last_checkpoint == "exit_request":
+            return True
+        if last_phase == "shutdown" and last_checkpoint in ("exit_request","exit","quit"):
+            return True
+    last_checkpoint=str(data.get("last_checkpoint","")).lower()
+    if last_checkpoint == "exit_request":
+        return True
+    return False
+
+inv=load(inv_path)
+if has_exit_request(inv):
+    raise SystemExit(0)
+
+prog=load(progress_path)
+if has_exit_request(prog):
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  return $?
+}
+
 exit_by_signal() {
   local process_exit_code="$1"
   if [ "$process_exit_code" -ge 128 ]; then
@@ -1789,7 +1842,14 @@ run_job() {
   local original_exit_code=""
   local signature_exit_reason="$exit_reason"
   local signature_exit_code="$runner_exit_code"
-  if [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
+  if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
+    original_exit_reason="$exit_reason"
+    original_exit_code="$runner_exit_code"
+    exit_reason="$EXIT_REASON_WARN"
+    runner_exit_code="$EXIT_CODE_SUCCESS"
+    signature_exit_reason="$original_exit_reason"
+    signature_exit_code="$original_exit_code"
+  elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
     if required_questions_unknown_present "$out_dir"; then
       original_exit_reason="$exit_reason"
       original_exit_code="$runner_exit_code"
