@@ -242,9 +242,12 @@ if ([string]::IsNullOrWhiteSpace($triRoot)) {
     $triRoot = (Resolve-Path $triRoot).Path
 }
 
-$projectPath = Join-Path $triRoot $titleDefaults.project_path
+$projectPath = $titleDefaults.project_path
 if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
     $projectPath = $ProjectPathOverride
+}
+if (-not [string]::IsNullOrWhiteSpace($projectPath) -and -not [System.IO.Path]::IsPathRooted($projectPath)) {
+    $projectPath = Join-Path $triRoot $projectPath
 }
 $projectPath = [System.IO.Path]::GetFullPath($projectPath)
 if (-not (Test-Path $projectPath)) {
