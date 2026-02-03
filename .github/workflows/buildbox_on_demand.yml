@@ -308,6 +308,12 @@ jobs:
 
           $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
           if (Test-Path $summary) { Copy-Item $summary -Destination $diagRoot -Force }
+          $workflowState = Join-Path $diagRoot "workflow_state.txt"
+          "workflow_state=completed" | Set-Content -Path $workflowState
+          $summaryCopy = Join-Path $diagRoot "pipeline_smoke_summary_latest.md"
+          if (Test-Path $summaryCopy) {
+            Add-Content -Path $summaryCopy -Value "* workflow_state: completed"
+          }
 
           $buildId = $null
           $buildReportPath = $null
