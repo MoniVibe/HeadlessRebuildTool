@@ -10,6 +10,7 @@ param(
     [string]$SshHost = "25.30.14.37",
     [string]$SshUser = "Moni",
     [string]$SshKey = "/home/shonh/.ssh/buildbox_laptop_ed25519",
+    [string]$SshExe = "",
     [string]$QueueRoot = "C:\\polish\\anviloop",
     [switch]$ShowRunner
 )
@@ -82,7 +83,21 @@ function Show-Runner {
 function Show-SshHealth {
     if (-not $UseSsh) { return }
     Write-Section "Buildbox SSH Health"
-    $ssh = @("ssh","-i",$SshKey,"-o","IdentitiesOnly=yes","-o","StrictHostKeyChecking=accept-new",("{0}@{1}" -f $SshUser,$SshHost))
+    $sshExe = $SshExe
+    if ([string]::IsNullOrWhiteSpace($sshExe)) {
+        $cmd = Get-Command ssh -ErrorAction SilentlyContinue
+        if ($cmd) { $sshExe = $cmd.Source }
+        else {
+            $fallback = Join-Path $env:WINDIR "System32\\OpenSSH\\ssh.exe"
+            if (Test-Path $fallback) { $sshExe = $fallback }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($sshExe) -or -not (Test-Path $sshExe)) {
+        Write-Host "ssh health failed: ssh.exe not found (set -SshExe or ensure OpenSSH is installed)."
+        return
+    }
+
+    $ssh = @($sshExe,"-i",$SshKey,"-o","IdentitiesOnly=yes","-o","StrictHostKeyChecking=accept-new",("{0}@{1}" -f $SshUser,$SshHost))
 
     $scriptLines = @()
     $scriptLines += 'hostname'
