@@ -346,6 +346,40 @@ print(json.dumps(val, sort_keys=True, separators=(',', ':')))
 PY
 }
 
+json_get_env_pairs() {
+  local file="$1"
+  local field="$2"
+  if [ -z "$field" ]; then
+    field="env"
+  fi
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    jq -r --arg field "$field" '.[$field] // {} | to_entries[] | "\(.key)=\(.value)"' "$file" 2>/dev/null || true
+    return 0
+  fi
+  "$PYTHON_BIN" - "$file" "$field" <<'PY'
+import json,sys
+path=sys.argv[1]
+field=sys.argv[2]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+except Exception:
+    data={}
+env=data.get(field, {})
+if not isinstance(env, dict):
+    env={}
+for key in sorted(env.keys()):
+    if key is None:
+        continue
+    val=env.get(key, "")
+    if isinstance(val, (dict, list)):
+        continue
+    if val is None:
+        val=""
+    print(f"{key}={val}")
+PY
+}
+
 read_json_array_field() {
   local file="$1"
   local field="$2"
@@ -553,6 +587,22 @@ telemetry_disabled_in_args() {
 
 shell_quote() {
   printf '%q' "$1"
+}
+
+build_env_prefix() {
+  local -a pairs=("$@")
+  if [ "${#pairs[@]}" -eq 0 ]; then
+    return 0
+  fi
+  local prefix="env"
+  local pair
+  for pair in "${pairs[@]}"; do
+    if [ -z "$pair" ]; then
+      continue
+    fi
+    prefix+=" $(shell_quote "$pair")"
+  done
+  printf '%s' "$prefix"
 }
 
 build_repro_command() {
@@ -1521,6 +1571,7 @@ run_job() {
   local required_bank=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
+  local -a env_pairs=()
 
   local error_context=""
   local repro_command=""
@@ -1544,6 +1595,7 @@ run_job() {
     required_bank="$(json_get_string "$lease_path" "required_bank")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
+    mapfile -t env_pairs < <(json_get_env_pairs "$lease_path" "env")
   fi
 
   if [ -z "$scenario_rel" ] && [ -n "$scenario_id" ]; then
@@ -1551,6 +1603,7 @@ run_job() {
     if [ -z "$scenario_rel" ]; then
       case "$scenario_id" in
         space4x_collision_micro) scenario_rel="Assets/Scenarios/space4x_collision_micro.json" ;;
+        space4x_bug_hunt_headless) scenario_rel="Assets/Scenarios/space4x_bug_hunt_headless.json" ;;
         godgame_smoke) scenario_rel="Assets/Scenarios/Godgame/godgame_smoke.json" ;;
       esac
     fi
@@ -1762,6 +1815,13 @@ run_job() {
     fi
 
     repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${final_args[@]}")"
+    if [ "${#env_pairs[@]}" -gt 0 ]; then
+      local env_prefix
+      env_prefix="$(build_env_prefix "${env_pairs[@]}")"
+      if [ -n "$env_prefix" ]; then
+        repro_command="${env_prefix} $repro_command"
+      fi
+    fi
     fi
   fi
 
@@ -1784,6 +1844,7 @@ run_job() {
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
       ${perf_telemetry_env:+PUREDOTS_PERF_TELEMETRY_PATH=$perf_telemetry_env} \
+      "${env_pairs[@]}" \
       "$entrypoint_path" "${final_args[@]}" >"$stdout_log" 2>"$stderr_log" &
     local pid=$!
     local pgid

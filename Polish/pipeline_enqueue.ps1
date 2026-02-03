@@ -12,6 +12,8 @@ param(
     [string]$GoalSpec,
     [int]$Seed,
     [string[]]$Args,
+    [hashtable]$Env,
+    [string]$EnvJson,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 1800
@@ -75,6 +77,32 @@ function Normalize-GoalSpecPath {
         return $normalized
     }
     return $normalized.TrimStart("./")
+}
+
+function ConvertTo-EnvMap {
+    param(
+        [hashtable]$Env,
+        [string]$EnvJson
+    )
+    $map = @{}
+    if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
+        try {
+            $parsed = $EnvJson | ConvertFrom-Json
+        } catch {
+            throw "EnvJson is invalid JSON."
+        }
+        if ($parsed) {
+            foreach ($prop in $parsed.PSObject.Properties) {
+                $map[$prop.Name] = $prop.Value
+            }
+        }
+    }
+    if ($Env) {
+        foreach ($key in $Env.Keys) {
+            $map[$key] = $Env[$key]
+        }
+    }
+    return $map
 }
 
 function Get-ScenarioRelFromArgs {
@@ -200,8 +228,26 @@ function Read-BuildOutcome {
     }
 }
 
+function Resolve-TriRoot {
+    param(
+        [string]$StartPath,
+        [string]$ProjectName
+    )
+    if ([string]::IsNullOrWhiteSpace($StartPath)) { return $null }
+    $current = (Resolve-Path $StartPath).Path
+    for ($i = 0; $i -lt 8; $i++) {
+        if ($ProjectName) {
+            $candidate = Join-Path $current $ProjectName
+            if (Test-Path $candidate) { return $current }
+        }
+        $parent = Split-Path -Parent $current
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    return $null
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
 if (-not (Test-Path $defaultsPath)) {
     throw "Missing defaults file: $defaultsPath"
@@ -212,6 +258,16 @@ $titleKey = $Title.ToLowerInvariant()
 $titleDefaults = $defaults.titles.$titleKey
 if (-not $titleDefaults) {
     throw "Unknown title '$Title'. Check pipeline_defaults.json."
+}
+
+$triRoot = $env:TRI_ROOT
+if ([string]::IsNullOrWhiteSpace($triRoot) -or -not (Test-Path $triRoot)) {
+    $triRoot = Resolve-TriRoot -StartPath $scriptRoot -ProjectName $titleDefaults.project_path
+}
+if ([string]::IsNullOrWhiteSpace($triRoot)) {
+    $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
+} else {
+    $triRoot = (Resolve-Path $triRoot).Path
 }
 
 $projectPath = Join-Path $triRoot $titleDefaults.project_path
@@ -268,6 +324,8 @@ if (-not $PSBoundParameters.ContainsKey("ScenarioId") -and $scenarioRelValue) {
     }
 }
 
+$envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $jobsDir = Join-Path $queueRootFull "jobs"
 $resultsDir = Join-Path $queueRootFull "results"
@@ -307,6 +365,9 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     if ($goalSpecValue) {
         $job.goal_spec = $goalSpecValue
+    }
+    if ($envMap.Count -gt 0) {
+        $job.env = $envMap
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6

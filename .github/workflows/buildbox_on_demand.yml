@@ -38,6 +38,10 @@ on:
         description: "Optional scenario rel path (Assets/... or Packages/...)"
         required: false
         default: ""
+      env_json:
+        description: "Optional env JSON map (e.g. {\"PUREDOTS_BUGHUNT\":\"1\"})"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -70,6 +74,7 @@ jobs:
           $wait   = '${{ inputs.wait_for_result }}' -eq 'true'
           $clean  = '${{ inputs.clean_cache }}' -eq 'true'
           $scenarioRel = '${{ inputs.scenario_rel }}'
+          $envJson = '${{ inputs.env_json }}'
           $scenarioId = ""
           if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) {
             try {
@@ -242,6 +247,7 @@ jobs:
           if ($wait) { $args.WaitForResult = $true }
           if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) { $args.ScenarioRel = $scenarioRel }
           if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
+          if (-not [string]::IsNullOrWhiteSpace($envJson)) { $args.EnvJson = $envJson }
 
           $env:GIT_COMMIT = $ref
           $env:GIT_BRANCH = $ref

@@ -9,6 +9,10 @@ param(
     [switch]$WaitForResult,
     [switch]$CleanCache,
     [string]$QueueRoot = "",
+    [string]$PuredotsRef = "",
+    [string]$ScenarioRel = "",
+    [string]$WorkflowRef = "",
+    [string]$EnvJson = "",
     [string]$Repo = "MoniVibe/HeadlessRebuildTool",
     [string]$Workflow = "buildbox_on_demand.yml",
     [int]$PollSec = 10,
@@ -76,8 +80,20 @@ $inputArgs = @(
 if (-not [string]::IsNullOrWhiteSpace($QueueRoot)) {
     $inputArgs += "queue_root=$QueueRoot"
 }
+if (-not [string]::IsNullOrWhiteSpace($PuredotsRef)) {
+    $inputArgs += "puredots_ref=$PuredotsRef"
+}
+if (-not [string]::IsNullOrWhiteSpace($ScenarioRel)) {
+    $inputArgs += "scenario_rel=$ScenarioRel"
+}
+if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
+    $inputArgs += "env_json=$EnvJson"
+}
 
 $ghArgs = @("workflow", "run", $Workflow, "-R", $Repo)
+if (-not [string]::IsNullOrWhiteSpace($WorkflowRef)) {
+    $ghArgs += @("--ref", $WorkflowRef)
+}
 foreach ($arg in $inputArgs) {
     $ghArgs += @("-f", $arg)
 }

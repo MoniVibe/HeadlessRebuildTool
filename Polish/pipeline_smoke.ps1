@@ -13,6 +13,8 @@ param(
     [int]$Seed,
     [int]$TimeoutSec,
     [string[]]$Args,
+    [hashtable]$Env,
+    [string]$EnvJson,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 1800
@@ -76,6 +78,32 @@ function Normalize-GoalSpecPath {
         return $normalized
     }
     return $normalized.TrimStart("./")
+}
+
+function ConvertTo-EnvMap {
+    param(
+        [hashtable]$Env,
+        [string]$EnvJson
+    )
+    $map = @{}
+    if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
+        try {
+            $parsed = $EnvJson | ConvertFrom-Json
+        } catch {
+            throw "EnvJson is invalid JSON."
+        }
+        if ($parsed) {
+            foreach ($prop in $parsed.PSObject.Properties) {
+                $map[$prop.Name] = $prop.Value
+            }
+        }
+    }
+    if ($Env) {
+        foreach ($key in $Env.Keys) {
+            $map[$key] = $Env[$key]
+        }
+    }
+    return $map
 }
 
 function Get-ScenarioRelFromArgs {
@@ -591,6 +619,8 @@ if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
 
+$envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+
 $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
@@ -747,6 +777,9 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     if ($goalSpecValue) {
         $job.goal_spec = $goalSpecValue
+    }
+    if ($envMap.Count -gt 0) {
+        $job.env = $envMap
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6
