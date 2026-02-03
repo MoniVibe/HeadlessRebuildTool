@@ -123,15 +123,20 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($toolsRef)) {
             $toolsRef = '${{ github.sha }}'
           }
+          $toolsCheckout = $toolsRef
           if (Test-Path (Join-Path $toolsRepo ".git")) {
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
-            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsRef
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo show-ref --verify --quiet ("refs/remotes/origin/" + $toolsRef)
+            if ($LASTEXITCODE -eq 0) { $toolsCheckout = "origin/$toolsRef" }
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsCheckout
           } else {
             $toolsRepo = Join-Path $env:GITHUB_WORKSPACE "tools_repo"
             if (Test-Path $toolsRepo) { Remove-Item -Recurse -Force $toolsRepo }
             & git clone "https://github.com/MoniVibe/HeadlessRebuildTool.git" $toolsRepo
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
-            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsRef
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo show-ref --verify --quiet ("refs/remotes/origin/" + $toolsRef)
+            if ($LASTEXITCODE -eq 0) { $toolsCheckout = "origin/$toolsRef" }
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsCheckout
             $pipeline = Join-Path $toolsRepo "Polish\\pipeline_smoke.ps1"
           }
 
