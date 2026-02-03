@@ -679,6 +679,59 @@ PY
   tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
 }
 
+shutdown_exit_request_present() {
+  local out_dir="$1"
+  local inv_path="${out_dir}/invariants.json"
+  local progress_path="${out_dir}/progress.json"
+  if [ -z "$PYTHON_BIN" ]; then
+    return 1
+  fi
+  if [ ! -f "$inv_path" ] && [ ! -f "$progress_path" ]; then
+    return 1
+  fi
+  "$PYTHON_BIN" - "$inv_path" "$progress_path" <<'PY'
+import json,sys,os
+inv_path=sys.argv[1]
+progress_path=sys.argv[2]
+
+def load(path):
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path,"r",encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+def has_exit_request(data):
+    if not isinstance(data, dict):
+        return False
+    progress=data.get("progress")
+    if isinstance(progress, dict):
+        last_phase=str(progress.get("last_phase","")).lower()
+        last_checkpoint=str(progress.get("last_checkpoint","")).lower()
+        if last_checkpoint == "exit_request":
+            return True
+        if last_phase == "shutdown" and last_checkpoint in ("exit_request","exit","quit"):
+            return True
+    last_checkpoint=str(data.get("last_checkpoint","")).lower()
+    if last_checkpoint == "exit_request":
+        return True
+    return False
+
+inv=load(inv_path)
+if has_exit_request(inv):
+    raise SystemExit(0)
+
+prog=load(progress_path)
+if has_exit_request(prog):
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  return $?
+}
+
 exit_by_signal() {
   local process_exit_code="$1"
   if [ "$process_exit_code" -ge 128 ]; then
@@ -928,6 +981,7 @@ add("system_snapshot","system_snapshot.txt","out/system_snapshot.txt")
 add("ps_snapshot","ps_snapshot.txt","out/ps_snapshot.txt")
 add("gdb_bt","gdb_bt.txt","out/gdb_bt.txt")
 add("core_dump_path","core_dump_path.txt","out/core_dump_path.txt")
+add("core_pattern","core_pattern.txt","out/core_pattern.txt")
 
 print(json.dumps(paths, sort_keys=True, separators=(',', ':')))
 PY
@@ -1202,6 +1256,27 @@ ensure_queue_dirs() {
   mkdir -p "${queue_dir}/results/.tmp" "${queue_dir}/leases/archive"
 }
 
+enable_core_dumps() {
+  local run_dir="$1"
+  local out_dir="$2"
+  local pattern_path="/proc/sys/kernel/core_pattern"
+  local current_pattern=""
+
+  ulimit -c unlimited 2>/dev/null || true
+
+  if [ -r "$pattern_path" ]; then
+    current_pattern="$(cat "$pattern_path" 2>/dev/null || true)"
+  fi
+
+  if [ -n "$current_pattern" ]; then
+    printf '%s\n' "$current_pattern" > "${out_dir}/core_pattern.txt" 2>/dev/null || true
+  fi
+
+  if [ -w "$pattern_path" ]; then
+    echo "${run_dir}/core.%e.%p" > "$pattern_path" 2>/dev/null || true
+  fi
+}
+
 find_core_dump() {
   local run_dir="$1"
   local build_dir="$2"
@@ -1218,6 +1293,22 @@ find_core_dump() {
   if [ -n "$core_path" ]; then
     echo "$core_path" > "$out_dir/core_dump_path.txt"
     CURRENT_CORE_DUMP_PRESENT=1
+  fi
+}
+
+capture_core_backtrace() {
+  local entrypoint_path="$1"
+  local out_dir="$2"
+  if [ "$CURRENT_CORE_DUMP_PRESENT" -ne 1 ]; then
+    return 0
+  fi
+  local core_path=""
+  core_path="$(cat "${out_dir}/core_dump_path.txt" 2>/dev/null || true)"
+  if [ -z "$core_path" ]; then
+    return 0
+  fi
+  if command -v gdb >/dev/null 2>&1; then
+    gdb -batch -ex "thread apply all bt" "$entrypoint_path" "$core_path" > "${out_dir}/gdb_bt.txt" 2>/dev/null || true
   fi
 }
 
@@ -1685,6 +1776,7 @@ run_job() {
     local orig_dir
     orig_dir="$(pwd)"
     cd "$build_dir" || true
+    enable_core_dumps "$run_dir" "$out_dir"
     setsid -- env \
       ${repo_root:+TRI_ROOT=$repo_root} \
       ${repo_root:+TRI_REPO_ROOT=$repo_root} \
@@ -1732,6 +1824,7 @@ run_job() {
     CURRENT_PLAYER_LOG="$player_log"
     CURRENT_CORE_DUMP_PRESENT=0
     find_core_dump "$run_dir" "$build_dir" "$out_dir"
+    capture_core_backtrace "$entrypoint_path" "$out_dir"
     if [ "$timed_out" -eq 1 ]; then
       exit_reason="$EXIT_REASON_HANG"
     else
@@ -1744,7 +1837,14 @@ run_job() {
   local original_exit_code=""
   local signature_exit_reason="$exit_reason"
   local signature_exit_code="$runner_exit_code"
-  if [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
+  if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
+    original_exit_reason="$exit_reason"
+    original_exit_code="$runner_exit_code"
+    exit_reason="$EXIT_REASON_WARN"
+    runner_exit_code="$EXIT_CODE_SUCCESS"
+    signature_exit_reason="$original_exit_reason"
+    signature_exit_code="$original_exit_code"
+  elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
     if required_questions_unknown_present "$out_dir"; then
       original_exit_reason="$exit_reason"
       original_exit_code="$runner_exit_code"
