@@ -13,6 +13,7 @@ param(
     [string]$ScenarioRel = "",
     [string]$WorkflowRef = "",
     [string]$EnvJson = "",
+    [string]$ToolsRef = "",
     [string]$Repo = "MoniVibe/HeadlessRebuildTool",
     [string]$Workflow = "buildbox_on_demand.yml",
     [int]$PollSec = 10,
@@ -88,6 +89,9 @@ if (-not [string]::IsNullOrWhiteSpace($ScenarioRel)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
     $inputArgs += "env_json=$EnvJson"
+}
+if (-not [string]::IsNullOrWhiteSpace($ToolsRef)) {
+    $inputArgs += "tools_ref=$ToolsRef"
 }
 
 $ghArgs = @("workflow", "run", $Workflow, "-R", $Repo)

@@ -42,6 +42,10 @@ on:
         description: "Optional env JSON map (e.g. {\"PUREDOTS_BUGHUNT\":\"1\"})"
         required: false
         default: ""
+      tools_ref:
+        description: "Optional HeadlessRebuildTool ref/sha for tools repo (blank = use workflow sha)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -75,6 +79,7 @@ jobs:
           $clean  = '${{ inputs.clean_cache }}' -eq 'true'
           $scenarioRel = '${{ inputs.scenario_rel }}'
           $envJson = '${{ inputs.env_json }}'
+          $toolsRef = '${{ inputs.tools_ref }}'
           $scenarioId = ""
           if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) {
             try {
@@ -115,13 +120,18 @@ jobs:
 
           $toolsRepo = Split-Path -Parent $pipeline
           $toolsRepo = Split-Path -Parent $toolsRepo
+          if ([string]::IsNullOrWhiteSpace($toolsRef)) {
+            $toolsRef = '${{ github.sha }}'
+          }
           if (Test-Path (Join-Path $toolsRepo ".git")) {
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
-            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard origin/main
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsRef
           } else {
             $toolsRepo = Join-Path $env:GITHUB_WORKSPACE "tools_repo"
             if (Test-Path $toolsRepo) { Remove-Item -Recurse -Force $toolsRepo }
             & git clone "https://github.com/MoniVibe/HeadlessRebuildTool.git" $toolsRepo
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsRef
             $pipeline = Join-Path $toolsRepo "Polish\\pipeline_smoke.ps1"
           }
 

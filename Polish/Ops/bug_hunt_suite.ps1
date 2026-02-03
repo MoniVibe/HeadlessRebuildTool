@@ -12,7 +12,8 @@ param(
     [switch]$WaitForResult,
     [string]$Disable = '',
     [string]$EnvJson = '',
-    [string]$WorkflowRef = ''
+    [string]$WorkflowRef = '',
+    [string]$ToolsRef = ''
 )
 
 Set-StrictMode -Version Latest
@@ -77,5 +78,6 @@ foreach ($scenarioRel in $ScenarioRels) {
     if (-not [string]::IsNullOrWhiteSpace($QueueRoot)) { $args.QueueRoot = $QueueRoot }
     if (-not [string]::IsNullOrWhiteSpace($PuredotsRef)) { $args.PuredotsRef = $PuredotsRef }
     if (-not [string]::IsNullOrWhiteSpace($WorkflowRef)) { $args.WorkflowRef = $WorkflowRef }
+    if (-not [string]::IsNullOrWhiteSpace($ToolsRef)) { $args.ToolsRef = $ToolsRef }
     & $trigger @args
 }
