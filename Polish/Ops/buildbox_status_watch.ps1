@@ -36,7 +36,7 @@ function Read-SummaryField {
         [string]$Name
     )
     if (-not $Lines) { return "" }
-    $pattern = "^\*\s+$Name:\s*(.+)$"
+    $pattern = "^\*\s+${Name}:\s*(.+)$"
     foreach ($line in $Lines) {
         $m = [regex]::Match($line, $pattern)
         if ($m.Success) { return $m.Groups[1].Value.Trim() }
