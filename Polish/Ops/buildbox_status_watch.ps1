@@ -97,7 +97,12 @@ function Show-SshHealth {
         return
     }
 
-    $ssh = @($sshExe,"-i",$SshKey,"-o","IdentitiesOnly=yes","-o","StrictHostKeyChecking=accept-new",("{0}@{1}" -f $SshUser,$SshHost))
+    $sshArgs = @(
+        "-i", $SshKey,
+        "-o", "IdentitiesOnly=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+        ("{0}@{1}" -f $SshUser, $SshHost)
+    )
 
     $scriptLines = @()
     $scriptLines += 'hostname'
@@ -138,7 +143,7 @@ function Show-SshHealth {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($remoteScript))
     $remote = "powershell -NoProfile -EncodedCommand $encoded"
     try {
-        & $ssh $remote
+        & $sshExe @sshArgs $remote
     } catch {
         Write-Host ("ssh health failed: {0}" -f $_.Exception.Message)
     }
