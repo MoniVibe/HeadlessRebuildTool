@@ -13,7 +13,8 @@ param(
     [string]$Disable = '',
     [string]$EnvJson = '',
     [string]$WorkflowRef = '',
-    [string]$ToolsRef = ''
+    [string]$ToolsRef = '',
+    [switch]$FastFirst
 )
 
 Set-StrictMode -Version Latest
@@ -35,6 +36,22 @@ function Resolve-ScenarioDefaults {
         'Assets/Scenarios/space4x_sensors_micro.json',
         'Assets/Scenarios/space4x_dogfight_headless.json'
     )
+}
+
+function Get-ScenarioPriority {
+    param([string]$ScenarioRel)
+    if ([string]::IsNullOrWhiteSpace($ScenarioRel)) { return 99 }
+    $name = [IO.Path]::GetFileNameWithoutExtension($ScenarioRel)
+    switch ($name) {
+        'space4x_bug_hunt_headless' { return 0 }
+        'space4x_smoke_headless' { return 1 }
+        'space4x_collision_micro' { return 2 }
+        'space4x_turnrate_micro' { return 3 }
+        'space4x_comms_micro' { return 4 }
+        'space4x_sensors_micro' { return 5 }
+        'space4x_dogfight_headless' { return 6 }
+        default { return 50 }
+    }
 }
 
 function Build-EnvJson {
@@ -60,6 +77,18 @@ if (-not (Test-Path $trigger)) {
 
 if (-not $ScenarioRels -or $ScenarioRels.Count -eq 0) {
     $ScenarioRels = Resolve-ScenarioDefaults -Title $Title
+}
+
+if (-not $PSBoundParameters.ContainsKey('FastFirst') -or $FastFirst) {
+    $index = 0
+    $ScenarioRels = $ScenarioRels | ForEach-Object {
+        $index++
+        [pscustomobject]@{
+            Rel = $_
+            Priority = Get-ScenarioPriority $_
+            Index = $index
+        }
+    } | Sort-Object Priority, Index | ForEach-Object { $_.Rel }
 }
 
 $envJsonValue = Build-EnvJson -Disable $Disable -EnvJson $EnvJson
