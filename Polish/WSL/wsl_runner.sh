@@ -1972,6 +1972,12 @@ run_job() {
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
     "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank"
 
+  local run_state="failed"
+  if [ "$exit_reason" = "$EXIT_REASON_SUCCESS" ] || [ "$exit_reason" = "$EXIT_REASON_WARN" ]; then
+    run_state="ran"
+  fi
+  log "run_state=${run_state} exit_reason=${exit_reason} job_id=${job_id} scenario_id=${scenario_id}"
+
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"

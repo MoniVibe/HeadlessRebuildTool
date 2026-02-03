@@ -30,6 +30,45 @@ function Show-GhRuns {
     }
 }
 
+function Read-SummaryField {
+    param(
+        [string[]]$Lines,
+        [string]$Name
+    )
+    if (-not $Lines) { return "" }
+    $pattern = "^\*\s+$Name:\s*(.+)$"
+    foreach ($line in $Lines) {
+        $m = [regex]::Match($line, $pattern)
+        if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    }
+    return ""
+}
+
+function Show-PipelineStatus {
+    Write-Section "Pipeline Status"
+    foreach ($title in $Titles) {
+        $summaryPath = Join-Path $QueueRoot "$title\\queue\\reports\\pipeline_smoke_summary_latest.md"
+        if (-not (Test-Path $summaryPath)) {
+            Write-Host ("{0}: summary_missing" -f $title)
+            continue
+        }
+        $lines = Get-Content -Path $summaryPath
+        $pipelineState = Read-SummaryField -Lines $lines -Name "pipeline_state"
+        if (-not $pipelineState) {
+            $status = Read-SummaryField -Lines $lines -Name "status"
+            if ($status) {
+                $pipelineState = ($status -eq "SUCCESS") ? "finished" : "failed"
+            }
+        }
+        $buildState = Read-SummaryField -Lines $lines -Name "build_state"
+        $runState = Read-SummaryField -Lines $lines -Name "run_state"
+        $scenarioId = Read-SummaryField -Lines $lines -Name "scenario_id"
+        $buildId = Read-SummaryField -Lines $lines -Name "build_id"
+        $workflowState = Read-SummaryField -Lines $lines -Name "workflow_state"
+        Write-Host ("{0}: pipeline={1} build={2} run={3} workflow={4} scenario={5} build_id={6}" -f $title, $pipelineState, $buildState, $runState, $workflowState, $scenarioId, $buildId)
+    }
+}
+
 function Show-Runner {
     if (-not $ShowRunner) { return }
     Write-Section "Runner Status"
@@ -57,9 +96,27 @@ function Show-SshHealth {
         $leases = Join-Path $QueueRoot "$title\\queue\\leases"
         $results = Join-Path $QueueRoot "$title\\queue\\results"
         $artifacts = Join-Path $QueueRoot "$title\\queue\\artifacts"
+        $summary = Join-Path $QueueRoot "$title\\queue\\reports\\pipeline_smoke_summary_latest.md"
         $scriptLines += ("Write-Host '--- {0} ---'" -f $title)
         $scriptLines += ('$dirs = @(' + ("'{0}','{1}','{2}','{3}'" -f $jobs,$leases,$results,$artifacts) + ')')
         $scriptLines += 'foreach ($d in $dirs) { if (Test-Path $d) { $count=(Get-ChildItem -Path $d -File | Measure-Object).Count; Write-Host (\"{0}={1}\" -f (Split-Path $d -Leaf), $count) } else { Write-Host (\"{0}=MISSING\" -f (Split-Path $d -Leaf)) } }'
+        $scriptLines += ('$summaryPath = "{0}"' -f $summary)
+        $scriptLines += '$pipeline=""; $build=""; $run=""; $workflow=""; $scenario=""; $buildId="";'
+        $scriptLines += 'if (Test-Path $summaryPath) {'
+        $scriptLines += '  $lines = Get-Content -Path $summaryPath'
+        $scriptLines += '  foreach ($line in $lines) {'
+        $scriptLines += '    if ($line -match "^\\*\\s+pipeline_state:\\s*(.+)$") { $pipeline = $matches[1].Trim() }'
+        $scriptLines += '    elseif ($line -match "^\\*\\s+build_state:\\s*(.+)$") { $build = $matches[1].Trim() }'
+        $scriptLines += '    elseif ($line -match "^\\*\\s+run_state:\\s*(.+)$") { $run = $matches[1].Trim() }'
+        $scriptLines += '    elseif ($line -match "^\\*\\s+workflow_state:\\s*(.+)$") { $workflow = $matches[1].Trim() }'
+        $scriptLines += '    elseif ($line -match "^\\*\\s+scenario_id:\\s*(.+)$") { $scenario = $matches[1].Trim() }'
+        $scriptLines += '    elseif ($line -match "^\\*\\s+build_id:\\s*(.+)$") { $buildId = $matches[1].Trim() }'
+        $scriptLines += '  }'
+        $scriptLines += '  if (-not $pipeline) {'
+        $scriptLines += '    foreach ($line in $lines) { if ($line -match "^\\*\\s+status:\\s*(.+)$") { $pipeline = ($matches[1].Trim() -eq "SUCCESS") ? "finished" : "failed"; break } }'
+        $scriptLines += '  }'
+        $scriptLines += '  Write-Host ("pipeline_state={0} build_state={1} run_state={2} workflow_state={3} scenario_id={4} build_id={5}" -f $pipeline,$build,$run,$workflow,$scenario,$buildId)'
+        $scriptLines += '} else { Write-Host "pipeline_state=missing" }'
     }
 
     $remoteScript = $scriptLines -join "`n"
@@ -100,6 +157,7 @@ while ($true) {
     $iteration++
     Write-Host ("\n[{0}] buildbox_status_watch" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
     Show-GhRuns
+    Show-PipelineStatus
     Show-Runner
     Show-LocalQueue
     Show-SshHealth

@@ -273,6 +273,7 @@ jobs:
           $summary = Join-Path $queueRoot "reports\\pipeline_smoke_summary_latest.md"
           $summaryCopy = Join-Path $env:GITHUB_WORKSPACE "pipeline_smoke_summary_latest.md"
           if (Test-Path $summary) {
+            Add-Content -Path $summary -Value "* workflow_state: completed"
             Copy-Item -Path $summary -Destination $summaryCopy -Force
             $summaryText = Get-Content $summaryCopy -Raw
             if ($summaryText -match '(?m)^\\* status: FAIL') {
