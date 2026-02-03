@@ -773,12 +773,19 @@ inv=load(inv_path)
 if has_exit_request(inv):
     raise SystemExit(0)
 
-prog=load(progress_path)
-if has_exit_request(prog):
+  prog=load(progress_path)
+  if has_exit_request(prog):
     raise SystemExit(0)
 
 raise SystemExit(1)
 PY
+  local status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+
+  local pattern='HeadlessExitSystem\] Quit requested'
+  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
   return $?
 }
 
