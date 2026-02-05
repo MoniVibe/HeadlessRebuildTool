@@ -115,7 +115,9 @@ function Invoke-SshJson {
         "-o", "StrictHostKeyChecking=accept-new",
         ("{0}@{1}" -f $SshUser, $SshHost)
     )
-    $remote = "powershell -NoProfile -Command `"$RemoteScript`""
+    $bytes = [System.Text.Encoding]::Unicode.GetBytes($RemoteScript)
+    $encoded = [Convert]::ToBase64String($bytes)
+    $remote = "powershell -NoProfile -EncodedCommand $encoded"
     $output = & $info.exe @sshArgs $remote
     if (-not $output) { return $null }
     return ($output | ConvertFrom-Json)
