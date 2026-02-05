@@ -276,6 +276,8 @@ internal static class Program
             File.AppendAllText(unityLog, $"UNITY_PROJECT_MUTEX_TIMEOUT project={options.ProjectPath}{Environment.NewLine}", Encoding.ASCII);
             return new UnityRunResult(1, false);
         }
+        using var settingsOverride = new ProjectSettingsOverride(options.ProjectPath, logger);
+
         var args = new List<string>
         {
             "-batchmode",
@@ -2640,6 +2642,93 @@ internal static class Program
             public UIntPtr JobMemoryLimit;
             public UIntPtr PeakProcessMemoryUsed;
             public UIntPtr PeakJobMemoryUsed;
+        }
+    }
+
+    private sealed class ProjectSettingsOverride : IDisposable
+    {
+        private readonly string? _graphicsPath;
+        private readonly string? _qualityPath;
+        private readonly string? _graphicsBackup;
+        private readonly string? _qualityBackup;
+        private readonly Logger _logger;
+        private readonly bool _applied;
+
+        public ProjectSettingsOverride(string projectPath, Logger logger)
+        {
+            _logger = logger;
+            _graphicsPath = Path.Combine(projectPath, "ProjectSettings", "GraphicsSettings.asset");
+            _qualityPath = Path.Combine(projectPath, "ProjectSettings", "QualitySettings.asset");
+
+            if (File.Exists(_graphicsPath))
+            {
+                _graphicsBackup = File.ReadAllText(_graphicsPath, Encoding.UTF8);
+            }
+
+            if (File.Exists(_qualityPath))
+            {
+                _qualityBackup = File.ReadAllText(_qualityPath, Encoding.UTF8);
+            }
+
+            var applied = false;
+            if (!string.IsNullOrEmpty(_graphicsBackup))
+            {
+                var updated = ClearRenderPipelineRefs(_graphicsBackup, "m_CustomRenderPipeline");
+                if (!string.Equals(updated, _graphicsBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_graphicsPath, updated, Encoding.UTF8);
+                    applied = true;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_qualityBackup))
+            {
+                var updated = ClearRenderPipelineRefs(_qualityBackup, "customRenderPipeline");
+                if (!string.Equals(updated, _qualityBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_qualityPath, updated, Encoding.UTF8);
+                    applied = true;
+                }
+            }
+
+            _applied = applied;
+            if (_applied)
+            {
+                _logger.Info("headless_render_pipeline_cleared");
+            }
+        }
+
+        public void Dispose()
+        {
+            if (!_applied)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!string.IsNullOrEmpty(_graphicsBackup) && _graphicsPath != null)
+                {
+                    File.WriteAllText(_graphicsPath, _graphicsBackup, Encoding.UTF8);
+                }
+
+                if (!string.IsNullOrEmpty(_qualityBackup) && _qualityPath != null)
+                {
+                    File.WriteAllText(_qualityPath, _qualityBackup, Encoding.UTF8);
+                }
+
+                _logger.Info("headless_render_pipeline_restored");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"headless_render_pipeline_restore_failed err={ex.GetType().Name}");
+            }
+        }
+
+        private static string ClearRenderPipelineRefs(string content, string key)
+        {
+            var pattern = $"({Regex.Escape(key)}:\\s*)\\{{fileID:[^}}]*\\}}";
+            return Regex.Replace(content, pattern, $"$1{{fileID: 0}}", RegexOptions.Multiline);
         }
     }
 }
