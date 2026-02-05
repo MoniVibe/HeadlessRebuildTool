@@ -126,7 +126,8 @@ function Invoke-SshJson {
 
 function Read-DesktopQueue {
     if (-not $UseSsh) { return $null }
-    $remoteScript = @'
+$remoteScript = @'
+$ProgressPreference='SilentlyContinue';
 $queues=@(
   @{name='space4x';path='C:\polish\anviloop\space4x\queue'},
   @{name='godgame';path='C:\polish\anviloop\godgame\queue'}
