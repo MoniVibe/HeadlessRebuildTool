@@ -15,6 +15,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 function Resolve-StatePath {
     if (-not [string]::IsNullOrWhiteSpace($StatePath)) { return $StatePath }
