@@ -2654,8 +2654,11 @@ internal static class Program
         private readonly string? _graphicsBackup;
         private readonly string? _qualityBackup;
         private readonly string? _projectSettingsBackup;
+        private readonly string? _entitiesGraphicsPath;
+        private readonly string? _entitiesGraphicsBackup;
         private readonly Logger _logger;
         private readonly bool _applied;
+        private readonly bool _entitiesGraphicsPatched;
 
         public ProjectSettingsOverride(string projectPath, Logger logger)
         {
@@ -2663,6 +2666,7 @@ internal static class Program
             _graphicsPath = Path.Combine(projectPath, "ProjectSettings", "GraphicsSettings.asset");
             _qualityPath = Path.Combine(projectPath, "ProjectSettings", "QualitySettings.asset");
             _projectSettingsPath = Path.Combine(projectPath, "ProjectSettings", "ProjectSettings.asset");
+            _entitiesGraphicsPath = TryLocateEntitiesGraphicsSystem(projectPath);
 
             if (File.Exists(_graphicsPath))
             {
@@ -2679,7 +2683,13 @@ internal static class Program
                 _projectSettingsBackup = File.ReadAllText(_projectSettingsPath, Encoding.UTF8);
             }
 
+            if (!string.IsNullOrWhiteSpace(_entitiesGraphicsPath) && File.Exists(_entitiesGraphicsPath))
+            {
+                _entitiesGraphicsBackup = File.ReadAllText(_entitiesGraphicsPath, Encoding.UTF8);
+            }
+
             var applied = false;
+            var needsScriptAssembliesClear = false;
             if (!string.IsNullOrEmpty(_graphicsBackup))
             {
                 var updated = ClearRenderPipelineRefs(_graphicsBackup, "m_CustomRenderPipeline");
@@ -2687,6 +2697,7 @@ internal static class Program
                 {
                     File.WriteAllText(_graphicsPath, updated, Encoding.UTF8);
                     applied = true;
+                    needsScriptAssembliesClear = true;
                 }
             }
 
@@ -2697,6 +2708,7 @@ internal static class Program
                 {
                     File.WriteAllText(_qualityPath, updated, Encoding.UTF8);
                     applied = true;
+                    needsScriptAssembliesClear = true;
                 }
             }
 
@@ -2710,20 +2722,7 @@ internal static class Program
                 {
                     File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
                     applied = true;
-
-                    var scriptAssemblies = Path.Combine(projectPath, "Library", "ScriptAssemblies");
-                    try
-                    {
-                        if (Directory.Exists(scriptAssemblies))
-                        {
-                            Directory.Delete(scriptAssemblies, true);
-                            _logger.Info("headless_scriptassemblies_cleared");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warn($"headless_scriptassemblies_clear_failed err={ex.GetType().Name}");
-                    }
+                    needsScriptAssembliesClear = true;
                 }
 
                 var standaloneDefines = ExtractDefineSymbols(updated, "Standalone");
@@ -2733,7 +2732,39 @@ internal static class Program
                 }
             }
 
+            var entitiesGraphicsPatched = false;
+            if (!string.IsNullOrWhiteSpace(_entitiesGraphicsPath) && !string.IsNullOrEmpty(_entitiesGraphicsBackup))
+            {
+                var updated = DisableEntitiesGraphics(_entitiesGraphicsBackup);
+                if (!string.Equals(updated, _entitiesGraphicsBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_entitiesGraphicsPath, updated, Encoding.UTF8);
+                    entitiesGraphicsPatched = true;
+                    applied = true;
+                    needsScriptAssembliesClear = true;
+                    _logger.Info($"headless_entitiesgraphics_patched path={_entitiesGraphicsPath}");
+                }
+            }
+
+            if (needsScriptAssembliesClear)
+            {
+                var scriptAssemblies = Path.Combine(projectPath, "Library", "ScriptAssemblies");
+                try
+                {
+                    if (Directory.Exists(scriptAssemblies))
+                    {
+                        Directory.Delete(scriptAssemblies, true);
+                        _logger.Info("headless_scriptassemblies_cleared");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn($"headless_scriptassemblies_clear_failed err={ex.GetType().Name}");
+                }
+            }
+
             _applied = applied;
+            _entitiesGraphicsPatched = entitiesGraphicsPatched;
             if (_applied)
             {
                 _logger.Info("headless_projectsettings_overrides_applied");
@@ -2762,6 +2793,12 @@ internal static class Program
                 if (!string.IsNullOrEmpty(_projectSettingsBackup) && _projectSettingsPath != null)
                 {
                     File.WriteAllText(_projectSettingsPath, _projectSettingsBackup, Encoding.UTF8);
+                }
+
+                if (_entitiesGraphicsPatched && !string.IsNullOrWhiteSpace(_entitiesGraphicsPath) && _entitiesGraphicsBackup != null)
+                {
+                    File.WriteAllText(_entitiesGraphicsPath, _entitiesGraphicsBackup, Encoding.UTF8);
+                    _logger.Info("headless_entitiesgraphics_restored");
                 }
 
                 _logger.Info("headless_projectsettings_overrides_restored");
@@ -2837,6 +2874,45 @@ internal static class Program
                 return string.Empty;
             }
             return match.Groups[1].Value.Trim();
+        }
+
+        private static string? TryLocateEntitiesGraphicsSystem(string projectPath)
+        {
+            var cacheRoot = Path.Combine(projectPath, "Library", "PackageCache");
+            if (!Directory.Exists(cacheRoot))
+            {
+                return null;
+            }
+
+            var candidates = Directory.GetDirectories(cacheRoot, "com.unity.entities.graphics@*", SearchOption.TopDirectoryOnly);
+            foreach (var candidate in candidates)
+            {
+                var path = Path.Combine(candidate, "Unity.Entities.Graphics", "EntitiesGraphicsSystem.cs");
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+            }
+            return null;
+        }
+
+        private static string DisableEntitiesGraphics(string content)
+        {
+            const string marker = "// ANVILOOP_HEADLESS_DISABLE_HYBRID";
+            if (content.Contains(marker, StringComparison.Ordinal))
+            {
+                return content;
+            }
+
+            var injection = marker + Environment.NewLine + "#define HYBRID_RENDERER_DISABLED" + Environment.NewLine + Environment.NewLine;
+            var sentinel = "#if !(SRP_10_0_0_OR_NEWER || HYBRID_RENDERER_ENABLE_WITHOUT_SRP)";
+            var index = content.IndexOf(sentinel, StringComparison.Ordinal);
+            if (index <= 0)
+            {
+                return content;
+            }
+
+            return content.Insert(index, injection);
         }
     }
 }
