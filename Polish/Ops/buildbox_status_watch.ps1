@@ -16,7 +16,9 @@ param(
     [switch]$ShowRunner,
     [switch]$HideLocalQueue,
     [switch]$NoClear,
-    [int]$TableWidth = 220
+    [switch]$Log,
+    [int]$TableWidth = 320,
+    [switch]$Compact
 )
 
 Set-StrictMode -Version Latest
@@ -81,6 +83,28 @@ function Show-GhRuns {
         Write-Table -Rows $rows
     } catch {
         Write-Host ("gh run list failed: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Show-GhRunsLog {
+    param([hashtable]$Prev)
+    try {
+        $runs = gh run list -R $Repo --workflow $Workflow --limit 12 --json status,conclusion,displayTitle,headBranch,event,number,createdAt,startedAt,updatedAt | ConvertFrom-Json
+        $now = Get-Date
+        foreach ($run in $runs) {
+            $key = "{0}/{1}" -f $run.status, $run.conclusion
+            $existing = $Prev[$run.number]
+            if (-not $existing) {
+                $event = if ($run.status -eq "completed") { "workflow_" + (Format-RunStatus $run.status $run.conclusion).ToLowerInvariant() } else { "run_started" }
+                Write-Host ("[{0}] {1} id={2} branch={3} title=""{4}""" -f $now.ToString("yyyy-MM-dd HH:mm:ss"), $event, $run.number, $run.headBranch, $run.displayTitle)
+            } elseif ($existing -ne $key) {
+                $event = if ($run.status -eq "completed") { "workflow_" + (Format-RunStatus $run.status $run.conclusion).ToLowerInvariant() } else { "run_status" }
+                Write-Host ("[{0}] {1} id={2} status={3} title=""{4}""" -f $now.ToString("yyyy-MM-dd HH:mm:ss"), $event, $run.number, (Format-RunStatus $run.status $run.conclusion), $run.displayTitle)
+            }
+            $Prev[$run.number] = $key
+        }
+    } catch {
+        Write-Host ("[{0}] gh run list failed: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message)
     }
 }
 
@@ -198,6 +222,46 @@ function Show-PipelineStatus {
     }
 }
 
+function Show-PipelineStatusLog {
+    param([hashtable]$Prev)
+    $now = Get-Date
+    foreach ($title in $Titles) {
+        $summaryPath = Join-Path $QueueRoot "$title\\queue\\reports\\pipeline_smoke_summary_latest.md"
+        $legacyPath = Join-Path $LegacyQueueRoot "reports\\pipeline_smoke_summary_latest.md"
+        $lines = @()
+        if (Test-Path $summaryPath) {
+            $lines = Get-Content -Path $summaryPath
+        } elseif (Test-Path $legacyPath) {
+            $lines = Get-Content -Path $legacyPath
+        }
+        if (-not $lines -or $lines.Count -eq 0) {
+            $state = "summary_missing"
+            if ($Prev[$title] -ne $state) {
+                Write-Host ("[{0}] pipeline_status title={1} state={2}" -f $now.ToString("yyyy-MM-dd HH:mm:ss"), $title, $state)
+                $Prev[$title] = $state
+            }
+            continue
+        }
+        $pipelineState = Read-SummaryField -Lines $lines -Name "pipeline_state"
+        if (-not $pipelineState) {
+            $status = Read-SummaryField -Lines $lines -Name "status"
+            if ($status) {
+                $pipelineState = $status.ToLowerInvariant()
+            }
+        }
+        $buildState = Read-SummaryField -Lines $lines -Name "build_state"
+        $runState = Read-SummaryField -Lines $lines -Name "run_state"
+        $workflowState = Read-SummaryField -Lines $lines -Name "workflow_state"
+        $scenarioId = Read-SummaryField -Lines $lines -Name "scenario_id"
+        $payload = ("{0}|build={1}|run={2}|workflow={3}|scenario={4}" -f $pipelineState, $buildState, $runState, $workflowState, $scenarioId)
+        if ($Prev[$title] -ne $payload) {
+            Write-Host ("[{0}] pipeline_status title={1} state={2} build={3} run={4} workflow={5} scenario={6}" -f
+                $now.ToString("yyyy-MM-dd HH:mm:ss"), $title, $pipelineState, $buildState, $runState, $workflowState, $scenarioId)
+            $Prev[$title] = $payload
+        }
+    }
+}
+
 function Show-Runner {
     if (-not $ShowRunner) { return }
     Write-Section "Runner Status"
@@ -262,16 +326,16 @@ function Invoke-SshJson {
     return ($output | ConvertFrom-Json)
 }
 
-function Show-SshHealth {
-    if (-not $UseSsh) { return }
-    Write-Section "Desktop Queue (SSH)"
+function Get-SshQueueSnapshot {
+    $queueRoot = if ([string]::IsNullOrWhiteSpace($QueueRoot)) { "C:\\polish\\anviloop" } else { $QueueRoot }
     $remoteScript = @'
 $ErrorActionPreference='Stop';
+$queueRoot='__QUEUE_ROOT__';
 $drive=Get-PSDrive -Name C -EA SilentlyContinue;
 $freeGb=if($drive){[math]::Round($drive.Free/1GB,1)}else{''};
 $queueList=@(
-    @{name='space4x';path='C:\polish\anviloop\space4x\queue'},
-    @{name='godgame';path='C:\polish\anviloop\godgame\queue'}
+    @{name='space4x';path=(Join-Path $queueRoot 'space4x\queue')},
+    @{name='godgame';path=(Join-Path $queueRoot 'godgame\queue')}
 );
 $queues=@();
 foreach($q in $queueList){
@@ -303,14 +367,23 @@ foreach($q in $queueList){
     queues=$queues
 } | ConvertTo-Json -Depth 4
 '@
+    $remoteScript = $remoteScript.Replace('__QUEUE_ROOT__', $queueRoot)
     $remoteScript = ($remoteScript -replace "\r?\n", " ")
+    return (Invoke-SshJson -RemoteScript $remoteScript)
+}
+
+function Show-SshHealth {
+    if (-not $UseSsh) { return }
+    Write-Section "Desktop Queue (SSH)"
     try {
-        $data = Invoke-SshJson -RemoteScript $remoteScript
+        $data = Get-SshQueueSnapshot
         if (-not $data) {
             Write-Host "ssh health failed: empty response"
             return
         }
-        Write-Host ("HOST={0} USER={1} C_free_GB={2}" -f $data.host, $data.user, $data.c_free_gb)
+        if (-not $Compact) {
+            Write-Host ("HOST={0} USER={1} C_free_GB={2}" -f $data.host, $data.user, $data.c_free_gb)
+        }
         $rows = foreach ($q in $data.queues) {
             [pscustomobject]@{
                 TITLE = $q.name
@@ -324,6 +397,30 @@ foreach($q in $queueList){
         Write-Table -Rows $rows
     } catch {
         Write-Host ("ssh health failed: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Show-SshHealthLog {
+    param([hashtable]$Prev)
+    if (-not $UseSsh) { return }
+    $now = Get-Date
+    try {
+        $data = Get-SshQueueSnapshot
+        if (-not $data) {
+            Write-Host ("[{0}] ssh_queue failed=empty_response" -f $now.ToString("yyyy-MM-dd HH:mm:ss"))
+            return
+        }
+        foreach ($q in $data.queues) {
+            $key = "{0}|{1}|{2}|{3}|{4}" -f $q.jobs, $q.leases, $q.results, $q.artifacts, $q.latest
+            $prevKey = $Prev[$q.name]
+            if ($prevKey -ne $key) {
+                Write-Host ("[{0}] queue_status title={1} jobs={2} leases={3} results={4} artifacts={5} latest={6}" -f
+                    $now.ToString("yyyy-MM-dd HH:mm:ss"), $q.name, $q.jobs, $q.leases, $q.results, $q.artifacts, $q.latest)
+                $Prev[$q.name] = $key
+            }
+        }
+    } catch {
+        Write-Host ("[{0}] ssh_queue failed: {1}" -f $now.ToString("yyyy-MM-dd HH:mm:ss"), $_.Exception.Message)
     }
 }
 
@@ -388,17 +485,29 @@ function Show-LocalQueue {
 }
 
 $iteration = 0
+$prevRuns = @{}
+$prevPipeline = @{}
+$prevQueues = @{}
 while ($true) {
     $iteration++
-    if (-not $NoClear) {
+    if ($Log) {
+        $NoClear = $true
+    }
+    if (-not $NoClear -and -not $Log) {
         try { Clear-Host } catch { }
     }
     Write-Host ("[{0}] buildbox_status_watch" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-    Show-GhRuns
-    Show-PipelineStatus
-    Show-Runner
-    if (-not $HideLocalQueue) { Show-LocalQueue }
-    Show-SshHealth
+    if ($Log) {
+        Show-GhRunsLog -Prev $prevRuns
+        Show-PipelineStatusLog -Prev $prevPipeline
+        if ($UseSsh) { Show-SshHealthLog -Prev $prevQueues }
+    } else {
+        Show-GhRuns
+        Show-PipelineStatus
+        Show-Runner
+        if (-not $HideLocalQueue) { Show-LocalQueue }
+        Show-SshHealth
+    }
 
     if ($Once) { break }
     if ($Loops -gt 0 -and $iteration -ge $Loops) { break }
