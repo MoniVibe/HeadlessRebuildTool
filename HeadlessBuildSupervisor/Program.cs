@@ -2705,6 +2705,7 @@ internal static class Program
                 var updated = _projectSettingsBackup;
                 updated = EnsureDefineSymbol(updated, "Standalone", "HYBRID_RENDERER_DISABLED");
                 updated = EnsureDefineSymbol(updated, "Standalone", "UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP");
+                updated = EnsureDefineSymbol(updated, "Standalone", "UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP_EDITOR_WORLD");
                 if (!string.Equals(updated, _projectSettingsBackup, StringComparison.Ordinal))
                 {
                     File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
