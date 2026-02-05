@@ -1672,7 +1672,14 @@ run_job() {
     local entrypoint
     entrypoint="$(json_get_string "$manifest_path" "entrypoint")"
     if [ -z "$entrypoint" ]; then
-      error_context="entrypoint_missing"
+      local fallback_entrypoint=""
+      fallback_entrypoint="$(find "$build_dir" -maxdepth 3 -type f \( -name '*_Headless.x86_64' -o -name '*_Headless.exe' \) | head -n 1)"
+      if [ -n "$fallback_entrypoint" ]; then
+        entrypoint_path="$fallback_entrypoint"
+        log "entrypoint_missing: using fallback ${entrypoint_path}"
+      else
+        error_context="entrypoint_missing"
+      fi
     else
       if [[ "$entrypoint" = /* ]]; then
         entrypoint_path="$entrypoint"

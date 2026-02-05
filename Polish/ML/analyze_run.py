@@ -4,8 +4,10 @@ import glob
 import json
 import math
 import os
+import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 
 def load_json(path):
@@ -274,6 +276,100 @@ def parse_perf_telemetry(out_dir):
     return perf
 
 
+def tail_lines(path, max_bytes=65536, max_lines=200):
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            file_size = handle.tell()
+            read_size = min(max_bytes, file_size)
+            handle.seek(-read_size, os.SEEK_END)
+            data = handle.read(read_size)
+        text = data.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        if len(lines) > max_lines:
+            return lines[-max_lines:]
+        return lines
+    except Exception:
+        return []
+
+
+def collect_top_errors(out_dir, limit=5):
+    candidates = [
+        "diag_stderr_tail.txt",
+        "diag_stdout_tail.txt",
+        "stderr.log",
+        "stdout.log",
+        "player.log",
+    ]
+    pattern = re.compile(r"(error|exception|assert|failed|failure|fatal|crash)", re.IGNORECASE)
+    hits = []
+    for name in candidates:
+        path = os.path.join(out_dir, name)
+        for line in tail_lines(path):
+            line = line.strip()
+            if not line:
+                continue
+            if pattern.search(line):
+                hits.append(line)
+    unique = []
+    seen = set()
+    for line in hits:
+        if line in seen:
+            continue
+        seen.add(line)
+        unique.append(line)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+def extract_failed_tests(out_dir):
+    candidates = [
+        "test-results.xml",
+        "TestResults.xml",
+        "test_results.xml",
+        "TestResults.xml",
+    ]
+    for name in candidates:
+        path = os.path.join(out_dir, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            tree = ET.parse(path)
+            root = tree.getroot()
+        except Exception:
+            continue
+        failed = []
+        for case in root.findall(".//test-case"):
+            result = case.get("result") or ""
+            if result.lower() in ("failed", "error"):
+                name = case.get("name") or case.get("fullname") or case.get("id") or "unknown"
+                failed.append(name)
+        return failed
+    return []
+
+
+def suggest_next_step(exit_reason, failing_invariants, failed_tests, top_errors):
+    reason = (exit_reason or "").upper()
+    if reason == "INFRA_FAIL":
+        return "Check runner/queue infra and artifact paths; inspect meta.json and watchdog.json."
+    if reason == "HANG_TIMEOUT":
+        return "Inspect watchdog.json, gdb_bt.txt/core dump, and player.log for stall clues."
+    if reason == "CRASH":
+        return "Inspect player.log and gdb_bt.txt/core dump; look for last error/stack trace."
+    if reason == "TEST_FAIL":
+        if failed_tests:
+            return "Review failed tests in test-results.xml and fix the top failure."
+        if failing_invariants:
+            return "Review invariants.json failing entries and fix the top invariant."
+        return "Check stdout/stderr/player.log for assertion failures."
+    if top_errors:
+        return "Review top error lines in logs; fix the first reproducible error."
+    return "Review run_summary.json and logs; iterate on the first failing signal."
+
+
 def compute_score(exit_reason, runtime_sec, runtime_budget_sec, telemetry_bytes, telemetry_budget_bytes):
     breakdown = []
     total_loss = 0.0
@@ -465,6 +561,50 @@ def main():
 
     run_summary_path = os.path.join(out_dir, "run_summary.json")
     write_json(run_summary_path, run_summary)
+
+    failed_tests = extract_failed_tests(out_dir)
+    top_errors = collect_top_errors(out_dir)
+    log_files = []
+    if isinstance(artifact_paths, dict):
+        for key in (
+            "stdout_log",
+            "stderr_log",
+            "player_log",
+            "diag_stdout_tail",
+            "diag_stderr_tail",
+            "watchdog",
+            "gdb_bt",
+            "core_dump_path",
+        ):
+            path = artifact_paths.get(key)
+            if path:
+                log_files.append(path)
+
+    exit_reason = meta.get("exit_reason")
+    status = "fail"
+    if str(exit_reason).upper() == "SUCCESS":
+        status = "pass"
+    elif str(exit_reason).upper() == "OK_WITH_WARNINGS":
+        status = "warn"
+
+    run_summary_min = {
+        "schema_version": 1,
+        "status": status,
+        "exit_reason": exit_reason,
+        "exit_code": to_int(meta.get("exit_code")),
+        "job_id": meta.get("job_id"),
+        "build_id": meta.get("build_id"),
+        "commit": meta.get("commit"),
+        "scenario_id": meta.get("scenario_id"),
+        "failed_tests": failed_tests,
+        "failing_invariants": failing_invariants,
+        "telemetry_files": [entry.get("path") for entry in telemetry_files if isinstance(entry, dict)],
+        "log_files": log_files,
+        "top_errors": top_errors,
+        "suggested_next_step": suggest_next_step(exit_reason, failing_invariants, failed_tests, top_errors),
+        "run_summary_path": "out/run_summary.json",
+    }
+    write_json(os.path.join(out_dir, "run_summary_min.json"), run_summary_min)
 
     goal_report = maybe_score_goal(meta, run_summary, out_dir)
     if isinstance(goal_report, dict):

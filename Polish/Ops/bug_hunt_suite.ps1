@@ -70,9 +70,14 @@ function Build-EnvJson {
 }
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-$trigger = Join-Path $root '.cursor\skills\buildbox-iterate\scripts\trigger_buildbox.ps1'
+$trigger = Join-Path $root 'scripts\trigger_buildbox.ps1'
 if (-not (Test-Path $trigger)) {
-    throw "trigger_buildbox.ps1 not found: $trigger"
+    $legacyTrigger = Join-Path $root '.cursor\skills\buildbox-iterate\scripts\trigger_buildbox.ps1'
+    if (Test-Path $legacyTrigger) {
+        $trigger = $legacyTrigger
+    } else {
+        throw "trigger_buildbox.ps1 not found: $trigger"
+    }
 }
 
 if (-not $ScenarioRels -or $ScenarioRels.Count -eq 0) {

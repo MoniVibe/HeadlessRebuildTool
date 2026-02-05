@@ -11,6 +11,7 @@ Diagnostics bundle contents (when available):
 - pipeline_smoke.log
 - pipeline_smoke_summary_latest.md
 - results/<result_zip_name>/meta.json
+- results/<result_zip_name>/out/run_summary_min.json
 - results/<result_zip_name>/out/run_summary.json
 - results/<result_zip_name>/out/watchdog.json
 - results/<result_zip_name>/out/invariants.json

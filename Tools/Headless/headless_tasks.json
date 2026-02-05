@@ -13,7 +13,8 @@
       ],
       "default_pack": "nightly-default",
       "tags": [
-        "nightly"
+        "nightly",
+        "fast_smoke"
       ],
       "nightly_order": 10,
       "allow_exit_codes": [
@@ -146,7 +147,8 @@
       ],
       "default_pack": "nightly-default",
       "tags": [
-        "nightly"
+        "nightly",
+        "fast_smoke"
       ],
       "nightly_order": 12,
       "required_bank": "",

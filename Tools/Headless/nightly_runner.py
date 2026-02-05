@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
 
 def resolve_state_dir():
@@ -20,6 +22,43 @@ def resolve_state_dir():
 
 def resolve_tasks_path():
     return os.path.join(os.path.dirname(__file__), "headless_tasks.json")
+
+
+def resolve_nightly_lock_path(state_dir):
+    return os.path.join(state_dir, "ops", "locks", "nightly.lock")
+
+
+def should_skip_for_nightly_lock(lock_path, ttl_sec):
+    if not os.path.exists(lock_path):
+        return False, None
+    try:
+        age = time.time() - os.path.getmtime(lock_path)
+        if age > ttl_sec:
+            os.remove(lock_path)
+            return False, None
+    except Exception as exc:
+        return True, f"nightly_lock_unremovable:{exc}"
+    return True, "nightly_lock"
+
+
+def write_nightly_lock(lock_path, tag, tasks):
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    payload = {
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "pid": os.getpid(),
+        "tag": tag,
+        "tasks": tasks
+    }
+    with open(lock_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+
+
+def clear_nightly_lock(lock_path):
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except Exception:
+        pass
 
 
 def load_tasks(tasks_path):
@@ -41,6 +80,23 @@ def task_sort_key(task_id, task):
     if isinstance(order, float):
         return (int(order), task_id)
     return (1000, task_id)
+
+
+def is_fast_smoke(task):
+    tags = task.get("tags") or []
+    return "fast_smoke" in tags
+
+
+def prioritize_fast_smoke(task_ids, task_data):
+    fast = []
+    rest = []
+    for task_id in task_ids:
+        task = task_data.get(task_id, {})
+        if is_fast_smoke(task):
+            fast.append(task_id)
+        else:
+            rest.append(task_id)
+    return fast + rest
 
 
 def select_tasks(task_data, tag, task_ids):
@@ -166,6 +222,21 @@ def main():
     args = parser.parse_args()
 
     state_dir = resolve_state_dir()
+    nightly_lock_path = resolve_nightly_lock_path(state_dir)
+    nightly_lock_ttl = int(os.environ.get("TRI_NIGHTLY_LOCK_TTL_SEC", "21600"))
+    skip_for_lock, lock_reason = should_skip_for_nightly_lock(nightly_lock_path, nightly_lock_ttl)
+    if skip_for_lock:
+        summary = {
+            "ok": True,
+            "skipped": True,
+            "reason": lock_reason,
+            "tag": args.tag,
+            "tasks": []
+        }
+        summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        return
     lock_path = os.path.join(state_dir, "ops", "locks", "build.lock")
     if os.path.exists(lock_path):
         summary = {
@@ -198,6 +269,8 @@ def main():
                 json.dump(summary, handle, indent=2, sort_keys=True)
             return
 
+        write_nightly_lock(nightly_lock_path, args.tag, [])
+
         tasks_path = resolve_tasks_path()
         task_data = load_tasks(tasks_path)
         task_override = parse_task_list(args.tasks)
@@ -216,6 +289,9 @@ def main():
             with open(summary_path, "w", encoding="utf-8") as handle:
                 json.dump(summary, handle, indent=2, sort_keys=True)
             sys.exit(1)
+
+        if not task_override:
+            selected_tasks = prioritize_fast_smoke(selected_tasks, task_data)
 
         if not selected_tasks and not args.gate:
             summary = {
@@ -241,6 +317,7 @@ def main():
             "runs": [],
             "gate_runs": []
         }
+        write_nightly_lock(nightly_lock_path, args.tag, selected_tasks)
         overall_fail = False
 
         gate_tasks = ["S2.SPACE4X_CREW_SENSORS_CAUSALITY_MICRO", "S3.SPACE4X_CREW_ENTITY_TRANSFER_MICRO"]
@@ -355,6 +432,7 @@ def main():
     finally:
         if session_lock and session_lock.get("acquired"):
             run_headlessctl(["release_session_lock", "--run-id", session_lock.get("run_id") or ""])
+        clear_nightly_lock(nightly_lock_path)
 
 
 if __name__ == "__main__":
