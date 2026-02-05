@@ -35,6 +35,17 @@ function Load-State {
     }
 }
 
+function Ensure-Hashtable {
+    param([object]$Value)
+    if ($null -eq $Value) { return @{} }
+    if ($Value -is [hashtable]) { return $Value }
+    $table = @{}
+    foreach ($prop in $Value.PSObject.Properties) {
+        $table[$prop.Name] = $prop.Value
+    }
+    return $table
+}
+
 function Save-State {
     param([string]$Path, [object]$State)
     $dir = Split-Path $Path -Parent
@@ -138,9 +149,9 @@ foreach($q in $queues){
 
 $stateFile = Resolve-StatePath
 $state = Load-State -Path $stateFile
-if (-not $state.runs) { $state.runs = @{} }
-if (-not $state.artifacts) { $state.artifacts = @{} }
-if (-not $state.results) { $state.results = @{} }
+$state.runs = Ensure-Hashtable -Value $state.runs
+$state.artifacts = Ensure-Hashtable -Value $state.artifacts
+$state.results = Ensure-Hashtable -Value $state.results
 
 if (-not $NoGh) { Require-Gh }
 
