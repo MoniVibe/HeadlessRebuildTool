@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -2649,8 +2650,10 @@ internal static class Program
     {
         private readonly string? _graphicsPath;
         private readonly string? _qualityPath;
+        private readonly string? _projectSettingsPath;
         private readonly string? _graphicsBackup;
         private readonly string? _qualityBackup;
+        private readonly string? _projectSettingsBackup;
         private readonly Logger _logger;
         private readonly bool _applied;
 
@@ -2659,6 +2662,7 @@ internal static class Program
             _logger = logger;
             _graphicsPath = Path.Combine(projectPath, "ProjectSettings", "GraphicsSettings.asset");
             _qualityPath = Path.Combine(projectPath, "ProjectSettings", "QualitySettings.asset");
+            _projectSettingsPath = Path.Combine(projectPath, "ProjectSettings", "ProjectSettings.asset");
 
             if (File.Exists(_graphicsPath))
             {
@@ -2668,6 +2672,11 @@ internal static class Program
             if (File.Exists(_qualityPath))
             {
                 _qualityBackup = File.ReadAllText(_qualityPath, Encoding.UTF8);
+            }
+
+            if (File.Exists(_projectSettingsPath))
+            {
+                _projectSettingsBackup = File.ReadAllText(_projectSettingsPath, Encoding.UTF8);
             }
 
             var applied = false;
@@ -2691,10 +2700,20 @@ internal static class Program
                 }
             }
 
+            if (!string.IsNullOrEmpty(_projectSettingsBackup))
+            {
+                var updated = EnsureDefineSymbol(_projectSettingsBackup, "Standalone", "HYBRID_RENDERER_DISABLED");
+                if (!string.Equals(updated, _projectSettingsBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
+                    applied = true;
+                }
+            }
+
             _applied = applied;
             if (_applied)
             {
-                _logger.Info("headless_render_pipeline_cleared");
+                _logger.Info("headless_projectsettings_overrides_applied");
             }
         }
 
@@ -2717,7 +2736,12 @@ internal static class Program
                     File.WriteAllText(_qualityPath, _qualityBackup, Encoding.UTF8);
                 }
 
-                _logger.Info("headless_render_pipeline_restored");
+                if (!string.IsNullOrEmpty(_projectSettingsBackup) && _projectSettingsPath != null)
+                {
+                    File.WriteAllText(_projectSettingsPath, _projectSettingsBackup, Encoding.UTF8);
+                }
+
+                _logger.Info("headless_projectsettings_overrides_restored");
             }
             catch (Exception ex)
             {
@@ -2729,6 +2753,51 @@ internal static class Program
         {
             var pattern = $"({Regex.Escape(key)}:\\s*)\\{{fileID:[^}}]*\\}}";
             return Regex.Replace(content, pattern, $"$1{{fileID: 0}}", RegexOptions.Multiline);
+        }
+
+        private static string EnsureDefineSymbol(string content, string group, string symbol)
+        {
+            if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(group) || string.IsNullOrWhiteSpace(symbol))
+            {
+                return content;
+            }
+
+            var linePattern = $"(?m)^(\\s*{Regex.Escape(group)}:\\s*)(.*)$";
+            if (Regex.IsMatch(content, linePattern))
+            {
+                return Regex.Replace(content, linePattern, match =>
+                {
+                    var prefix = match.Groups[1].Value;
+                    var existing = match.Groups[2].Value.Trim();
+                    if (string.IsNullOrEmpty(existing))
+                    {
+                        return prefix + symbol;
+                    }
+
+                    var parts = existing.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(p => p.Trim())
+                        .Where(p => !string.IsNullOrEmpty(p))
+                        .ToList();
+                    if (parts.Contains(symbol, StringComparer.Ordinal))
+                    {
+                        return match.Value;
+                    }
+                    parts.Add(symbol);
+                    return prefix + string.Join(';', parts);
+                }, 1);
+            }
+
+            var blockPattern = @"(?m)^(\\s*scriptingDefineSymbols:\\s*)$";
+            if (Regex.IsMatch(content, blockPattern))
+            {
+                return Regex.Replace(content, blockPattern, match =>
+                {
+                    var indent = match.Groups[1].Value;
+                    return $"{indent}{Environment.NewLine}    {group}: {symbol}";
+                }, 1);
+            }
+
+            return content;
         }
     }
 }
