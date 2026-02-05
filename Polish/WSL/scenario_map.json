@@ -1,4 +1,5 @@
 {
   "space4x_collision_micro": "Assets/Scenarios/space4x_collision_micro.json",
+  "space4x_bug_hunt_headless": "Assets/Scenarios/space4x_bug_hunt_headless.json",
   "godgame_smoke": "Assets/Scenarios/Godgame/godgame_smoke.json"
 }

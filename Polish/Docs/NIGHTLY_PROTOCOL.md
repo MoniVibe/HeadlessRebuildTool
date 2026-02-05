@@ -19,6 +19,8 @@
   4) WSL runner consumes jobs and writes result zips.
   5) Download `buildbox_diag_*` artifacts and summarize with `Polish/Ops/diag_summarize.ps1`.
 - Local deck runs are **blocked by default** in `run_deck.ps1`. Use `-AllowLocalBuild` only for emergency local rebuilds.
+- Nightly loop lock: `Tools/Headless/nightly_runner.py` writes `$TRI_STATE_DIR/ops/locks/nightly.lock` while active (stale after ~6h). Skip launching a second loop if the lock exists.
+- Fast smoke first: tasks tagged `fast_smoke` run before the rest of the nightly list (S0/G0 by default).
 
 ## 2b) Fallback (desktop unavailable)
 - Use local rebuilds only when buildbox is offline.

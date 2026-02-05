@@ -346,6 +346,40 @@ print(json.dumps(val, sort_keys=True, separators=(',', ':')))
 PY
 }
 
+json_get_env_pairs() {
+  local file="$1"
+  local field="$2"
+  if [ -z "$field" ]; then
+    field="env"
+  fi
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    jq -r --arg field "$field" '.[$field] // {} | to_entries[] | "\(.key)=\(.value)"' "$file" 2>/dev/null || true
+    return 0
+  fi
+  "$PYTHON_BIN" - "$file" "$field" <<'PY'
+import json,sys
+path=sys.argv[1]
+field=sys.argv[2]
+try:
+    with open(path,"r",encoding="utf-8") as handle:
+        data=json.load(handle)
+except Exception:
+    data={}
+env=data.get(field, {})
+if not isinstance(env, dict):
+    env={}
+for key in sorted(env.keys()):
+    if key is None:
+        continue
+    val=env.get(key, "")
+    if isinstance(val, (dict, list)):
+        continue
+    if val is None:
+        val=""
+    print(f"{key}={val}")
+PY
+}
+
 read_json_array_field() {
   local file="$1"
   local field="$2"
@@ -555,6 +589,22 @@ shell_quote() {
   printf '%q' "$1"
 }
 
+build_env_prefix() {
+  local -a pairs=("$@")
+  if [ "${#pairs[@]}" -eq 0 ]; then
+    return 0
+  fi
+  local prefix="env"
+  local pair
+  for pair in "${pairs[@]}"; do
+    if [ -z "$pair" ]; then
+      continue
+    fi
+    prefix+=" $(shell_quote "$pair")"
+  done
+  printf '%s' "$prefix"
+}
+
 build_repro_command() {
   local entrypoint_path="$1"
   local param_json="$2"
@@ -723,12 +773,19 @@ inv=load(inv_path)
 if has_exit_request(inv):
     raise SystemExit(0)
 
-prog=load(progress_path)
-if has_exit_request(prog):
+  prog=load(progress_path)
+  if has_exit_request(prog):
     raise SystemExit(0)
 
 raise SystemExit(1)
 PY
+  local status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+
+  local pattern='HeadlessExitSystem\] Quit requested'
+  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
   return $?
 }
 
@@ -981,6 +1038,7 @@ add("system_snapshot","system_snapshot.txt","out/system_snapshot.txt")
 add("ps_snapshot","ps_snapshot.txt","out/ps_snapshot.txt")
 add("gdb_bt","gdb_bt.txt","out/gdb_bt.txt")
 add("core_dump_path","core_dump_path.txt","out/core_dump_path.txt")
+add("core_pattern","core_pattern.txt","out/core_pattern.txt")
 
 print(json.dumps(paths, sort_keys=True, separators=(',', ':')))
 PY
@@ -1255,6 +1313,27 @@ ensure_queue_dirs() {
   mkdir -p "${queue_dir}/results/.tmp" "${queue_dir}/leases/archive"
 }
 
+enable_core_dumps() {
+  local run_dir="$1"
+  local out_dir="$2"
+  local pattern_path="/proc/sys/kernel/core_pattern"
+  local current_pattern=""
+
+  ulimit -c unlimited 2>/dev/null || true
+
+  if [ -r "$pattern_path" ]; then
+    current_pattern="$(cat "$pattern_path" 2>/dev/null || true)"
+  fi
+
+  if [ -n "$current_pattern" ]; then
+    printf '%s\n' "$current_pattern" > "${out_dir}/core_pattern.txt" 2>/dev/null || true
+  fi
+
+  if [ -w "$pattern_path" ]; then
+    echo "${run_dir}/core.%e.%p" > "$pattern_path" 2>/dev/null || true
+  fi
+}
+
 find_core_dump() {
   local run_dir="$1"
   local build_dir="$2"
@@ -1271,6 +1350,22 @@ find_core_dump() {
   if [ -n "$core_path" ]; then
     echo "$core_path" > "$out_dir/core_dump_path.txt"
     CURRENT_CORE_DUMP_PRESENT=1
+  fi
+}
+
+capture_core_backtrace() {
+  local entrypoint_path="$1"
+  local out_dir="$2"
+  if [ "$CURRENT_CORE_DUMP_PRESENT" -ne 1 ]; then
+    return 0
+  fi
+  local core_path=""
+  core_path="$(cat "${out_dir}/core_dump_path.txt" 2>/dev/null || true)"
+  if [ -z "$core_path" ]; then
+    return 0
+  fi
+  if command -v gdb >/dev/null 2>&1; then
+    gdb -batch -ex "thread apply all bt" "$entrypoint_path" "$core_path" > "${out_dir}/gdb_bt.txt" 2>/dev/null || true
   fi
 }
 
@@ -1383,10 +1478,6 @@ PY
 requeue_stale_leases() {
   local queue_dir="$1"
   local ttl_sec="$2"
-  local max_requeues="${TRI_STALE_REQUEUE_MAX:-3}"
-  if ! [[ "$max_requeues" =~ ^[0-9]+$ ]]; then
-    max_requeues=3
-  fi
   local now
   now="$(date -u +%s)"
   local leases_dir="${queue_dir}/leases"
@@ -1422,48 +1513,7 @@ requeue_stale_leases() {
       continue
     fi
     local result_zip="${queue_dir}/results/result_${job_id}.zip"
-    local requeue_count_path="${leases_dir}/${job_id}.requeue"
     if [ -f "$result_zip" ]; then
-      rm -f "$requeue_count_path" 2>/dev/null || true
-      continue
-    fi
-    local requeue_count=0
-    if [ -f "$requeue_count_path" ]; then
-      requeue_count="$(tr -d '[:space:]' < "$requeue_count_path" 2>/dev/null || echo 0)"
-      if ! [[ "$requeue_count" =~ ^[0-9]+$ ]]; then
-        requeue_count=0
-      fi
-    fi
-    requeue_count=$((requeue_count + 1))
-    printf '%s' "$requeue_count" > "$requeue_count_path"
-    if [ "$max_requeues" -gt 0 ] && [ "$requeue_count" -gt "$max_requeues" ]; then
-      local raw_signature="stale_lease_timeout|${job_id}"
-      local failure_signature
-      failure_signature="$(hash_signature "$raw_signature")"
-      local tmp_dir="${queue_dir}/results/.tmp/stale_${job_id}"
-      mkdir -p "${tmp_dir}/out"
-      "$PYTHON_BIN" - "${tmp_dir}/meta.json" "$job_id" "$EXIT_REASON_INFRA" "$EXIT_CODE_INFRA_FAIL" "$failure_signature" <<'PY'
-import json,sys
-path=sys.argv[1]
-job_id=sys.argv[2]
-reason=sys.argv[3]
-exit_code=int(sys.argv[4])
-signature=sys.argv[5]
-payload={
-  "job_id": job_id,
-  "exit_reason": reason,
-  "exit_code": exit_code,
-  "failure_signature": signature
-}
-with open(path,"w",encoding="utf-8") as handle:
-  json.dump(payload, handle, indent=2, sort_keys=True)
-PY
-      write_watchdog_json "${tmp_dir}/out" "$job_id" "$EXIT_REASON_INFRA" "$EXIT_CODE_INFRA_FAIL" "$EXIT_CODE_INFRA_FAIL" "$raw_signature"
-      mkdir -p "${queue_dir}/results"
-      create_zip_from_dir "${queue_dir}/results/result_${job_id}.zip" "$tmp_dir"
-      rm -rf "$tmp_dir" 2>/dev/null || true
-      archive_lease "$lease_path" "$meta_path" "$queue_dir" "$job_id"
-      log "stale_lease_fail job_id=${job_id} count=${requeue_count}"
       continue
     fi
     local dest="${jobs_dir}/${job_id}.json"
@@ -1528,6 +1578,7 @@ run_job() {
   local required_bank=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
+  local -a env_pairs=()
 
   local error_context=""
   local repro_command=""
@@ -1551,6 +1602,7 @@ run_job() {
     required_bank="$(json_get_string "$lease_path" "required_bank")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
+    mapfile -t env_pairs < <(json_get_env_pairs "$lease_path" "env")
   fi
 
   if [ -z "$scenario_rel" ] && [ -n "$scenario_id" ]; then
@@ -1558,6 +1610,7 @@ run_job() {
     if [ -z "$scenario_rel" ]; then
       case "$scenario_id" in
         space4x_collision_micro) scenario_rel="Assets/Scenarios/space4x_collision_micro.json" ;;
+        space4x_bug_hunt_headless) scenario_rel="Assets/Scenarios/space4x_bug_hunt_headless.json" ;;
         godgame_smoke) scenario_rel="Assets/Scenarios/Godgame/godgame_smoke.json" ;;
       esac
     fi
@@ -1619,7 +1672,14 @@ run_job() {
     local entrypoint
     entrypoint="$(json_get_string "$manifest_path" "entrypoint")"
     if [ -z "$entrypoint" ]; then
-      error_context="entrypoint_missing"
+      local fallback_entrypoint=""
+      fallback_entrypoint="$(find "$build_dir" -maxdepth 3 -type f \( -name '*_Headless.x86_64' -o -name '*_Headless.exe' \) | head -n 1)"
+      if [ -n "$fallback_entrypoint" ]; then
+        entrypoint_path="$fallback_entrypoint"
+        log "entrypoint_missing: using fallback ${entrypoint_path}"
+      else
+        error_context="entrypoint_missing"
+      fi
     else
       if [[ "$entrypoint" = /* ]]; then
         entrypoint_path="$entrypoint"
@@ -1769,6 +1829,13 @@ run_job() {
     fi
 
     repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${final_args[@]}")"
+    if [ "${#env_pairs[@]}" -gt 0 ]; then
+      local env_prefix
+      env_prefix="$(build_env_prefix "${env_pairs[@]}")"
+      if [ -n "$env_prefix" ]; then
+        repro_command="${env_prefix} $repro_command"
+      fi
+    fi
     fi
   fi
 
@@ -1783,6 +1850,7 @@ run_job() {
     local orig_dir
     orig_dir="$(pwd)"
     cd "$build_dir" || true
+    enable_core_dumps "$run_dir" "$out_dir"
     setsid -- env \
       ${repo_root:+TRI_ROOT=$repo_root} \
       ${repo_root:+TRI_REPO_ROOT=$repo_root} \
@@ -1790,6 +1858,7 @@ run_job() {
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
       ${perf_telemetry_env:+PUREDOTS_PERF_TELEMETRY_PATH=$perf_telemetry_env} \
+      "${env_pairs[@]}" \
       "$entrypoint_path" "${final_args[@]}" >"$stdout_log" 2>"$stderr_log" &
     local pid=$!
     local pgid
@@ -1830,6 +1899,7 @@ run_job() {
     CURRENT_PLAYER_LOG="$player_log"
     CURRENT_CORE_DUMP_PRESENT=0
     find_core_dump "$run_dir" "$build_dir" "$out_dir"
+    capture_core_backtrace "$entrypoint_path" "$out_dir"
     if [ "$timed_out" -eq 1 ]; then
       exit_reason="$EXIT_REASON_HANG"
     else
@@ -1908,6 +1978,12 @@ run_job() {
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
     "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank"
+
+  local run_state="failed"
+  if [ "$exit_reason" = "$EXIT_REASON_SUCCESS" ] || [ "$exit_reason" = "$EXIT_REASON_WARN" ]; then
+    run_state="ran"
+  fi
+  log "run_state=${run_state} exit_reason=${exit_reason} job_id=${job_id} scenario_id=${scenario_id}"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 

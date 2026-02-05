@@ -11,6 +11,7 @@ Diagnostics bundle contents (when available):
 - pipeline_smoke.log
 - pipeline_smoke_summary_latest.md
 - results/<result_zip_name>/meta.json
+- results/<result_zip_name>/out/run_summary_min.json
 - results/<result_zip_name>/out/run_summary.json
 - results/<result_zip_name>/out/watchdog.json
 - results/<result_zip_name>/out/invariants.json
@@ -30,3 +31,4 @@ Notes:
 - The workflow looks for zips in both queue\results (result_*.zip) and queue\artifacts (artifact_*.zip).
 - It also parses pipeline_smoke.log for explicit artifact paths to extract diagnostics.
 - Raw zips are not uploaded to keep artifacts small; only extracted JSONs are included.
+- "Queue" paths refer to the desktop/buildbox machine (for example C:\polish\anviloop\<title>\queue), not this laptop.

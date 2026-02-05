@@ -12,6 +12,8 @@ param(
     [string]$GoalSpec,
     [int]$Seed,
     [string[]]$Args,
+    [hashtable]$Env,
+    [string]$EnvJson,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 1800
@@ -75,6 +77,32 @@ function Normalize-GoalSpecPath {
         return $normalized
     }
     return $normalized.TrimStart("./")
+}
+
+function ConvertTo-EnvMap {
+    param(
+        [hashtable]$Env,
+        [string]$EnvJson
+    )
+    $map = @{}
+    if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
+        try {
+            $parsed = $EnvJson | ConvertFrom-Json
+        } catch {
+            throw "EnvJson is invalid JSON."
+        }
+        if ($parsed) {
+            foreach ($prop in $parsed.PSObject.Properties) {
+                $map[$prop.Name] = $prop.Value
+            }
+        }
+    }
+    if ($Env) {
+        foreach ($key in $Env.Keys) {
+            $map[$key] = $Env[$key]
+        }
+    }
+    return $map
 }
 
 function Get-ScenarioRelFromArgs {
@@ -242,12 +270,9 @@ if ([string]::IsNullOrWhiteSpace($triRoot)) {
     $triRoot = (Resolve-Path $triRoot).Path
 }
 
-$projectPath = $titleDefaults.project_path
+$projectPath = Join-Path $triRoot $titleDefaults.project_path
 if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
     $projectPath = $ProjectPathOverride
-}
-if (-not [string]::IsNullOrWhiteSpace($projectPath) -and -not [System.IO.Path]::IsPathRooted($projectPath)) {
-    $projectPath = Join-Path $triRoot $projectPath
 }
 $projectPath = [System.IO.Path]::GetFullPath($projectPath)
 if (-not (Test-Path $projectPath)) {
@@ -299,6 +324,8 @@ if (-not $PSBoundParameters.ContainsKey("ScenarioId") -and $scenarioRelValue) {
     }
 }
 
+$envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $jobsDir = Join-Path $queueRootFull "jobs"
 $resultsDir = Join-Path $queueRootFull "results"
@@ -338,6 +365,9 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     if ($goalSpecValue) {
         $job.goal_spec = $goalSpecValue
+    }
+    if ($envMap.Count -gt 0) {
+        $job.env = $envMap
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6

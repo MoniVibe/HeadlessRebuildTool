@@ -13,6 +13,8 @@ param(
     [int]$Seed,
     [int]$TimeoutSec,
     [string[]]$Args,
+    [hashtable]$Env,
+    [string]$EnvJson,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 1800
@@ -76,6 +78,32 @@ function Normalize-GoalSpecPath {
         return $normalized
     }
     return $normalized.TrimStart("./")
+}
+
+function ConvertTo-EnvMap {
+    param(
+        [hashtable]$Env,
+        [string]$EnvJson
+    )
+    $map = @{}
+    if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
+        try {
+            $parsed = $EnvJson | ConvertFrom-Json
+        } catch {
+            throw "EnvJson is invalid JSON."
+        }
+        if ($parsed) {
+            foreach ($prop in $parsed.PSObject.Properties) {
+                $map[$prop.Name] = $prop.Value
+            }
+        }
+    }
+    if ($Env) {
+        foreach ($key in $Env.Keys) {
+            $map[$key] = $Env[$key]
+        }
+    }
+    return $map
 }
 
 function Get-ScenarioRelFromArgs {
@@ -591,6 +619,8 @@ if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
 
+$envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+
 $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
@@ -621,6 +651,9 @@ $summaryExtraLines = New-Object System.Collections.Generic.List[string]
 $summaryStatus = "SUCCESS"
 $summaryFailure = ""
 $summaryWritten = $false
+$summaryPipelineState = ""
+$summaryBuildState = "unknown"
+$summaryRunState = "unknown"
 
 function Finalize-PipelineSummary {
     param(
@@ -631,6 +664,18 @@ function Finalize-PipelineSummary {
     $summaryWritten = $true
     if ($Status) { $script:summaryStatus = $Status }
     if ($Failure) { $script:summaryFailure = $Failure }
+    if ([string]::IsNullOrWhiteSpace($script:summaryPipelineState)) {
+        $script:summaryPipelineState = if ($script:summaryStatus -eq "SUCCESS") { "finished" } else { "failed" }
+    }
+    if ([string]::IsNullOrWhiteSpace($script:summaryBuildState)) {
+        $script:summaryBuildState = "unknown"
+    }
+    if ([string]::IsNullOrWhiteSpace($script:summaryRunState)) {
+        $script:summaryRunState = "unknown"
+    }
+    $summaryExtraLines.Add("* pipeline_state: $script:summaryPipelineState") | Out-Null
+    $summaryExtraLines.Add("* build_state: $script:summaryBuildState") | Out-Null
+    $summaryExtraLines.Add("* run_state: $script:summaryRunState") | Out-Null
     Write-PipelineSummary -ReportsDir $reportsDir `
         -BuildId $buildId `
         -Title $Title `
@@ -686,6 +731,8 @@ $global:LASTEXITCODE = 0
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
 if (-not (Test-Path $artifactZip)) {
     $summaryFailure = "artifact_missing"
+    $summaryBuildState = "failed"
+    $summaryRunState = "skipped"
     Finalize-PipelineSummary -Status "FAIL" -Failure "artifact_missing"
     throw "Artifact zip not found: $artifactZip"
 }
@@ -704,8 +751,13 @@ if (-not $preflight.ok) {
     if ($preflight.message) { $summary += " message=$($preflight.message)" }
     Write-Host $summary
     $summaryFailure = $summary
+    $summaryBuildState = "failed"
+    $summaryRunState = "skipped"
     Finalize-PipelineSummary -Status "FAIL" -Failure $summary
     exit 1
+}
+else {
+    $summaryBuildState = "built"
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
@@ -747,6 +799,9 @@ for ($i = 1; $i -le $Repeat; $i++) {
     }
     if ($goalSpecValue) {
         $job.goal_spec = $goalSpecValue
+    }
+    if ($envMap.Count -gt 0) {
+        $job.env = $envMap
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6
@@ -811,6 +866,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $alternateList = if (@($alternateNames).Count -gt 0) { [string]::Join(", ", @($alternateNames)) } else { "(none)" }
             Write-Host ("Timed out waiting for {0}; found alternates: {1}" -f $resultZip, $alternateList)
             $summaryFailure = "result_timeout"
+            $summaryRunState = "failed"
             Finalize-PipelineSummary -Status "FAIL" -Failure "Timed out waiting for result: $resultZip"
             throw "Timed out waiting for result: $resultZip"
         }
@@ -819,10 +875,16 @@ for ($i = 1; $i -le $Repeat; $i++) {
         $summary = Format-ResultSummary -Index $i -Total $Repeat -Details $details
         Write-Host $summary
         $summaryResultZips.Add($resultZip) | Out-Null
+        if ($details.exit_reason -in @("SUCCESS", "OK_WITH_WARNINGS")) {
+            $summaryRunState = "ran"
+        } else {
+            $summaryRunState = "failed"
+        }
 
         if ($details.exit_reason -in @("INFRA_FAIL", "CRASH", "HANG_TIMEOUT")) {
             Write-Host ("stop_reason={0}" -f $details.exit_reason)
             $summaryFailure = "stop_reason=$($details.exit_reason)"
+            $summaryRunState = "failed"
             Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 2
         }
@@ -830,6 +892,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
         if ([string]::IsNullOrWhiteSpace($details.determinism_hash)) {
             Write-Host ("stop_reason=determinism_hash_missing run_index={0}" -f $i)
             $summaryFailure = "determinism_hash_missing"
+            $summaryRunState = "failed"
             Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 3
         }
@@ -845,9 +908,13 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $currentInv = Get-ResultInvariants -ZipPath $resultZip
             Write-InvariantDiff -Baseline $baselineInv -Current $currentInv -BaselineLabel ("run{0}" -f $baselineIndex) -CurrentLabel ("run{0}" -f $i)
             $summaryFailure = "determinism_hash_divergence"
+            $summaryRunState = "failed"
             Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 3
         }
+    }
+    else {
+        $summaryRunState = "queued"
     }
 }
 
