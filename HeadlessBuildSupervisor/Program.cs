@@ -2784,7 +2784,7 @@ internal static class Program
                     }
                     parts.Add(symbol);
                     return prefix + string.Join(';', parts);
-                }, 1);
+                });
             }
 
             var blockPattern = @"(?m)^(\\s*scriptingDefineSymbols:\\s*)$";
@@ -2794,7 +2794,7 @@ internal static class Program
                 {
                     var indent = match.Groups[1].Value;
                     return $"{indent}{Environment.NewLine}    {group}: {symbol}";
-                }, 1);
+                });
             }
 
             return content;
