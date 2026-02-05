@@ -2709,6 +2709,20 @@ internal static class Program
                 {
                     File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
                     applied = true;
+
+                    var scriptAssemblies = Path.Combine(projectPath, "Library", "ScriptAssemblies");
+                    try
+                    {
+                        if (Directory.Exists(scriptAssemblies))
+                        {
+                            Directory.Delete(scriptAssemblies, true);
+                            _logger.Info("headless_scriptassemblies_cleared");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"headless_scriptassemblies_clear_failed err={ex.GetType().Name}");
+                    }
                 }
 
                 var standaloneDefines = ExtractDefineSymbols(updated, "Standalone");
