@@ -2710,6 +2710,12 @@ internal static class Program
                     File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
                     applied = true;
                 }
+
+                var standaloneDefines = ExtractDefineSymbols(updated, "Standalone");
+                if (!string.IsNullOrWhiteSpace(standaloneDefines))
+                {
+                    _logger.Info($"headless_define_symbols_standalone={standaloneDefines}");
+                }
             }
 
             _applied = applied;
@@ -2800,6 +2806,22 @@ internal static class Program
             }
 
             return content;
+        }
+
+        private static string ExtractDefineSymbols(string content, string group)
+        {
+            if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(group))
+            {
+                return string.Empty;
+            }
+
+            var linePattern = $"(?m)^\\s*{Regex.Escape(group)}:\\s*(.*)$";
+            var match = Regex.Match(content, linePattern);
+            if (!match.Success)
+            {
+                return string.Empty;
+            }
+            return match.Groups[1].Value.Trim();
         }
     }
 }
