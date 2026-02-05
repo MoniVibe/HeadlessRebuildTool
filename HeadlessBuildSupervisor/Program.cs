@@ -2702,7 +2702,9 @@ internal static class Program
 
             if (!string.IsNullOrEmpty(_projectSettingsBackup))
             {
-                var updated = EnsureDefineSymbol(_projectSettingsBackup, "Standalone", "HYBRID_RENDERER_DISABLED");
+                var updated = _projectSettingsBackup;
+                updated = EnsureDefineSymbol(updated, "Standalone", "HYBRID_RENDERER_DISABLED");
+                updated = EnsureDefineSymbol(updated, "Standalone", "UNITY_DISABLE_AUTOMATIC_SYSTEMS");
                 if (!string.Equals(updated, _projectSettingsBackup, StringComparison.Ordinal))
                 {
                     File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
