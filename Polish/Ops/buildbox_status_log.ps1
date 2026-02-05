@@ -126,7 +126,9 @@ foreach($q in $queues){
     $item=Get-ChildItem $results -Filter 'result_*.zip' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1;
     if($item){ $latest=$item.Name }
   }
-  $out += [ordered]@{ name=$q.name; jobs=(Test-Path $jobs ? (Get-ChildItem $jobs -File).Count : 0); latest=$latest }
+  $jobsCount=0;
+  if(Test-Path $jobs){ $jobsCount=(Get-ChildItem $jobs -File).Count }
+  $out += [ordered]@{ name=$q.name; jobs=$jobsCount; latest=$latest }
 }
 [ordered]@{ queues=$out } | ConvertTo-Json -Depth 3
 '@
