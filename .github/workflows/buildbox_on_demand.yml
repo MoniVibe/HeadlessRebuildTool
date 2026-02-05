@@ -31,7 +31,7 @@ on:
         required: false
         default: ""
       puredots_ref:
-        description: "Optional PureDOTS ref/branch/SHA (blank = origin/fix/ai-stubs-guard)"
+        description: "Optional PureDOTS ref/branch/SHA (blank = origin/main)"
         required: false
         default: ""
       scenario_rel:
@@ -212,7 +212,7 @@ jobs:
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
             & git -C $puredotsTarget fetch --all --prune
-            $puredotsCheckout = "origin/fix/ai-stubs-guard"
+            $puredotsCheckout = "origin/main"
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
               & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
