@@ -204,6 +204,13 @@ jobs:
           # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          if (-not (Test-Path $puredotsTarget)) {
+            try {
+              & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+            } catch {
+              throw "Failed to clone PureDOTS into $puredotsTarget: $($_.Exception.Message)"
+            }
+          }
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
