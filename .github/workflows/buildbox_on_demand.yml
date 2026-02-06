@@ -223,9 +223,13 @@ jobs:
           # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          $puredotsProjectLink = Join-Path $wt "puredots"
           $puredotsPackage = Join-Path $puredotsTarget "Packages\\com.moni.puredots\\package.json"
           if ((Test-Path $puredotsLink) -and (-not (Test-Path $puredotsTarget))) {
             try { Remove-Item -Force $puredotsLink } catch { }
+          }
+          if ((Test-Path $puredotsProjectLink) -and (-not (Test-Path $puredotsTarget))) {
+            try { Remove-Item -Force $puredotsProjectLink } catch { }
           }
           if (-not (Test-Path $puredotsPackage)) {
             if (Test-Path $puredotsTarget) {
@@ -244,6 +248,9 @@ jobs:
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
+            }
+            if (-not (Test-Path $puredotsProjectLink)) {
+              New-Item -ItemType Junction -Path $puredotsProjectLink -Target $puredotsTarget | Out-Null
             }
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
