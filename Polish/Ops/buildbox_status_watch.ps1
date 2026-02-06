@@ -333,6 +333,11 @@ $ErrorActionPreference='Stop';
 $queueRoot='__QUEUE_ROOT__';
 $drive=Get-PSDrive -Name C -EA SilentlyContinue;
 $freeGb=if($drive){[math]::Round($drive.Free/1GB,1)}else{''};
+$buildProcs=Get-Process HeadlessBuildSupervisor -ErrorAction SilentlyContinue;
+$buildActive=if($buildProcs){$true}else{$false};
+$buildCount=if($buildProcs){$buildProcs.Count}else{0};
+$buildSince=if($buildActive){($buildProcs | Sort-Object StartTime | Select-Object -First 1).StartTime}else{$null};
+$buildSinceText=if($buildSince){$buildSince.ToString('s')}else{''};
 $queueList=@(
     @{name='space4x';path=(Join-Path $queueRoot 'space4x\queue')},
     @{name='godgame';path=(Join-Path $queueRoot 'godgame\queue')}
@@ -340,7 +345,7 @@ $queueList=@(
 $queues=@();
 foreach($q in $queueList){
     if(-not(Test-Path $q.path)){
-        $queues += [ordered]@{ name=$q.name; jobs='MISSING'; leases='MISSING'; results='MISSING'; artifacts='MISSING'; latest='MISSING' };
+        $queues += [ordered]@{ name=$q.name; jobs='MISSING'; leases='MISSING'; results='MISSING'; artifacts='MISSING'; latest='MISSING'; latest_artifact='MISSING'; artifact_age_min='' };
         continue;
     }
     $jobs=Join-Path $q.path 'jobs';
@@ -358,12 +363,21 @@ foreach($q in $queueList){
         }
     }
     $latestName=if($latestItem){$latestItem.Name}else{''};
-    $queues += [ordered]@{ name=$q.name; jobs=$jobsCount; leases=$leasesCount; results=$resultsCount; artifacts=$artifactsCount; latest=$latestName };
+    $latestArtifact=$null;
+    if(Test-Path $artifacts){
+        foreach($item in (Get-ChildItem $artifacts -Filter 'artifact_*.zip' -File)){
+            if(-not $latestArtifact -or $item.LastWriteTime -gt $latestArtifact.LastWriteTime){$latestArtifact=$item}
+        }
+    }
+    $artifactName=if($latestArtifact){$latestArtifact.Name}else{''};
+    $artifactAge=if($latestArtifact){[math]::Round(((Get-Date) - $latestArtifact.LastWriteTime).TotalMinutes,1)}else{''};
+    $queues += [ordered]@{ name=$q.name; jobs=$jobsCount; leases=$leasesCount; results=$resultsCount; artifacts=$artifactsCount; latest=$latestName; latest_artifact=$artifactName; artifact_age_min=$artifactAge };
 }
 [ordered]@{
     host=$env:COMPUTERNAME;
     user=[Environment]::UserName;
     c_free_gb=$freeGb;
+    build=[ordered]@{ active=$buildActive; count=$buildCount; since=$buildSinceText };
     queues=$queues
 } | ConvertTo-Json -Depth 4
 '@
@@ -383,6 +397,13 @@ function Show-SshHealth {
         }
         if (-not $Compact) {
             Write-Host ("HOST={0} USER={1} C_free_GB={2}" -f $data.host, $data.user, $data.c_free_gb)
+            if ($data.build) {
+                if ($data.build.active) {
+                    Write-Host ("BUILD=active count={0} since={1}" -f $data.build.count, $data.build.since)
+                } else {
+                    Write-Host "BUILD=idle"
+                }
+            }
         }
         $rows = foreach ($q in $data.queues) {
             [pscustomobject]@{
@@ -392,6 +413,8 @@ function Show-SshHealth {
                 RESULTS = $q.results
                 ARTIFACTS = $q.artifacts
                 LATEST = $q.latest
+                ARTIFACT = $q.latest_artifact
+                ART_AGE_MIN = $q.artifact_age_min
             }
         }
         Write-Table -Rows $rows
@@ -409,6 +432,14 @@ function Show-SshHealthLog {
         if (-not $data) {
             Write-Host ("[{0}] ssh_queue failed=empty_response" -f $now.ToString("yyyy-MM-dd HH:mm:ss"))
             return
+        }
+        if ($data.build) {
+            $buildKey = "{0}|{1}|{2}" -f $data.build.active, $data.build.count, $data.build.since
+            if ($Prev["_build"] -ne $buildKey) {
+                Write-Host ("[{0}] build_status active={1} count={2} since={3}" -f
+                    $now.ToString("yyyy-MM-dd HH:mm:ss"), $data.build.active, $data.build.count, $data.build.since)
+                $Prev["_build"] = $buildKey
+            }
         }
         foreach ($q in $data.queues) {
             $key = "{0}|{1}|{2}|{3}|{4}" -f $q.jobs, $q.leases, $q.results, $q.artifacts, $q.latest
