@@ -211,6 +211,10 @@ jobs:
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
+            $puredotsIndexLock = Join-Path $puredotsTarget ".git\\index.lock"
+            if (Test-Path $puredotsIndexLock) {
+              Remove-Item $puredotsIndexLock -Force
+            }
             & git -C $puredotsTarget fetch --all --prune
             $puredotsCheckout = "origin/main"
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
