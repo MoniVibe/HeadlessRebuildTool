@@ -397,12 +397,12 @@ function Show-SshHealth {
         }
         if (-not $Compact) {
             Write-Host ("HOST={0} USER={1} C_free_GB={2}" -f $data.host, $data.user, $data.c_free_gb)
-            if ($data.build) {
-                if ($data.build.active) {
-                    Write-Host ("BUILD=active count={0} since={1}" -f $data.build.count, $data.build.since)
-                } else {
-                    Write-Host "BUILD=idle"
-                }
+        }
+        if ($data.build) {
+            if ($data.build.active) {
+                Write-Host ("BUILD=active count={0} since={1}" -f $data.build.count, $data.build.since)
+            } else {
+                Write-Host "BUILD=idle"
             }
         }
         $rows = foreach ($q in $data.queues) {
