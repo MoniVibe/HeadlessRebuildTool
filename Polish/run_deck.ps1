@@ -203,7 +203,7 @@ function Build-Artifact {
     $manifestPre = Get-ManifestSnapshot -ProjectPath $ProjectPath
     $swapApplied = $false
     try {
-        & $syncScript -ProjectPath $ProjectPath | Out-Null
+        & $syncScript -ProjectPath $ProjectPath -RemoveEntitiesGraphics | Out-Null
         & $swapScript -ProjectPath $ProjectPath | Out-Null
         $swapApplied = $true
         & dotnet @supervisorArgs | Out-Null

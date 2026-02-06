@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -276,6 +277,8 @@ internal static class Program
             File.AppendAllText(unityLog, $"UNITY_PROJECT_MUTEX_TIMEOUT project={options.ProjectPath}{Environment.NewLine}", Encoding.ASCII);
             return new UnityRunResult(1, false);
         }
+        using var settingsOverride = new ProjectSettingsOverride(options.ProjectPath, logger);
+
         var args = new List<string>
         {
             "-batchmode",
@@ -2640,6 +2643,276 @@ internal static class Program
             public UIntPtr JobMemoryLimit;
             public UIntPtr PeakProcessMemoryUsed;
             public UIntPtr PeakJobMemoryUsed;
+        }
+    }
+
+    private sealed class ProjectSettingsOverride : IDisposable
+    {
+        private readonly string? _graphicsPath;
+        private readonly string? _qualityPath;
+        private readonly string? _projectSettingsPath;
+        private readonly string? _graphicsBackup;
+        private readonly string? _qualityBackup;
+        private readonly string? _projectSettingsBackup;
+        private readonly string? _entitiesGraphicsPath;
+        private readonly string? _entitiesGraphicsBackup;
+        private readonly Logger _logger;
+        private readonly bool _applied;
+        private readonly bool _entitiesGraphicsPatched;
+
+        public ProjectSettingsOverride(string projectPath, Logger logger)
+        {
+            _logger = logger;
+            _graphicsPath = Path.Combine(projectPath, "ProjectSettings", "GraphicsSettings.asset");
+            _qualityPath = Path.Combine(projectPath, "ProjectSettings", "QualitySettings.asset");
+            _projectSettingsPath = Path.Combine(projectPath, "ProjectSettings", "ProjectSettings.asset");
+            _entitiesGraphicsPath = TryLocateEntitiesGraphicsSystem(projectPath);
+
+            if (File.Exists(_graphicsPath))
+            {
+                _graphicsBackup = File.ReadAllText(_graphicsPath, Encoding.UTF8);
+            }
+
+            if (File.Exists(_qualityPath))
+            {
+                _qualityBackup = File.ReadAllText(_qualityPath, Encoding.UTF8);
+            }
+
+            if (File.Exists(_projectSettingsPath))
+            {
+                _projectSettingsBackup = File.ReadAllText(_projectSettingsPath, Encoding.UTF8);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_entitiesGraphicsPath) && File.Exists(_entitiesGraphicsPath))
+            {
+                _entitiesGraphicsBackup = File.ReadAllText(_entitiesGraphicsPath, Encoding.UTF8);
+            }
+
+            var applied = false;
+            var needsScriptAssembliesClear = false;
+            if (!string.IsNullOrEmpty(_graphicsBackup))
+            {
+                var updated = ClearRenderPipelineRefs(_graphicsBackup, "m_CustomRenderPipeline");
+                if (!string.Equals(updated, _graphicsBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_graphicsPath, updated, Encoding.UTF8);
+                    applied = true;
+                    needsScriptAssembliesClear = true;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_qualityBackup))
+            {
+                var updated = ClearRenderPipelineRefs(_qualityBackup, "customRenderPipeline");
+                if (!string.Equals(updated, _qualityBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_qualityPath, updated, Encoding.UTF8);
+                    applied = true;
+                    needsScriptAssembliesClear = true;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_projectSettingsBackup))
+            {
+                var updated = _projectSettingsBackup;
+                updated = EnsureDefineSymbol(updated, "Standalone", "HYBRID_RENDERER_DISABLED");
+                updated = EnsureDefineSymbol(updated, "Standalone", "UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP");
+                updated = EnsureDefineSymbol(updated, "Standalone", "UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP_EDITOR_WORLD");
+                if (!string.Equals(updated, _projectSettingsBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_projectSettingsPath, updated, Encoding.UTF8);
+                    applied = true;
+                    needsScriptAssembliesClear = true;
+                }
+
+                var standaloneDefines = ExtractDefineSymbols(updated, "Standalone");
+                if (!string.IsNullOrWhiteSpace(standaloneDefines))
+                {
+                    _logger.Info($"headless_define_symbols_standalone={standaloneDefines}");
+                }
+            }
+
+            var entitiesGraphicsPatched = false;
+            if (!string.IsNullOrWhiteSpace(_entitiesGraphicsPath) && !string.IsNullOrEmpty(_entitiesGraphicsBackup))
+            {
+                var updated = DisableEntitiesGraphics(_entitiesGraphicsBackup);
+                if (!string.Equals(updated, _entitiesGraphicsBackup, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(_entitiesGraphicsPath, updated, Encoding.UTF8);
+                    entitiesGraphicsPatched = true;
+                    applied = true;
+                    needsScriptAssembliesClear = true;
+                    _logger.Info($"headless_entitiesgraphics_patched path={_entitiesGraphicsPath}");
+                }
+            }
+
+            if (needsScriptAssembliesClear)
+            {
+                var scriptAssemblies = Path.Combine(projectPath, "Library", "ScriptAssemblies");
+                try
+                {
+                    if (Directory.Exists(scriptAssemblies))
+                    {
+                        Directory.Delete(scriptAssemblies, true);
+                        _logger.Info("headless_scriptassemblies_cleared");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn($"headless_scriptassemblies_clear_failed err={ex.GetType().Name}");
+                }
+            }
+
+            _applied = applied;
+            _entitiesGraphicsPatched = entitiesGraphicsPatched;
+            if (_applied)
+            {
+                _logger.Info("headless_projectsettings_overrides_applied");
+            }
+        }
+
+        public void Dispose()
+        {
+            if (!_applied)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!string.IsNullOrEmpty(_graphicsBackup) && _graphicsPath != null)
+                {
+                    File.WriteAllText(_graphicsPath, _graphicsBackup, Encoding.UTF8);
+                }
+
+                if (!string.IsNullOrEmpty(_qualityBackup) && _qualityPath != null)
+                {
+                    File.WriteAllText(_qualityPath, _qualityBackup, Encoding.UTF8);
+                }
+
+                if (!string.IsNullOrEmpty(_projectSettingsBackup) && _projectSettingsPath != null)
+                {
+                    File.WriteAllText(_projectSettingsPath, _projectSettingsBackup, Encoding.UTF8);
+                }
+
+                if (_entitiesGraphicsPatched && !string.IsNullOrWhiteSpace(_entitiesGraphicsPath) && _entitiesGraphicsBackup != null)
+                {
+                    File.WriteAllText(_entitiesGraphicsPath, _entitiesGraphicsBackup, Encoding.UTF8);
+                    _logger.Info("headless_entitiesgraphics_restored");
+                }
+
+                _logger.Info("headless_projectsettings_overrides_restored");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"headless_render_pipeline_restore_failed err={ex.GetType().Name}");
+            }
+        }
+
+        private static string ClearRenderPipelineRefs(string content, string key)
+        {
+            var pattern = $"({Regex.Escape(key)}:\\s*)\\{{fileID:[^}}]*\\}}";
+            return Regex.Replace(content, pattern, $"$1{{fileID: 0}}", RegexOptions.Multiline);
+        }
+
+        private static string EnsureDefineSymbol(string content, string group, string symbol)
+        {
+            if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(group) || string.IsNullOrWhiteSpace(symbol))
+            {
+                return content;
+            }
+
+            var linePattern = $"(?m)^(\\s*{Regex.Escape(group)}:\\s*)(.*)$";
+            if (Regex.IsMatch(content, linePattern))
+            {
+                return Regex.Replace(content, linePattern, match =>
+                {
+                    var prefix = match.Groups[1].Value;
+                    var existing = match.Groups[2].Value.Trim();
+                    if (string.IsNullOrEmpty(existing))
+                    {
+                        return prefix + symbol;
+                    }
+
+                    var parts = existing.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(p => p.Trim())
+                        .Where(p => !string.IsNullOrEmpty(p))
+                        .ToList();
+                    if (parts.Contains(symbol, StringComparer.Ordinal))
+                    {
+                        return match.Value;
+                    }
+                    parts.Add(symbol);
+                    return prefix + string.Join(';', parts);
+                });
+            }
+
+            var blockPattern = @"(?m)^(\\s*scriptingDefineSymbols:\\s*)$";
+            if (Regex.IsMatch(content, blockPattern))
+            {
+                return Regex.Replace(content, blockPattern, match =>
+                {
+                    var indent = match.Groups[1].Value;
+                    return $"{indent}{Environment.NewLine}    {group}: {symbol}";
+                });
+            }
+
+            return content;
+        }
+
+        private static string ExtractDefineSymbols(string content, string group)
+        {
+            if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(group))
+            {
+                return string.Empty;
+            }
+
+            var linePattern = $"(?m)^\\s*{Regex.Escape(group)}:\\s*(.*)$";
+            var match = Regex.Match(content, linePattern);
+            if (!match.Success)
+            {
+                return string.Empty;
+            }
+            return match.Groups[1].Value.Trim();
+        }
+
+        private static string? TryLocateEntitiesGraphicsSystem(string projectPath)
+        {
+            var cacheRoot = Path.Combine(projectPath, "Library", "PackageCache");
+            if (!Directory.Exists(cacheRoot))
+            {
+                return null;
+            }
+
+            var candidates = Directory.GetDirectories(cacheRoot, "com.unity.entities.graphics@*", SearchOption.TopDirectoryOnly);
+            foreach (var candidate in candidates)
+            {
+                var path = Path.Combine(candidate, "Unity.Entities.Graphics", "EntitiesGraphicsSystem.cs");
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+            }
+            return null;
+        }
+
+        private static string DisableEntitiesGraphics(string content)
+        {
+            const string marker = "// ANVILOOP_HEADLESS_DISABLE_HYBRID";
+            if (content.Contains(marker, StringComparison.Ordinal))
+            {
+                return content;
+            }
+
+            var injection = marker + Environment.NewLine + "#define HYBRID_RENDERER_DISABLED" + Environment.NewLine + Environment.NewLine;
+            var sentinel = "#if !(SRP_10_0_0_OR_NEWER || HYBRID_RENDERER_ENABLE_WITHOUT_SRP)";
+            var index = content.IndexOf(sentinel, StringComparison.Ordinal);
+            if (index <= 0)
+            {
+                return content;
+            }
+
+            return content.Insert(index, injection);
         }
     }
 }

@@ -169,6 +169,12 @@ jobs:
           $gitRepoArgs = @('-c', "safe.directory=$repoPath")
           $gitWtArgs = @('-c', "safe.directory=$wt")
 
+          try {
+            Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'prune')) -Context "worktree prune"
+          } catch {
+            Write-Warning "worktree prune failed: $($_.Exception.Message)"
+          }
+
           $refExists = $false
           & git @gitRepoArgs -C $repoPath rev-parse --verify $ref 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) { $refExists = $true }
@@ -181,12 +187,25 @@ jobs:
           & git @gitRepoArgs -C $repoPath show-ref --verify --quiet "refs/remotes/origin/$ref"
           if ($LASTEXITCODE -eq 0) { $refToCheckout = "origin/$ref" }
 
+          if (Test-Path $wt) {
+            $wtGit = Join-Path $wt ".git"
+            $registered = $false
+            try {
+              $wtList = & git @gitRepoArgs -C $repoPath worktree list --porcelain
+              $wtNorm = ($wt -replace '\\','/')
+              if ($wtList -match ("(?m)^worktree\\s+" + [Regex]::Escape($wtNorm) + "$")) { $registered = $true }
+            } catch {
+              $registered = $false
+            }
+            if (-not (Test-Path $wtGit) -or -not $registered) {
+              Write-Warning "Worktree path exists but is not a valid git worktree: $wt. Removing."
+              Remove-Item -Recurse -Force $wt
+            }
+          }
+
           if (-not (Test-Path $wt)) {
             Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'add', $wt, $refToCheckout)) -Context "worktree add $refToCheckout"
           } else {
-            if (-not (Test-Path (Join-Path $wt '.git'))) {
-              throw "Worktree path exists but is not a git worktree: $wt"
-            }
             $headlessManifest = Join-Path $wt "Packages\\manifest.headless.json"
             $headlessLock = Join-Path $wt "Packages\\packages-lock.headless.json"
             if (Test-Path $headlessManifest) {
@@ -204,9 +223,34 @@ jobs:
           # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          $puredotsProjectLink = Join-Path $wt "puredots"
+          $puredotsPackage = Join-Path $puredotsTarget "Packages\\com.moni.puredots\\package.json"
+          if ((Test-Path $puredotsLink) -and (-not (Test-Path $puredotsTarget))) {
+            try { Remove-Item -Force $puredotsLink } catch { }
+          }
+          if ((Test-Path $puredotsProjectLink) -and (-not (Test-Path $puredotsTarget))) {
+            try { Remove-Item -Force $puredotsProjectLink } catch { }
+          }
+          if (-not (Test-Path $puredotsPackage)) {
+            if (Test-Path $puredotsTarget) {
+              try {
+                Remove-Item -Recurse -Force $puredotsTarget
+              } catch {
+                $bak = $puredotsTarget + ".bak." + (Get-Date -Format "yyyyMMdd_HHmmss")
+                try { Move-Item -Path $puredotsTarget -Destination $bak -Force } catch { }
+              }
+            }
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to clone PureDOTS into $puredotsTarget (exit $LASTEXITCODE)"
+            }
+          }
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
+            }
+            if (-not (Test-Path $puredotsProjectLink)) {
+              New-Item -ItemType Junction -Path $puredotsProjectLink -Target $puredotsTarget | Out-Null
             }
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
