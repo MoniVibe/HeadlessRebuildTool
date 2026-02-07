@@ -29,6 +29,39 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Ensure-GitSafeDirectory {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    try {
+        & git config --global --add safe.directory $full | Out-Null
+    }
+    catch {
+        # Best-effort only; continue if git config fails.
+    }
+}
+
+function Resolve-GitDir {
+    param([string]$RepoPath)
+    if ([string]::IsNullOrWhiteSpace($RepoPath)) { return "" }
+    $gitPath = Join-Path $RepoPath ".git"
+    if (-not (Test-Path $gitPath)) { return "" }
+    $gitItem = Get-Item $gitPath -ErrorAction SilentlyContinue
+    if ($null -eq $gitItem) { return "" }
+    if ($gitItem.Attributes -band [System.IO.FileAttributes]::Directory) {
+        return $gitPath
+    }
+    $line = Get-Content $gitPath -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($line -match '^gitdir:\s*(.+)$') {
+        $dir = $Matches[1].Trim()
+        if (-not [System.IO.Path]::IsPathRooted($dir)) {
+            $dir = Join-Path $RepoPath $dir
+        }
+        return $dir
+    }
+    return ""
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -620,6 +653,12 @@ if ($Repeat -lt 1) {
 }
 
 $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+
+Ensure-GitSafeDirectory $projectPath
+$gitDirPath = Resolve-GitDir $projectPath
+if (-not [string]::IsNullOrWhiteSpace($gitDirPath)) {
+    Ensure-GitSafeDirectory $gitDirPath
+}
 
 $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {

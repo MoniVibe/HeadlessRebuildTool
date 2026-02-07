@@ -1475,6 +1475,85 @@ print(" ".join([p for p in parts if p]))
 PY
 }
 
+update_pipeline_summary() {
+  local queue_dir="$1"
+  local build_id="$2"
+  local run_state="$3"
+  local exit_reason="$4"
+  local job_id="$5"
+
+  if [ -z "$queue_dir" ] || [ -z "$build_id" ] || [ -z "$run_state" ]; then
+    return 0
+  fi
+
+  local reports_dir="${queue_dir%/}/reports"
+  local latest_path="${reports_dir}/pipeline_smoke_summary_latest.md"
+  local build_path="${reports_dir}/pipeline_smoke_summary_${build_id}.md"
+
+  "$PYTHON_BIN" - "$build_id" "$run_state" "$exit_reason" "$job_id" "$latest_path" "$build_path" <<'PY'
+import os
+import sys
+
+build_id = sys.argv[1]
+run_state = sys.argv[2]
+exit_reason = sys.argv[3]
+job_id = sys.argv[4]
+paths = sys.argv[5:]
+
+def update_file(path: str) -> None:
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        return
+
+    def get_field(name: str) -> str:
+        prefix = f"* {name}:"
+        for line in lines:
+            if line.startswith(prefix):
+                return line.split(":", 1)[1].strip()
+        return ""
+
+    existing_build_id = get_field("build_id")
+    if existing_build_id and build_id and existing_build_id != build_id:
+        return
+
+    updated_lines = []
+    run_state_written = False
+    for line in lines:
+        if line.startswith("* run_state:"):
+            updated_lines.append(f"* run_state: {run_state}")
+            run_state_written = True
+        else:
+            updated_lines.append(line)
+
+    if not run_state_written:
+        insert_at = None
+        for idx, line in enumerate(updated_lines):
+            if line.strip() == "":
+                insert_at = idx
+                break
+        if insert_at is None:
+            updated_lines.append(f"* run_state: {run_state}")
+        else:
+            updated_lines.insert(insert_at, f"* run_state: {run_state}")
+
+    if updated_lines == lines:
+        return
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
+            handle.write("\r\n".join(updated_lines))
+    except Exception:
+        return
+
+for path in paths:
+    update_file(path)
+PY
+}
+
 requeue_stale_leases() {
   local queue_dir="$1"
   local ttl_sec="$2"
@@ -1988,6 +2067,7 @@ run_job() {
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
+  update_pipeline_summary "$queue_dir" "$build_id" "$run_state" "$exit_reason" "$job_id"
   local triage_path=""
   if [ "$emit_triage_on_fail" -eq 1 ] && [ "$exit_reason" != "$EXIT_REASON_SUCCESS" ]; then
     local result_zip="${queue_dir}/results/result_${job_id}.zip"
