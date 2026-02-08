@@ -242,6 +242,10 @@ jobs:
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
               & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+              if ($LASTEXITCODE -ne 0) {
+                Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', "$puredotsRef:refs/remotes/origin/$puredotsRef") -Context "puredots fetch ref $puredotsRef"
+                & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+              }
               if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = $puredotsDefault }
             }
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'reset', '--hard', $puredotsCheckout) -Context "puredots reset $puredotsCheckout"
