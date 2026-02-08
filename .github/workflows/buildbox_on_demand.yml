@@ -181,12 +181,15 @@ jobs:
           & git @gitRepoArgs -C $repoPath show-ref --verify --quiet "refs/remotes/origin/$ref"
           if ($LASTEXITCODE -eq 0) { $refToCheckout = "origin/$ref" }
 
+          if (Test-Path $wt) {
+            if (-not (Test-Path (Join-Path $wt '.git'))) {
+              Remove-Item -Recurse -Force $wt
+            }
+          }
+
           if (-not (Test-Path $wt)) {
             Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'add', $wt, $refToCheckout)) -Context "worktree add $refToCheckout"
           } else {
-            if (-not (Test-Path (Join-Path $wt '.git'))) {
-              throw "Worktree path exists but is not a git worktree: $wt"
-            }
             $headlessManifest = Join-Path $wt "Packages\\manifest.headless.json"
             $headlessLock = Join-Path $wt "Packages\\packages-lock.headless.json"
             if (Test-Path $headlessManifest) {
