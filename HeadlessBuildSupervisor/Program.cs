@@ -1261,10 +1261,10 @@ internal static class Program
             trimmed = $"{drive}:\\{rest}";
         }
 
-        var driveMatches = Regex.Matches(trimmed, "[A-Za-z]:[\\\\/][^\\r\\n]*");
+        var driveMatches = Regex.Matches(trimmed, "[A-Za-z]:[\\\\/]");
         if (driveMatches.Count > 0)
         {
-            trimmed = driveMatches[driveMatches.Count - 1].Value;
+            trimmed = trimmed.Substring(driveMatches[^1].Index);
         }
 
         return Path.GetFullPath(trimmed);

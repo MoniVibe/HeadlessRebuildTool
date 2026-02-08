@@ -41,9 +41,9 @@ function Normalize-ProjectPathInput {
         return ("{0}:\{1}" -f $drive, $rest)
     }
     # If path contains an embedded absolute drive segment, keep the last one.
-    $driveMatches = [regex]::Matches($trim, '[A-Za-z]:[\\/][^\r\n]*')
+    $driveMatches = [regex]::Matches($trim, '[A-Za-z]:[\\/]')
     if ($driveMatches.Count -gt 0) {
-        $trim = $driveMatches[$driveMatches.Count - 1].Value
+        $trim = $trim.Substring($driveMatches[$driveMatches.Count - 1].Index)
     }
     return $trim
 }
@@ -88,9 +88,9 @@ function Convert-ToWslPath {
     if ($raw -match '^/mnt/[a-z]/') {
         return ($raw -replace '\\', '/')
     }
-    $driveMatches = [regex]::Matches($raw, '[A-Za-z]:[\\/][^\r\n]*')
+    $driveMatches = [regex]::Matches($raw, '[A-Za-z]:[\\/]')
     if ($driveMatches.Count -gt 0) {
-        $raw = $driveMatches[$driveMatches.Count - 1].Value
+        $raw = $raw.Substring($driveMatches[$driveMatches.Count - 1].Index)
     }
     $full = [System.IO.Path]::GetFullPath($raw)
     $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
