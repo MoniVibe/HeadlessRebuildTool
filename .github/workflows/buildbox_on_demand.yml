@@ -223,19 +223,26 @@ jobs:
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
+            Write-Host ("puredots_ref_input={0}" -f $puredotsRef)
             $puredotsIndexLock = Join-Path $puredotsTarget ".git\\index.lock"
             if (Test-Path $puredotsIndexLock) {
               Remove-Item $puredotsIndexLock -Force
             }
-            & git -C $puredotsTarget fetch --all --prune
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', '--all', '--prune') -Context "puredots fetch"
             $puredotsCheckout = "origin/main"
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
               & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
-              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" }
+              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = "origin/main" }
             }
-            & git -C $puredotsTarget reset --hard $puredotsCheckout
-            & git -C $puredotsTarget clean -fd
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'reset', '--hard', $puredotsCheckout) -Context "puredots reset $puredotsCheckout"
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'clean', '-fd') -Context "puredots clean"
+            try {
+              $refLine = & git -C $puredotsTarget show-ref --heads --remotes | Select-String -Pattern "origin/$puredotsRef"
+              Write-Host ("puredots_ref_present={0}" -f ($null -ne $refLine))
+            } catch {
+              Write-Warning "Failed to check PureDOTS ref presence."
+            }
             try {
               $puredotsHead = (& git -C $puredotsTarget rev-parse HEAD)
               Write-Host ("puredots_head={0}" -f $puredotsHead)
