@@ -224,16 +224,20 @@ jobs:
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
             Write-Host ("puredots_ref_input={0}" -f $puredotsRef)
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'set-url', 'origin', 'https://github.com/MoniVibe/PureDOTS.git') -Context "puredots remote set-url"
             $puredotsIndexLock = Join-Path $puredotsTarget ".git\\index.lock"
             if (Test-Path $puredotsIndexLock) {
               Remove-Item $puredotsIndexLock -Force
             }
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', '--all', '--prune') -Context "puredots fetch"
             $puredotsCheckout = "origin/main"
+            & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/main"
+            if ($LASTEXITCODE -ne 0) { $puredotsCheckout = "origin/HEAD" }
+            $puredotsDefault = $puredotsCheckout
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
               & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
-              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = "origin/main" }
+              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = $puredotsDefault }
             }
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'reset', '--hard', $puredotsCheckout) -Context "puredots reset $puredotsCheckout"
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'clean', '-fd') -Context "puredots clean"
