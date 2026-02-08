@@ -207,6 +207,15 @@ jobs:
           # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          if (-not (Test-Path $puredotsTarget)) {
+            Write-Warning "PureDOTS repo missing at $puredotsTarget. Cloning."
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+          }
+          if (-not (Test-Path (Join-Path $puredotsTarget ".git"))) {
+            Write-Warning "PureDOTS repo at $puredotsTarget has no .git. Recloning."
+            Remove-Item -Recurse -Force $puredotsTarget
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+          }
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
@@ -227,6 +236,16 @@ jobs:
             }
             & git -C $puredotsTarget reset --hard $puredotsCheckout
             & git -C $puredotsTarget clean -fd
+            try {
+              $puredotsHead = (& git -C $puredotsTarget rev-parse HEAD)
+              Write-Host ("puredots_head={0}" -f $puredotsHead)
+            } catch {
+              Write-Warning "Failed to read PureDOTS HEAD."
+            }
+            $compatPath = Join-Path $puredotsTarget "Packages\\com.moni.puredots\\Runtime\\Runtime\\Individual\\AnatomyCompat.cs"
+            $legacyPath = Join-Path $puredotsTarget "Packages\\com.moni.puredots\\Runtime\\Individual\\AnatomyComponents.cs"
+            Write-Host ("puredots_compat_present={0}" -f (Test-Path $compatPath))
+            Write-Host ("puredots_legacy_present={0}" -f (Test-Path $legacyPath))
           }
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
           $puredotsDupes = @(
