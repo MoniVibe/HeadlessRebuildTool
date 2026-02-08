@@ -37,7 +37,7 @@ function Normalize-ProjectPathInput {
     if ($wslMatch.Success) {
         $drive = $wslMatch.Groups[1].Value.ToUpperInvariant()
         $rest = $wslMatch.Groups[2].Value -replace '/', '\'
-        return "$drive:\$rest"
+        return ("{0}:\{1}" -f $drive, $rest)
     }
     # If path contains an embedded absolute drive segment, keep the last one.
     $driveMatches = [regex]::Matches($trim, '[A-Za-z]:[\\/][^\r\n]*')
