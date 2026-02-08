@@ -260,6 +260,14 @@ if (-not $titleDefaults) {
     throw "Unknown title '$Title'. Check pipeline_defaults.json."
 }
 
+$queueRootValue = $QueueRoot
+if (-not $PSBoundParameters.ContainsKey("QueueRoot")) {
+    $defaultQueueRoot = $titleDefaults.queue_root
+    if (-not [string]::IsNullOrWhiteSpace($defaultQueueRoot)) {
+        $queueRootValue = $defaultQueueRoot
+    }
+}
+
 $triRoot = $env:TRI_ROOT
 if ([string]::IsNullOrWhiteSpace($triRoot) -or -not (Test-Path $triRoot)) {
     $triRoot = Resolve-TriRoot -StartPath $scriptRoot -ProjectName $titleDefaults.project_path
@@ -283,7 +291,7 @@ if ([string]::IsNullOrWhiteSpace($ArtifactZip)) {
     if ([string]::IsNullOrWhiteSpace($BuildId)) {
         throw "Provide -ArtifactZip or -BuildId."
     }
-    $ArtifactZip = Join-Path (Join-Path $QueueRoot "artifacts") ("artifact_{0}.zip" -f $BuildId)
+    $ArtifactZip = Join-Path (Join-Path $queueRootValue "artifacts") ("artifact_{0}.zip" -f $BuildId)
 }
 if (-not (Test-Path $ArtifactZip)) {
     throw "Artifact zip not found: $ArtifactZip"
@@ -326,7 +334,7 @@ if (-not $PSBoundParameters.ContainsKey("ScenarioId") -and $scenarioRelValue) {
 
 $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
 
-$queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
+$queueRootFull = [System.IO.Path]::GetFullPath($queueRootValue)
 $jobsDir = Join-Path $queueRootFull "jobs"
 $resultsDir = Join-Path $queueRootFull "results"
 Ensure-Directory $jobsDir

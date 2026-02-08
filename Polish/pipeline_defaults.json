@@ -2,6 +2,7 @@
   "titles": {
     "space4x": {
       "project_path": "..\\space4x",
+      "queue_root": "C:\\polish\\anviloop\\space4x\\queue",
       "scenario_id": "space4x_collision_micro",
       "scenario_rel": "Assets/Scenarios/space4x_collision_micro.json",
       "seed": 7,
@@ -13,6 +14,7 @@
     },
     "godgame": {
       "project_path": "..\\godgame",
+      "queue_root": "C:\\polish\\anviloop\\godgame\\queue",
       "scenario_id": "godgame_smoke",
       "scenario_rel": "Assets/Scenarios/Godgame/godgame_smoke.json",
       "seed": 42,

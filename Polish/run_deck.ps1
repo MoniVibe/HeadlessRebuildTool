@@ -287,7 +287,25 @@ $deckPollSec = Get-OptionalValue $deck "poll_sec"
 $deckPendingGrace = Get-OptionalValue $deck "pending_grace_sec"
 $deckMaxMinutes = Get-OptionalValue $deck "max_minutes"
 
-$queueRootValue = if ($QueueRoot) { $QueueRoot } elseif ($deckQueueRoot) { [string]$deckQueueRoot } else { "C:\\polish\\queue" }
+$derivedQueueRoot = $null
+$deckJobs = Get-OptionalValue $deck "jobs"
+if ($deckJobs) {
+    $titleKeys = @($deckJobs | ForEach-Object {
+        $titleValue = Get-OptionalValue $_ "title"
+        if ($titleValue) { [string]$titleValue.ToLowerInvariant() }
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($titleKeys.Count -eq 1 -and $defaults -and $defaults.titles) {
+        $titleDefaults = $defaults.titles.$($titleKeys[0])
+        if ($titleDefaults -and $titleDefaults.queue_root) {
+            $derivedQueueRoot = [string]$titleDefaults.queue_root
+        }
+    }
+}
+
+$queueRootValue = if ($QueueRoot) { $QueueRoot } elseif ($deckQueueRoot) { [string]$deckQueueRoot } elseif ($derivedQueueRoot) { $derivedQueueRoot } else { "C:\\polish\\queue" }
+if (-not $QueueRoot -and -not $deckQueueRoot -and -not $derivedQueueRoot) {
+    Write-Warning "QueueRoot not specified and no title-specific queue_root found; defaulting to C:\\polish\\queue (ensure a runner is watching)."
+}
 $pollSecValue = if ($PollSec -gt 0) { $PollSec } elseif ($deckPollSec) { [int]$deckPollSec } else { 60 }
 $pendingGraceValue = if ($PendingGraceSec -gt 0) { $PendingGraceSec } elseif ($deckPendingGrace) { [int]$deckPendingGrace } else { 600 }
 $maxMinutesValue = if ($MaxMinutes -gt 0) { $MaxMinutes } elseif ($deckMaxMinutes) { [int]$deckMaxMinutes } else { 720 }
