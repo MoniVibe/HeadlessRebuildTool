@@ -241,12 +241,17 @@ jobs:
             $puredotsDefault = $puredotsCheckout
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
-              & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
-              if ($LASTEXITCODE -ne 0) {
-                Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', "$puredotsRef:refs/remotes/origin/$puredotsRef") -Context "puredots fetch ref $puredotsRef"
+              if ($puredotsRef -match '^[0-9a-fA-F]{7,40}$') {
+                Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', $puredotsRef) -Context "puredots fetch sha $puredotsRef"
+                $puredotsCheckout = $puredotsRef
+              } else {
                 & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+                if ($LASTEXITCODE -ne 0) {
+                  Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', "$puredotsRef:refs/remotes/origin/$puredotsRef") -Context "puredots fetch ref $puredotsRef"
+                  & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+                }
+                if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = $puredotsDefault }
               }
-              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = $puredotsDefault }
             }
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'reset', '--hard', $puredotsCheckout) -Context "puredots reset $puredotsCheckout"
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'clean', '-fd') -Context "puredots clean"
