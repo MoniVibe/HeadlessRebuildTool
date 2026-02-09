@@ -57,6 +57,14 @@ Ships are physical systems plus governance.
   - Boarding/anti-personnel: Sight + Manipulation + Consciousness.
 - Failures degrade performance (latency, accuracy), never crash the sim.
 
+## Shared Timing/Accuracy/Deflection (PureDOTS)
+- Timing windows, accuracy spread, lock/reacquire, and deflection resolution live in PureDOTS.
+- Games only tune parameters; they do not re-implement the model.
+- Default model: windowed/coarse (not per-projectile) to control overhead.
+- Required parameters (per role or seat):
+  - windup_ms, window_ms, recovery_ms, prequeue_ms, arc_deg.
+- Telemetry keys are shared; games may add tags but should not rename the base keys.
+
 ## Scenario Contract (v0)
 Scenarios should reference templates + overrides, not full entities.
 - Scenario defines: ship_template + crew_template + overrides (seeded).
