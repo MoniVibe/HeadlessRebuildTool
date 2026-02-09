@@ -1,0 +1,23 @@
+{
+    "name":  "fast_exit_validate_20260204",
+    "queue_root":  "C:\\polish\\anviloop\\space4x\\queue",
+    "wsl_distro":  "Ubuntu",
+    "poll_sec":  30,
+    "pending_grace_sec":  300,
+    "max_minutes":  60,
+    "jobs":  [
+                 {
+                     "title":  "space4x",
+                     "scenario_id":  "space4x_comms_blocked_micro",
+                     "scenario_rel":  "Assets/Scenarios/space4x_comms_blocked_micro.json",
+                     "seed":  911,
+                     "timeout_sec":  120,
+                     "repeat":  1,
+                     "args":  [
+
+                              ],
+                     "base_ref":  "nightly/base_space4x_20260123",
+                     "project_path_override":  "C:\\dev\\Tri\\space4x_fix"
+                 }
+             ]
+}

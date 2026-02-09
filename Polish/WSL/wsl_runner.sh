@@ -32,8 +32,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
 DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
-  DEFAULT_TELEMETRY_MAX_BYTES="${PUREDOTS_TELEMETRY_MAX_BYTES:-104857600}"
+DEFAULT_TELEMETRY_MAX_BYTES=52428800
 SCENARIO_MAP_FILE="${TOOLS_ROOT}/Polish/WSL/scenario_map.json"
+SCENARIO_LOOKUP_STATUS=""
+SCENARIO_LOOKUP_DETAIL=""
 log() {
   echo "wsl_runner: $*" >&2
 }
@@ -238,17 +240,33 @@ resolve_repo_root() {
   echo ""
 }
 
-map_scenario_id_to_rel() {
-  local scenario_id="$1"
-  if [ -z "$scenario_id" ] || [ ! -f "$SCENARIO_MAP_FILE" ]; then
+scenario_map_lookup() {
+  local map_file="$1"
+  local scenario_id="$2"
+  if [ -z "$scenario_id" ] || [ -z "$map_file" ] || [ ! -f "$map_file" ]; then
     echo ""
     return 0
   fi
   if [ "$HAVE_JQ" -eq 1 ]; then
-    jq -r --arg id "$scenario_id" '.[$id] // empty' "$SCENARIO_MAP_FILE" 2>/dev/null || true
+    jq -r --arg id "$scenario_id" '
+      if type == "object" then
+        (.[$id] | select(type == "string")) // empty
+      elif type == "array" then
+        (map(select((.scenario_id // .scenarioId // .id) == $id)) | . as $m |
+          if ($m | length) == 1 then
+            ($m[0].scenario_rel | select(type == "string")) // empty
+          elif ($m | length) > 1 then
+            "__ambiguous__:" + (($m | map(.scenario_rel) | map(select(type == "string")) | .[0:5] | join(";")) // "")
+          else
+            empty
+          end)
+      else
+        empty
+      end
+    ' "$map_file" 2>/dev/null || true
     return 0
   fi
-  "$PYTHON_BIN" - "$SCENARIO_MAP_FILE" "$scenario_id" <<'PY'
+  "$PYTHON_BIN" - "$map_file" "$scenario_id" <<'PY'
 import json,sys
 path=sys.argv[1]
 key=sys.argv[2]
@@ -257,9 +275,163 @@ try:
         data=json.load(handle)
 except Exception:
     data={}
-value=data.get(key,"")
-print(value if isinstance(value,str) else "")
+value=""
+if isinstance(data, dict):
+    value=data.get(key,"")
+elif isinstance(data, list):
+    matches=[]
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        item_id=item.get("scenario_id") or item.get("scenarioId") or item.get("id")
+        if item_id == key:
+            matches.append(item.get("scenario_rel",""))
+    matches=[m for m in matches if isinstance(m,str)]
+    if len(matches) == 1:
+        value=matches[0]
+    elif len(matches) > 1:
+        value="__ambiguous__:" + ";".join(matches[:5])
+if isinstance(value,str):
+    print(value)
+else:
+    print("")
 PY
+}
+
+scan_repo_for_scenario_id() {
+  local repo_root="$1"
+  local scenario_id="$2"
+  if [ -z "$repo_root" ] || [ -z "$scenario_id" ] || [ ! -d "$repo_root" ]; then
+    echo ""
+    return 0
+  fi
+  "$PYTHON_BIN" - "$repo_root" "$scenario_id" <<'PY'
+import json,os,sys
+root=sys.argv[1]
+target=sys.argv[2]
+
+def add_path(paths, path):
+    if os.path.isdir(path):
+        paths.append(path)
+
+def candidate_roots(root):
+    roots=[]
+    add_path(roots, os.path.join(root,"Assets","Scenarios"))
+    add_path(roots, os.path.join(root,"Packages"))
+    try:
+        for entry in os.scandir(root):
+            if not entry.is_dir():
+                continue
+            add_path(roots, os.path.join(entry.path,"Assets","Scenarios"))
+            add_path(roots, os.path.join(entry.path,"Packages"))
+    except FileNotFoundError:
+        pass
+    expanded=[]
+    for base in roots:
+        if os.path.basename(base) == "Packages":
+            try:
+                for pkg in os.scandir(base):
+                    if not pkg.is_dir():
+                        continue
+                    candidate=os.path.join(pkg.path,"Scenarios")
+                    if os.path.isdir(candidate):
+                        expanded.append(candidate)
+            except FileNotFoundError:
+                pass
+        else:
+            expanded.append(base)
+    return expanded
+
+def read_scenario_id(path):
+    try:
+        with open(path,"r",encoding="utf-8") as handle:
+            data=json.load(handle)
+    except Exception:
+        return None
+    if isinstance(data, dict):
+        return data.get("scenarioId") or data.get("scenario_id") or data.get("id")
+    return None
+
+matches=[]
+for base in candidate_roots(root):
+    for dirpath, dirnames, filenames in os.walk(base):
+        parts=set(dirpath.split(os.sep))
+        if "Templates" in parts:
+            continue
+        for name in filenames:
+            if not name.endswith(".json"):
+                continue
+            if name == "README.json":
+                continue
+            path=os.path.join(dirpath, name)
+            scenario_id=read_scenario_id(path)
+            if scenario_id == target:
+                rel=os.path.relpath(path, root).replace("\\","/")
+                matches.append(rel)
+
+def is_assets_path(path):
+    return "/Assets/Scenarios/" in f"/{path.strip('/')}/"
+
+assets=[m for m in matches if is_assets_path(m)]
+if len(assets) == 1:
+    print(assets[0])
+    raise SystemExit(0)
+if len(assets) > 1:
+    print("__ambiguous__:" + ";".join(sorted(assets)[:5]))
+    raise SystemExit(0)
+if len(matches) == 1:
+    print(matches[0])
+    raise SystemExit(0)
+if len(matches) > 1:
+    print("__ambiguous__:" + ";".join(sorted(matches)[:5]))
+    raise SystemExit(0)
+print("__notfound__")
+PY
+}
+
+map_scenario_id_to_rel() {
+  local scenario_id="$1"
+  local repo_root="$2"
+  SCENARIO_LOOKUP_STATUS=""
+  SCENARIO_LOOKUP_DETAIL=""
+  if [ -z "$scenario_id" ]; then
+    SCENARIO_LOOKUP_STATUS="missing_id"
+    echo ""
+    return 0
+  fi
+  local map_file="$SCENARIO_MAP_FILE"
+  if [ -n "$repo_root" ] && [ -f "${repo_root}/scenario_map.json" ]; then
+    map_file="${repo_root}/scenario_map.json"
+  fi
+  local scenario_rel
+  scenario_rel="$(scenario_map_lookup "$map_file" "$scenario_id")"
+  case "$scenario_rel" in
+    __ambiguous__:* )
+      SCENARIO_LOOKUP_STATUS="ambiguous"
+      SCENARIO_LOOKUP_DETAIL="${scenario_rel#__ambiguous__:}"
+      scenario_rel=""
+      ;;
+  esac
+  if [ -z "$scenario_rel" ] && [ -z "$SCENARIO_LOOKUP_STATUS" ]; then
+    scenario_rel="$(scan_repo_for_scenario_id "$repo_root" "$scenario_id")"
+    case "$scenario_rel" in
+      __ambiguous__:* )
+        SCENARIO_LOOKUP_STATUS="ambiguous"
+        SCENARIO_LOOKUP_DETAIL="${scenario_rel#__ambiguous__:}"
+        scenario_rel=""
+        ;;
+      __notfound__ )
+        SCENARIO_LOOKUP_STATUS="notfound"
+        scenario_rel=""
+        ;;
+    esac
+  fi
+  if [ -n "$scenario_rel" ]; then
+    SCENARIO_LOOKUP_STATUS="ok"
+  elif [ -z "$SCENARIO_LOOKUP_STATUS" ]; then
+    SCENARIO_LOOKUP_STATUS="notfound"
+  fi
+  echo "$scenario_rel"
 }
 
 resolve_scenario_path() {
@@ -343,40 +515,6 @@ val=data.get(field, {})
 if not isinstance(val, dict):
     val={}
 print(json.dumps(val, sort_keys=True, separators=(',', ':')))
-PY
-}
-
-json_get_env_pairs() {
-  local file="$1"
-  local field="$2"
-  if [ -z "$field" ]; then
-    field="env"
-  fi
-  if [ "$HAVE_JQ" -eq 1 ]; then
-    jq -r --arg field "$field" '.[$field] // {} | to_entries[] | "\(.key)=\(.value)"' "$file" 2>/dev/null || true
-    return 0
-  fi
-  "$PYTHON_BIN" - "$file" "$field" <<'PY'
-import json,sys
-path=sys.argv[1]
-field=sys.argv[2]
-try:
-    with open(path,"r",encoding="utf-8") as handle:
-        data=json.load(handle)
-except Exception:
-    data={}
-env=data.get(field, {})
-if not isinstance(env, dict):
-    env={}
-for key in sorted(env.keys()):
-    if key is None:
-        continue
-    val=env.get(key, "")
-    if isinstance(val, (dict, list)):
-        continue
-    if val is None:
-        val=""
-    print(f"{key}={val}")
 PY
 }
 
@@ -512,30 +650,6 @@ strip_diagnostic_args() {
   done
 }
 
-strip_scenario_args() {
-  local -n in_args="$1"
-  local -n out_args="$2"
-  out_args=()
-  local skip_next=0
-  local arg
-  for arg in "${in_args[@]}"; do
-    if [ "$skip_next" -eq 1 ]; then
-      skip_next=0
-      continue
-    fi
-    case "$arg" in
-      --scenario)
-        skip_next=1
-        continue
-        ;;
-      --scenario=*)
-        continue
-        ;;
-    esac
-    out_args+=("$arg")
-  done
-}
-
 args_include_flag() {
   local flag="$1"
   shift
@@ -587,22 +701,6 @@ telemetry_disabled_in_args() {
 
 shell_quote() {
   printf '%q' "$1"
-}
-
-build_env_prefix() {
-  local -a pairs=("$@")
-  if [ "${#pairs[@]}" -eq 0 ]; then
-    return 0
-  fi
-  local prefix="env"
-  local pair
-  for pair in "${pairs[@]}"; do
-    if [ -z "$pair" ]; then
-      continue
-    fi
-    prefix+=" $(shell_quote "$pair")"
-  done
-  printf '%s' "$prefix"
 }
 
 build_repro_command() {
@@ -727,66 +825,6 @@ PY
 
   local pattern='required questions|questions unknown|unknown required questions|required questions unknown'
   tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
-}
-
-shutdown_exit_request_present() {
-  local out_dir="$1"
-  local inv_path="${out_dir}/invariants.json"
-  local progress_path="${out_dir}/progress.json"
-  if [ -z "$PYTHON_BIN" ]; then
-    return 1
-  fi
-  if [ ! -f "$inv_path" ] && [ ! -f "$progress_path" ]; then
-    return 1
-  fi
-  "$PYTHON_BIN" - "$inv_path" "$progress_path" <<'PY'
-import json,sys,os
-inv_path=sys.argv[1]
-progress_path=sys.argv[2]
-
-def load(path):
-    if not path or not os.path.exists(path):
-        return None
-    try:
-        with open(path,"r",encoding="utf-8") as handle:
-            return json.load(handle)
-    except Exception:
-        return None
-
-def has_exit_request(data):
-    if not isinstance(data, dict):
-        return False
-    progress=data.get("progress")
-    if isinstance(progress, dict):
-        last_phase=str(progress.get("last_phase","")).lower()
-        last_checkpoint=str(progress.get("last_checkpoint","")).lower()
-        if last_checkpoint == "exit_request":
-            return True
-        if last_phase == "shutdown" and last_checkpoint in ("exit_request","exit","quit"):
-            return True
-    last_checkpoint=str(data.get("last_checkpoint","")).lower()
-    if last_checkpoint == "exit_request":
-        return True
-    return False
-
-inv=load(inv_path)
-if has_exit_request(inv):
-    raise SystemExit(0)
-
-  prog=load(progress_path)
-  if has_exit_request(prog):
-    raise SystemExit(0)
-
-raise SystemExit(1)
-PY
-  local status=$?
-  if [ "$status" -eq 0 ]; then
-    return 0
-  fi
-
-  local pattern='HeadlessExitSystem\] Quit requested'
-  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
-  return $?
 }
 
 exit_by_signal() {
@@ -1038,7 +1076,6 @@ add("system_snapshot","system_snapshot.txt","out/system_snapshot.txt")
 add("ps_snapshot","ps_snapshot.txt","out/ps_snapshot.txt")
 add("gdb_bt","gdb_bt.txt","out/gdb_bt.txt")
 add("core_dump_path","core_dump_path.txt","out/core_dump_path.txt")
-add("core_pattern","core_pattern.txt","out/core_pattern.txt")
 
 print(json.dumps(paths, sort_keys=True, separators=(',', ':')))
 PY
@@ -1313,27 +1350,6 @@ ensure_queue_dirs() {
   mkdir -p "${queue_dir}/results/.tmp" "${queue_dir}/leases/archive"
 }
 
-enable_core_dumps() {
-  local run_dir="$1"
-  local out_dir="$2"
-  local pattern_path="/proc/sys/kernel/core_pattern"
-  local current_pattern=""
-
-  ulimit -c unlimited 2>/dev/null || true
-
-  if [ -r "$pattern_path" ]; then
-    current_pattern="$(cat "$pattern_path" 2>/dev/null || true)"
-  fi
-
-  if [ -n "$current_pattern" ]; then
-    printf '%s\n' "$current_pattern" > "${out_dir}/core_pattern.txt" 2>/dev/null || true
-  fi
-
-  if [ -w "$pattern_path" ]; then
-    echo "${run_dir}/core.%e.%p" > "$pattern_path" 2>/dev/null || true
-  fi
-}
-
 find_core_dump() {
   local run_dir="$1"
   local build_dir="$2"
@@ -1350,22 +1366,6 @@ find_core_dump() {
   if [ -n "$core_path" ]; then
     echo "$core_path" > "$out_dir/core_dump_path.txt"
     CURRENT_CORE_DUMP_PRESENT=1
-  fi
-}
-
-capture_core_backtrace() {
-  local entrypoint_path="$1"
-  local out_dir="$2"
-  if [ "$CURRENT_CORE_DUMP_PRESENT" -ne 1 ]; then
-    return 0
-  fi
-  local core_path=""
-  core_path="$(cat "${out_dir}/core_dump_path.txt" 2>/dev/null || true)"
-  if [ -z "$core_path" ]; then
-    return 0
-  fi
-  if command -v gdb >/dev/null 2>&1; then
-    gdb -batch -ex "thread apply all bt" "$entrypoint_path" "$core_path" > "${out_dir}/gdb_bt.txt" 2>/dev/null || true
   fi
 }
 
@@ -1578,7 +1578,6 @@ run_job() {
   local required_bank=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
-  local -a env_pairs=()
 
   local error_context=""
   local repro_command=""
@@ -1602,23 +1601,30 @@ run_job() {
     required_bank="$(json_get_string "$lease_path" "required_bank")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
-    mapfile -t env_pairs < <(json_get_env_pairs "$lease_path" "env")
   fi
 
+  repo_root="$(resolve_repo_root "$repo_root")"
   if [ -z "$scenario_rel" ] && [ -n "$scenario_id" ]; then
-    scenario_rel="$(map_scenario_id_to_rel "$scenario_id")"
-    if [ -z "$scenario_rel" ]; then
-      case "$scenario_id" in
-        space4x_collision_micro) scenario_rel="Assets/Scenarios/space4x_collision_micro.json" ;;
-        space4x_bug_hunt_headless) scenario_rel="Assets/Scenarios/space4x_bug_hunt_headless.json" ;;
-        godgame_smoke) scenario_rel="Assets/Scenarios/Godgame/godgame_smoke.json" ;;
-      esac
-    fi
+    scenario_rel="$(map_scenario_id_to_rel "$scenario_id" "$repo_root")"
   fi
   if [ -n "$scenario_rel" ]; then
     scenario_rel="$(normalize_rel_path "$scenario_rel")"
   fi
-  repo_root="$(resolve_repo_root "$repo_root")"
+
+  if [ -z "$error_context" ] && [ -n "$scenario_id" ] && [ -z "$scenario_rel" ]; then
+    case "$SCENARIO_LOOKUP_STATUS" in
+      ambiguous)
+        if [ -n "$SCENARIO_LOOKUP_DETAIL" ]; then
+          echo "$SCENARIO_LOOKUP_DETAIL" > "${out_dir}/scenario_id_ambiguous_candidates.txt"
+          log "scenario_id_ambiguous_candidates=${SCENARIO_LOOKUP_DETAIL}"
+        fi
+        error_context="scenario_id_ambiguous:${scenario_id}"
+        ;;
+      notfound|missing_id|"")
+        error_context="scenario_id_not_found:${scenario_id}"
+        ;;
+    esac
+  fi
 
   if [ -z "$error_context" ] && [ -z "$scenario_id" ] && [ -z "$scenario_rel" ]; then
     error_context="scenario_missing"
@@ -1672,14 +1678,7 @@ run_job() {
     local entrypoint
     entrypoint="$(json_get_string "$manifest_path" "entrypoint")"
     if [ -z "$entrypoint" ]; then
-      local fallback_entrypoint=""
-      fallback_entrypoint="$(find "$build_dir" -maxdepth 3 -type f \( -name '*_Headless.x86_64' -o -name '*_Headless.exe' \) | head -n 1)"
-      if [ -n "$fallback_entrypoint" ]; then
-        entrypoint_path="$fallback_entrypoint"
-        log "entrypoint_missing: using fallback ${entrypoint_path}"
-      else
-        error_context="entrypoint_missing"
-      fi
+      error_context="entrypoint_missing"
     else
       if [[ "$entrypoint" = /* ]]; then
         entrypoint_path="$entrypoint"
@@ -1731,9 +1730,7 @@ run_job() {
     mapfile -t job_args < <(read_json_array_field "$lease_path" "args")
     strip_logfile_args default_args default_args_stripped
     strip_diagnostic_args default_args_stripped default_args_stripped
-    strip_scenario_args default_args_stripped default_args_stripped
     strip_diagnostic_args job_args job_args_stripped
-    strip_scenario_args job_args_stripped job_args_stripped
 
     local logfile_override=0
     if args_include_logfile "${job_args[@]}"; then
@@ -1763,52 +1760,10 @@ run_job() {
       scenario_arg_value="$scenario_id"
     fi
 
-    if [ -n "$scenario_id" ] && { [ -z "$scenario_rel" ] || [ "$scenario_arg_value" = "$scenario_id" ]; }; then
-      local mapped_rel=""
-      mapped_rel="$(map_scenario_id_to_rel "$scenario_id")"
-      if [ -z "$mapped_rel" ]; then
-        case "$scenario_id" in
-          space4x_collision_micro) mapped_rel="Assets/Scenarios/space4x_collision_micro.json" ;;
-          godgame_smoke) mapped_rel="Assets/Scenarios/Godgame/godgame_smoke.json" ;;
-        esac
-      fi
-      if [ -n "$mapped_rel" ]; then
-        scenario_rel="$mapped_rel"
-        scenario_arg_value="$(resolve_scenario_path "$scenario_rel" "$repo_root")"
-      fi
-    fi
-
-    if [ -n "$scenario_id" ] && [ "$scenario_arg_value" = "$scenario_id" ] && [ -n "$repo_root" ]; then
-      local candidate=""
-      for candidate in \
-        "${repo_root%/}/Assets/Scenarios/${scenario_id}.json" \
-        "${repo_root%/}/Assets/Scenarios/Godgame/${scenario_id}.json"; do
-        if [ -f "$candidate" ]; then
-          scenario_arg_value="$candidate"
-          scenario_rel="$(normalize_rel_path "${candidate#${repo_root%/}/}")"
-          break
-        fi
-      done
-    fi
-
-    if [ -n "$scenario_arg_value" ]; then
-      log "scenario_arg_value=${scenario_arg_value} (id=${scenario_id} rel=${scenario_rel})"
-    fi
-
-    if [ -n "$scenario_arg_value" ] && [[ "$scenario_arg_value" == *".json"* ]]; then
-      if ! is_absolute_path "$scenario_arg_value" && [ -n "$repo_root" ]; then
-        scenario_arg_value="${repo_root%/}/$(normalize_rel_path "$scenario_arg_value")"
-      fi
-      if [ ! -f "$scenario_arg_value" ]; then
-        error_context="scenario_path_missing:${scenario_arg_value}"
-      fi
-    fi
-
     if [ -n "$error_context" ]; then
       :
     else
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
-    strip_scenario_args final_args final_args
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
       if [ -n "$scenario_arg_value" ]; then
         final_args+=("--scenario" "$scenario_arg_value")
@@ -1829,13 +1784,6 @@ run_job() {
     fi
 
     repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${final_args[@]}")"
-    if [ "${#env_pairs[@]}" -gt 0 ]; then
-      local env_prefix
-      env_prefix="$(build_env_prefix "${env_pairs[@]}")"
-      if [ -n "$env_prefix" ]; then
-        repro_command="${env_prefix} $repro_command"
-      fi
-    fi
     fi
   fi
 
@@ -1850,15 +1798,11 @@ run_job() {
     local orig_dir
     orig_dir="$(pwd)"
     cd "$build_dir" || true
-    enable_core_dumps "$run_dir" "$out_dir"
     setsid -- env \
-      ${repo_root:+TRI_ROOT=$repo_root} \
-      ${repo_root:+TRI_REPO_ROOT=$repo_root} \
       TRI_PARAM_OVERRIDES="$param_overrides_json" \
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
       ${perf_telemetry_env:+PUREDOTS_PERF_TELEMETRY_PATH=$perf_telemetry_env} \
-      "${env_pairs[@]}" \
       "$entrypoint_path" "${final_args[@]}" >"$stdout_log" 2>"$stderr_log" &
     local pid=$!
     local pgid
@@ -1899,7 +1843,6 @@ run_job() {
     CURRENT_PLAYER_LOG="$player_log"
     CURRENT_CORE_DUMP_PRESENT=0
     find_core_dump "$run_dir" "$build_dir" "$out_dir"
-    capture_core_backtrace "$entrypoint_path" "$out_dir"
     if [ "$timed_out" -eq 1 ]; then
       exit_reason="$EXIT_REASON_HANG"
     else
@@ -1912,14 +1855,7 @@ run_job() {
   local original_exit_code=""
   local signature_exit_reason="$exit_reason"
   local signature_exit_code="$runner_exit_code"
-  if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
-    original_exit_reason="$exit_reason"
-    original_exit_code="$runner_exit_code"
-    exit_reason="$EXIT_REASON_WARN"
-    runner_exit_code="$EXIT_CODE_SUCCESS"
-    signature_exit_reason="$original_exit_reason"
-    signature_exit_code="$original_exit_code"
-  elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
+  if [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
     if required_questions_unknown_present "$out_dir"; then
       original_exit_reason="$exit_reason"
       original_exit_code="$runner_exit_code"
@@ -1978,12 +1914,6 @@ run_job() {
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
     "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
     "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank"
-
-  local run_state="failed"
-  if [ "$exit_reason" = "$EXIT_REASON_SUCCESS" ] || [ "$exit_reason" = "$EXIT_REASON_WARN" ]; then
-    run_state="ran"
-  fi
-  log "run_state=${run_state} exit_reason=${exit_reason} job_id=${job_id} scenario_id=${scenario_id}"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 

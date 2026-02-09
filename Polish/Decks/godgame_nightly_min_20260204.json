@@ -1,0 +1,20 @@
+{
+  "name": "godgame_nightly_min_20260204",
+  "queue_root": "C:\\polish\\anviloop\\godgame\\queue",
+  "wsl_distro": "Ubuntu",
+  "poll_sec": 60,
+  "pending_grace_sec": 600,
+  "max_minutes": 240,
+  "jobs": [
+    {
+      "title": "godgame",
+      "scenario_id": "godgame_storehouse_micro",
+      "scenario_rel": "Assets/Scenarios/Godgame/godgame_storehouse_micro.json",
+      "seed": 42,
+      "timeout_sec": 180,
+      "repeat": 3,
+      "args": [],
+      "base_ref": "nightly/base_godgame_20260123"
+    }
+  ]
+}

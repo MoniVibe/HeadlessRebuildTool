@@ -1,0 +1,3 @@
+interface:
+  display_name: "Docs to Plans"
+  short_description: "Translate docs into executable plans"
