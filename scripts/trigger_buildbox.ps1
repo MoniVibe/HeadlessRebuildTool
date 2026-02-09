@@ -58,6 +58,9 @@ if (-not [string]::IsNullOrWhiteSpace($EnvJson)) { $inputs.env_json = $EnvJson }
 if (-not [string]::IsNullOrWhiteSpace($PuredotsRef)) { $inputs.puredots_ref = $PuredotsRef }
 if (-not [string]::IsNullOrWhiteSpace($ToolsRef)) { $inputs.tools_ref = $ToolsRef }
 
+Write-Host ("enqueue_request title={0} ref={1} queue_root={2} scenario_rel={3} puredots_ref={4} tools_ref={5} workflow_ref={6}" -f `
+    $Title, $Ref, $QueueRoot, $ScenarioRel, $PuredotsRef, $ToolsRef, $WorkflowRef)
+
 $ghArgs = @('workflow', 'run', $Workflow, '-R', $Repo)
 if (-not [string]::IsNullOrWhiteSpace($WorkflowRef)) { $ghArgs += @('--ref', $WorkflowRef) }
 foreach ($item in $inputs.GetEnumerator()) {
