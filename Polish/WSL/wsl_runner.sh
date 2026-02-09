@@ -773,8 +773,8 @@ inv=load(inv_path)
 if has_exit_request(inv):
     raise SystemExit(0)
 
-  prog=load(progress_path)
-  if has_exit_request(prog):
+prog=load(progress_path)
+if has_exit_request(prog):
     raise SystemExit(0)
 
 raise SystemExit(1)
@@ -1991,16 +1991,23 @@ run_job() {
   local original_exit_code=""
   local signature_exit_reason="$exit_reason"
   local signature_exit_code="$runner_exit_code"
-  if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
+if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
+  original_exit_reason="$exit_reason"
+  original_exit_code="$runner_exit_code"
+  exit_reason="$EXIT_REASON_WARN"
+  runner_exit_code="$EXIT_CODE_SUCCESS"
+  signature_exit_reason="$original_exit_reason"
+  signature_exit_code="$original_exit_code"
+elif [ "$exit_reason" = "$EXIT_REASON_HANG" ] && shutdown_exit_request_present "$out_dir"; then
+  original_exit_reason="$exit_reason"
+  original_exit_code="$runner_exit_code"
+  exit_reason="$EXIT_REASON_SUCCESS"
+  runner_exit_code="$EXIT_CODE_SUCCESS"
+  signature_exit_reason="$original_exit_reason"
+  signature_exit_code="$original_exit_code"
+elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
+  if required_questions_unknown_present "$out_dir"; then
     original_exit_reason="$exit_reason"
-    original_exit_code="$runner_exit_code"
-    exit_reason="$EXIT_REASON_WARN"
-    runner_exit_code="$EXIT_CODE_SUCCESS"
-    signature_exit_reason="$original_exit_reason"
-    signature_exit_code="$original_exit_code"
-  elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
-    if required_questions_unknown_present "$out_dir"; then
-      original_exit_reason="$exit_reason"
       original_exit_code="$runner_exit_code"
       exit_reason="$EXIT_REASON_WARN"
       runner_exit_code="$EXIT_CODE_SUCCESS"
