@@ -65,11 +65,33 @@ Ships are physical systems plus governance.
   - windup_ms, window_ms, recovery_ms, prequeue_ms, arc_deg.
 - Telemetry keys are shared; games may add tags but should not rename the base keys.
 
+## Skill Expression Primitives (PureDOTS Draft)
+- Reaction latency: reaction_time_ms (stimulus to action).
+- Aim/accuracy spread: aim_spread_deg.
+- Solution/lead time: solution_time_ms.
+- Lock/reacquire timing: lock_time_ms, reacquire_time_ms.
+- Windup/window/recovery/prequeue: windup_ms, window_ms, recovery_ms, prequeue_ms.
+- Deflection quality: deflect_accuracy_pct, deflect_timing_error_ms.
+- Cadence and variance: cadence_s, cadence_variance.
+- Tracking stability: track_stability, alignment_error_deg.
+- Focus/effort uptime: focus_uptime_pct, fatigue_level.
+- Decision jitter (optional): decision_jitter_ms.
+- Games may add tags, but should keep these base keys stable.
+
 ## Scenario Contract (v0)
 Scenarios should reference templates + overrides, not full entities.
 - Scenario defines: ship_template + crew_template + overrides (seeded).
 - Overrides may adjust single axes (injury, augments, skill deltas).
 - Keep scenarios minimal (2-4 ships) but mechanically faithful.
+
+## ScenarioConfig Optional Fields (Draft Registry)
+These keys are optional and loader-safe (unknown keys may be ignored), but their presence is intentional.
+- resourceUse: trackAmmo/trackEnergy, ammoReload_s, capacitorRecoveryScale.
+- rotationProfiles: per ship class yaw/pitch limits; applyToFleetId selector.
+- friendlyFire: enable/penalty/escalationVariant (non-base runs).
+- moraleCohesion: morale/cohesion enablement, competition penalties, fleet cohesion toggles.
+- moduleSeeds: seedModules, seedStrategy, seedOffsets for deterministic module variation.
+- targetDroneVariants: armorTypes, shieldTypes, engineProfiles, stealthProfiles, stealthChance.
 
 ## Proof Scenarios (micro)
 - Crew existence proof: roster + station occupancy matches template (BANK PASS).
