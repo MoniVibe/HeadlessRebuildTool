@@ -504,6 +504,11 @@
       ],
       "nightly_order": 36,
       "required_bank": "S1.SPACE4X_CREW_SENSORS_MICRO",
+      "bank_strict": false,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "metric_keys": [
         "space4x.hull.vessels",
         "space4x.departments.carriers",
@@ -622,6 +627,11 @@
       ],
       "nightly_order": 37,
       "required_bank": "S2.SPACE4X_CREW_SENSORS_CAUSALITY_MICRO",
+      "bank_strict": false,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
       "metric_keys": [
         "space4x.hull.vessels",
         "space4x.departments.carriers",

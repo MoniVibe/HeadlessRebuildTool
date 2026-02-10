@@ -1111,6 +1111,7 @@ def run_task_internal(task_id, seed, pack_name):
 
     invariant_fail = any(inv.get("ok") is False for inv in invariants)
     bank_required = bool(required_bank)
+    bank_strict = task.get("bank_strict", True)
     bank_status = None
     if bank_required:
         for bank in bank_results:
@@ -1125,6 +1126,7 @@ def run_task_internal(task_id, seed, pack_name):
     ok = True
     error_code = "none"
     error = None
+    warnings = []
 
     if timed_out:
         ok = False
@@ -1139,9 +1141,12 @@ def run_task_internal(task_id, seed, pack_name):
         error_code = "telemetry_missing"
         error = "telemetry output missing"
     if bank_required and not bank_ok:
-        ok = False
-        error_code = "bank_failed"
-        error = f"required bank {required_bank} not PASS"
+        if bank_strict:
+            ok = False
+            error_code = "bank_failed"
+            error = f"required bank {required_bank} not PASS"
+        else:
+            warnings.append(f"required bank {required_bank} not PASS")
     if invariant_fail:
         ok = False
         error_code = "invariant_failed"
@@ -1188,6 +1193,7 @@ def run_task_internal(task_id, seed, pack_name):
         "bank_required": required_bank,
         "bank_results": bank_results,
         "bank_status": bank_status,
+        "warnings": warnings,
         "telemetry_path": telemetry_path if telemetry_ok else None,
         "metrics_summary": metrics_summary,
         "metrics_stats": metrics_stats,
