@@ -1618,7 +1618,6 @@
         0,
         10
       ],
-      "required_bank": "S0.SPACE4X_SMOKE",
       "metric_keys": [
         "space4x.hull.vessels",
         "space4x.departments.carriers",
