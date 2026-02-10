@@ -38,6 +38,7 @@
 
 ## Links
 - `Polish/Docs/NIGHTLY_PROTOCOL.md`
+- `Polish/Docs/NIGHTLY_SKILL_LOOP.md`
 - `Polish/Docs/MORNING_VIEW.md`
 - `Polish/Docs/DEPENDENCY_POLICY.md`
 - `Polish/Docs/ANVILOOP_RECURRING_ERRORS.md`
