@@ -289,19 +289,27 @@ if (-not [System.IO.Path]::IsPathRooted($projectPath)) {
 }
 $projectPath = [System.IO.Path]::GetFullPath($projectPath)
 
-if (-not (Test-Path $projectPath)) {
-    # If TRI_ROOT was set but incorrect, retry with auto-resolved root.
-    $fallbackRoot = Resolve-TriRoot -StartPath $scriptRoot -ProjectName $titleDefaults.project_path
-    if ($fallbackRoot) {
-        $fallbackRoot = (Resolve-Path $fallbackRoot).Path
-        $fallbackPath = $titleDefaults.project_path
-        if (-not [System.IO.Path]::IsPathRooted($fallbackPath)) {
-            $fallbackPath = Join-Path $fallbackRoot $fallbackPath
+if (-not (Test-Path $projectPath) -and -not ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride))) {
+    # If TRI_ROOT was set but incorrect, retry with auto-resolved or alternate roots.
+    $fallbackRoots = New-Object System.Collections.Generic.List[string]
+    $autoRoot = Resolve-TriRoot -StartPath $scriptRoot -ProjectName $titleDefaults.project_path
+    if ($autoRoot) { $fallbackRoots.Add((Resolve-Path $autoRoot).Path) }
+    $toolsRoot = Join-Path $triRoot "Tools"
+    if (Test-Path $toolsRoot) { $fallbackRoots.Add((Resolve-Path $toolsRoot).Path) }
+    $parentRoot = Split-Path -Parent $triRoot
+    if (-not [string]::IsNullOrWhiteSpace($parentRoot) -and (Test-Path $parentRoot)) {
+        $fallbackRoots.Add((Resolve-Path $parentRoot).Path)
+    }
+    foreach ($root in $fallbackRoots) {
+        $candidate = $titleDefaults.project_path
+        if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+            $candidate = Join-Path $root $candidate
         }
-        $fallbackPath = [System.IO.Path]::GetFullPath($fallbackPath)
-        if (Test-Path $fallbackPath) {
-            $triRoot = $fallbackRoot
-            $projectPath = $fallbackPath
+        $candidate = [System.IO.Path]::GetFullPath($candidate)
+        if (Test-Path $candidate) {
+            $triRoot = $root
+            $projectPath = $candidate
+            break
         }
     }
 }
