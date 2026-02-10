@@ -23,6 +23,35 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Assert-BuildboxOnly {
+    $allowLocal = $env:ALLOW_LOCAL_PIPELINE_SMOKE
+    if ($allowLocal -and $allowLocal.Trim() -ne "0") {
+        return
+    }
+
+    $signals = @(
+        $env:BUILD_BOX,
+        $env:BUILDBOX,
+        $env:BUILD_BOX_RUN,
+        $env:GITHUB_ACTIONS,
+        $env:CI
+    ) | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+
+    $hasBuildboxSignal = $false
+    foreach ($signal in $signals) {
+        if ($signal -match '^(1|true|yes)$') {
+            $hasBuildboxSignal = $true
+            break
+        }
+    }
+
+    if (-not $hasBuildboxSignal) {
+        throw "USE BUILDBOX: pipeline_smoke.ps1 is blocked locally. Run this via Buildbox (on-demand workflow) or set ALLOW_LOCAL_PIPELINE_SMOKE=1 for an explicit override."
+    }
+}
+
+Assert-BuildboxOnly
+
 function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
