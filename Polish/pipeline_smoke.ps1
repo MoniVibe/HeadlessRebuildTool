@@ -35,7 +35,7 @@ function Assert-BuildboxOnly {
         $env:BUILD_BOX_RUN,
         $env:GITHUB_ACTIONS,
         $env:CI
-    ) | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+    ) | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne "" }
 
     $hasBuildboxSignal = $false
     foreach ($signal in $signals) {
