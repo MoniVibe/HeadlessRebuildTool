@@ -68,6 +68,76 @@ TRI_WSL=""
 LOG_PATH=""
 LOG_PATH_WIN=""
 BUILD_SRC=""
+MANIFEST_DIR=""
+MANIFEST_FILE=""
+MANIFEST_HEADLESS=""
+MANIFEST_BAK=""
+LOCK_FILE=""
+LOCK_HEADLESS=""
+LOCK_BAK=""
+
+restore_headless_manifest() {
+  if [ -n "$MANIFEST_BAK" ] && [ -f "$MANIFEST_BAK" ]; then
+    mv -f "$MANIFEST_BAK" "$MANIFEST_FILE" || true
+  fi
+  if [ -n "$LOCK_BAK" ] && [ -f "$LOCK_BAK" ]; then
+    mv -f "$LOCK_BAK" "$LOCK_FILE" || true
+  fi
+}
+
+swap_headless_manifest() {
+  MANIFEST_DIR="${PROJECT_DIR}/Packages"
+  MANIFEST_FILE="${MANIFEST_DIR}/manifest.json"
+  MANIFEST_HEADLESS="${MANIFEST_DIR}/manifest.headless.json"
+  MANIFEST_BAK="${MANIFEST_DIR}/manifest.json.bak_headless"
+  LOCK_FILE="${MANIFEST_DIR}/packages-lock.json"
+  LOCK_HEADLESS="${MANIFEST_DIR}/packages-lock.headless.json"
+  LOCK_BAK="${MANIFEST_DIR}/packages-lock.json.bak_headless"
+
+  if [ -f "$MANIFEST_HEADLESS" ]; then
+    cp -f "$MANIFEST_FILE" "$MANIFEST_BAK"
+    cp -f "$MANIFEST_HEADLESS" "$MANIFEST_FILE"
+    echo "Headless manifest swapped: $MANIFEST_HEADLESS -> $MANIFEST_FILE"
+  fi
+
+  if [ -f "$LOCK_HEADLESS" ]; then
+    cp -f "$LOCK_FILE" "$LOCK_BAK"
+    cp -f "$LOCK_HEADLESS" "$LOCK_FILE"
+    echo "Headless lock swapped: $LOCK_HEADLESS -> $LOCK_FILE"
+  fi
+
+  if [ -f "$LOCK_FILE" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$LOCK_FILE" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+deps = data.get("dependencies", {})
+remove = [
+    "com.unity.visualscripting",
+    "com.unity.visualscripting.entities",
+    "com.unity.test-framework",
+    "com.unity.ide.visualstudio",
+    "com.unity.ide.rider",
+    "com.unity.collab-proxy",
+    "com.coplaydev.coplay",
+]
+
+changed = False
+for pkg in remove:
+    if pkg in deps:
+        deps.pop(pkg, None)
+        changed = True
+
+if changed:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+PY
+  fi
+}
 
 if [ "$FORCE_LINUX_UNITY" = "1" ]; then
   UNITY_PATH="$(find_unity_linux || true)"
@@ -106,6 +176,9 @@ if [ "$UNITY_MODE" = "linux" ]; then
   LOG_PATH="${TRI_ROOT}/space4x_headless_build.log"
   BUILD_SRC="${PROJECT_DIR}/Builds/Space4X_headless/Linux"
 fi
+
+trap restore_headless_manifest EXIT
+swap_headless_manifest
 
 UNITY_VERSION="$(basename "$(dirname "$(dirname "$UNITY_PATH")")")"
 if [ -z "$UNITY_VERSION" ]; then
@@ -153,16 +226,30 @@ if [ "$SPACE4X_HASH" != "unknown" ] && [ "$PUREDOTS_HASH" != "unknown" ] && [ -f
   fi
 fi
 
+UNITY_EXIT=0
+set +e
 if [ "$UNITY_MODE" = "windows" ]; then
   "$UNITY_PATH" -batchmode -quit -nographics \
     -projectPath "$PROJECT_DIR_WIN" \
     -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless \
     -logFile "$LOG_PATH_WIN"
+  UNITY_EXIT=$?
 else
   "$UNITY_PATH" -batchmode -quit -nographics \
     -projectPath "$PROJECT_DIR" \
     -executeMethod Space4X.Headless.Editor.Space4XHeadlessBuilder.BuildLinuxHeadless \
     -logFile "$LOG_PATH"
+  UNITY_EXIT=$?
+fi
+set -e
+
+if [ "$UNITY_EXIT" -ne 0 ]; then
+  REPORT_PATH="${BUILD_SRC}/Space4X_HeadlessBuildReport.log"
+  if [ -f "$BUILD_SRC/Space4X_Headless.x86_64" ] && [ -f "$REPORT_PATH" ] && grep -q "Result:[[:space:]]*Succeeded" "$REPORT_PATH"; then
+    echo "Unity exited with code ${UNITY_EXIT} but build output exists and report indicates success. Continuing."
+  else
+    exit "$UNITY_EXIT"
+  fi
 fi
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
