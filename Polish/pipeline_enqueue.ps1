@@ -278,11 +278,34 @@ if ([string]::IsNullOrWhiteSpace($triRoot)) {
     $triRoot = (Resolve-Path $triRoot).Path
 }
 
-$projectPath = Join-Path $triRoot $titleDefaults.project_path
-if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
-    $projectPath = $ProjectPathOverride
+$projectPath = if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
+    $ProjectPathOverride
+} else {
+    $titleDefaults.project_path
+}
+
+if (-not [System.IO.Path]::IsPathRooted($projectPath)) {
+    $projectPath = Join-Path $triRoot $projectPath
 }
 $projectPath = [System.IO.Path]::GetFullPath($projectPath)
+
+if (-not (Test-Path $projectPath)) {
+    # If TRI_ROOT was set but incorrect, retry with auto-resolved root.
+    $fallbackRoot = Resolve-TriRoot -StartPath $scriptRoot -ProjectName $titleDefaults.project_path
+    if ($fallbackRoot) {
+        $fallbackRoot = (Resolve-Path $fallbackRoot).Path
+        $fallbackPath = $titleDefaults.project_path
+        if (-not [System.IO.Path]::IsPathRooted($fallbackPath)) {
+            $fallbackPath = Join-Path $fallbackRoot $fallbackPath
+        }
+        $fallbackPath = [System.IO.Path]::GetFullPath($fallbackPath)
+        if (Test-Path $fallbackPath) {
+            $triRoot = $fallbackRoot
+            $projectPath = $fallbackPath
+        }
+    }
+}
+
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
