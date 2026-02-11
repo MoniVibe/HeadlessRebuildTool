@@ -689,12 +689,52 @@ internal static class Program
 
     private static bool IsPrimaryErrorLine(string line)
     {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        if (ContainsIgnoreCase(line, "Licensing::Module") || ContainsIgnoreCase(line, "access token"))
+        {
+            return false;
+        }
+
         if (Regex.IsMatch(line, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
         {
             return true;
         }
 
-        return Regex.IsMatch(line, "\\b\\w*Exception\\b");
+        if (Regex.IsMatch(line, "\\b\\w*Exception\\b", RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "[HeadlessLinuxBuild] Build failed:"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "BuildFailedException"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "BuildPipeline.BuildPlayer"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "Linux Build Support"))
+        {
+            return true;
+        }
+
+        if (ContainsIgnoreCase(line, "ScriptCompilation"))
+        {
+            return true;
+        }
+
+        return ContainsIgnoreCase(line, "Assembly-CSharp");
     }
 
     private static bool ShouldDemoteLicensePrimaryError()
