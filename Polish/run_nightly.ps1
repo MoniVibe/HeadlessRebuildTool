@@ -76,6 +76,32 @@ function Parse-BuildIdFromArtifact {
     return $null
 }
 
+function Get-LatestResultZip {
+    param(
+        [string]$ResultsDir,
+        [string]$Title
+    )
+    if (-not (Test-Path $ResultsDir)) { return $null }
+    $pattern = "result_*_{0}_*.zip" -f $Title
+    $candidates = @(Get-ChildItem -Path $ResultsDir -Filter $pattern -File)
+    if ($null -eq $candidates -or $candidates.Count -eq 0) { return $null }
+    return ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
+}
+
+function Parse-BuildIdFromResult {
+    param(
+        [string]$ResultPath,
+        [string]$Title
+    )
+    if ([string]::IsNullOrWhiteSpace($ResultPath)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
+    $name = [System.IO.Path]::GetFileName($ResultPath)
+    $pattern = "^result_(.+?)_{0}_.*\\.zip$" -f [regex]::Escape($Title)
+    $match = [regex]::Match($name, $pattern)
+    if ($match.Success) { return $match.Groups[1].Value }
+    return $null
+}
+
 function Read-ZipEntryText {
     param(
         [System.IO.Compression.ZipArchive]$Archive,
@@ -281,35 +307,15 @@ function Invoke-Build {
         throw "Unity exe not found: $UnityExePath"
     }
 
-    $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "git rev-parse HEAD failed: $commitFull"
-    }
-    $commitShort = & git -C $projectPath rev-parse --short=8 HEAD 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "git rev-parse --short failed: $commitShort"
-    }
-    $commitFull = $commitFull.ToString().Trim()
-    $commitShort = $commitShort.ToString().Trim()
-
-    $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
-    $buildId = "${timestamp}_$commitShort"
-
-    $queueRootFull = [System.IO.Path]::GetFullPath($QueueRootPath)
-    $artifactsDir = Join-Path $queueRootFull "artifacts"
-    $jobsDir = Join-Path $queueRootFull "jobs"
-    $leasesDir = Join-Path $queueRootFull "leases"
-    $resultsDir = Join-Path $queueRootFull "results"
-    $reportsDir = Join-Path $queueRootFull "reports"
-    Ensure-Directory $artifactsDir
-    Ensure-Directory $jobsDir
-    Ensure-Directory $leasesDir
-    Ensure-Directory $resultsDir
-    Ensure-Directory $reportsDir
-
-    $supervisorProject = Join-Path $TriRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
-    if (-not (Test-Path $supervisorProject)) {
-        throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
+    $startUtc = [DateTime]::UtcNow
+    $invoke = @{
+        Title = $Title
+        UnityExe = $UnityExePath
+        QueueRoot = $QueueRootPath
+        LockReason = "run_nightly"
+        Repeat = $RepeatCount
+        WaitForResult = $true
+        WaitTimeoutSec = $WaitTimeoutSec
     }
 
     $supervisorArgs = @(
@@ -867,26 +873,72 @@ foreach ($title in $titles) {
             runs = [ordered]@{}
         }
 
-        $triageAll = New-Object System.Collections.Generic.List[string]
-        $entry = [pscustomobject][ordered]@{
-            build_id = $run.build_id
-            artifact_zip = $run.artifact_zip
-            pipeline_exit_code = $run.exit_code
-            result_count = 0
-            exit_reason_counts = @{}
-            determinism_hashes = @()
-            telemetry_bytes = $null
-            runtime_sec = $null
-            triage_paths = @()
-            failing_invariants = @()
-            polish_score_total_loss = $null
-            polish_score_grades = @()
-            notes = @()
-            error = $null
+    $triageAll = New-Object System.Collections.Generic.List[string]
+    $entry = [pscustomobject][ordered]@{
+        build_id = $run.build_id
+        artifact_zip = $run.artifact_zip
+        pipeline_exit_code = $run.exit_code
+        result_count = 0
+        exit_reason_counts = @{}
+        determinism_hashes = @()
+        telemetry_bytes = $null
+        runtime_sec = $null
+        triage_paths = @()
+        failing_invariants = @()
+        polish_score_total_loss = $null
+        polish_score_grades = @()
+        notes = @()
+        error = $null
+    }
+    $runErrorProp = $run.PSObject.Properties["error"]
+    if ($runErrorProp -and -not [string]::IsNullOrWhiteSpace([string]$runErrorProp.Value)) {
+        $entry.error = $runErrorProp.Value
+        $hasErrors = $true
+    }
+    $buildIdValue = $null
+    $buildIdProp = $run.PSObject.Properties["build_id"]
+    if ($buildIdProp) { $buildIdValue = [string]$buildIdProp.Value }
+    if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+        $artifactProp = $run.PSObject.Properties["artifact_zip"]
+        if ($artifactProp -and -not [string]::IsNullOrWhiteSpace([string]$artifactProp.Value)) {
+            $buildIdValue = Parse-BuildIdFromArtifact -ArtifactPath ([string]$artifactProp.Value)
         }
-        $runErrorProp = $run.PSObject.Properties["error"]
-        if ($runErrorProp -and -not [string]::IsNullOrWhiteSpace([string]$runErrorProp.Value)) {
-            $entry.error = $runErrorProp.Value
+        if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+            $artifactsDir = Join-Path $queueRoot "artifacts"
+            $artifact = Get-ArtifactZip -ArtifactsDir $artifactsDir -SinceUtc $null
+            if ($artifact) {
+                $buildIdValue = Parse-BuildIdFromArtifact -ArtifactPath $artifact.FullName
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+            $resultsDir = Join-Path $queueRoot "results"
+            $latestResult = Get-LatestResultZip -ResultsDir $resultsDir -Title $run.title
+            if ($latestResult) {
+                $buildIdValue = Parse-BuildIdFromResult -ResultPath $latestResult.FullName -Title $run.title
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($buildIdValue)) {
+            $entry.build_id = $buildIdValue
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($buildIdValue)) {
+        if (-not $entry.error) { $entry.error = "build_id_missing" }
+        $hasErrors = $true
+    }
+    else {
+        $stats = @(Summarize-Results -QueueRootPath $queueRoot -BuildId $buildIdValue -Title $run.title -ReportsDir $reportsDir)[0]
+        $entry.result_count = $stats.result_count
+        $entry.exit_reason_counts = $stats.exit_counts
+        $entry.determinism_hashes = $stats.determinism_hashes
+        $entry.telemetry_bytes = $stats.telemetry_bytes
+        $entry.runtime_sec = $stats.runtime_sec
+        $entry.triage_paths = $stats.triage_paths
+        $entry.failing_invariants = $stats.failing_invariants
+        $entry.polish_score_total_loss = $stats.polish_score_total_loss
+        $entry.polish_score_grades = $stats.polish_score_grades
+        $statsErrorProp = $stats.PSObject.Properties["error"]
+        if ($statsErrorProp -and $statsErrorProp.Value) {
+            $entry.error = $statsErrorProp.Value
             $hasErrors = $true
         }
         $buildIdValue = $null

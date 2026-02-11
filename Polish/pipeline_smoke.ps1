@@ -2,10 +2,11 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Title,
-    [Parameter(Mandatory = $true)]
+    [Parameter()]
     [string]$UnityExe,
     [string]$ProjectPathOverride,
     [string]$QueueRoot = "C:\\polish\\queue",
+    [string]$LockReason = "pipeline_smoke",
     [string]$ScenarioId,
     [int]$Seed,
     [int]$TimeoutSec,
@@ -24,19 +25,91 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
-function Sync-PureDots {
-    param([string]$TriRoot)
-    $source = Join-Path $TriRoot "puredots"
-    if (-not (Test-Path $source)) { return }
-    if (-not (Test-Path (Join-Path $source ".git"))) { return }
-    if ($env:PUREDOTS_SYNC -eq "0") { return }
+function Resolve-UnityExe {
+    param([string]$ExePath)
+    $resolved = $ExePath
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        $resolved = $env:UNITY_WIN
+    }
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        $resolved = $env:UNITY_EXE
+    }
+    if ([string]::IsNullOrWhiteSpace($resolved)) {
+        throw "UnityExe not provided (use -UnityExe or set UNITY_WIN/UNITY_EXE)."
+    }
+    if (-not (Test-Path $resolved)) {
+        throw "Unity exe not found: $resolved"
+    }
+    return $resolved
+}
 
-function Get-ResultWaitTimeoutSeconds {
-    param([int]$DefaultSeconds)
-    $envValue = $env:TRI_RESULT_TIMEOUT_SECONDS
-    $parsed = 0
-    if ([int]::TryParse($envValue, [ref]$parsed) -and $parsed -gt 0) {
-        return $parsed
+$LockRoot = "C:\\polish\\locks"
+$BuildLockMaxWaitSec = 2700
+
+function Get-BuildLockPath {
+    param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
+    $safeTitle = $Title.ToLowerInvariant()
+    return (Join-Path $LockRoot ("build_{0}.lock.json" -f $safeTitle))
+}
+
+function Acquire-BuildLock {
+    param(
+        [string]$Title,
+        [string]$QueueRoot,
+        [string]$Reason,
+        [int]$MaxWaitSec = $BuildLockMaxWaitSec
+    )
+    Ensure-Directory $LockRoot
+    $lockPath = Get-BuildLockPath -Title $Title
+    $waitedSec = 0
+    $attempt = 0
+    while ($true) {
+        try {
+            New-Item -ItemType File -Path $lockPath -ErrorAction Stop | Out-Null
+            $payload = [ordered]@{
+                title = $Title
+                pid = $PID
+                start_utc = ([DateTime]::UtcNow).ToString("o")
+                queue_root = $QueueRoot
+                reason = $Reason
+            }
+            $payloadJson = $payload | ConvertTo-Json -Depth 4
+            Set-Content -Path $lockPath -Value $payloadJson -Encoding ascii
+            return $lockPath
+        }
+        catch {
+            if (-not (Test-Path $lockPath)) { throw }
+            $attempt++
+            $sleepSec = switch ($attempt) {
+                1 { 60 }
+                2 { 120 }
+                default { 180 }
+            }
+            if ($waitedSec + $sleepSec -gt $MaxWaitSec) {
+                return $null
+            }
+            Write-Host ("build_lock_wait title={0} wait_sec={1} waited_sec={2}" -f $Title, $sleepSec, $waitedSec)
+            Start-Sleep -Seconds $sleepSec
+            $waitedSec += $sleepSec
+        }
+    }
+}
+
+function Release-BuildLock {
+    param([string]$LockPath)
+    if ([string]::IsNullOrWhiteSpace($LockPath)) { return }
+    Remove-Item -Path $LockPath -Force -ErrorAction SilentlyContinue
+}
+
+function Convert-ToWslPath {
+    param([string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
+    if ($match.Success) {
+        $drive = $match.Groups[1].Value.ToLowerInvariant()
+        $rest = $match.Groups[2].Value -replace '\\', '/'
+        return "/mnt/$drive/$rest"
     }
     return $DefaultSeconds
 }
@@ -404,21 +477,7 @@ if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
 
-Sync-PureDots -TriRoot $triRoot
-Ensure-PureDots -ProjectPath $projectPath -TriRoot $triRoot
-
-if (-not (Test-Path $UnityExe)) {
-    throw "Unity exe not found: $UnityExe"
-}
-
-$syncScript = Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"
-$swapScript = Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"
-if (-not (Test-Path $syncScript)) {
-    throw "Missing headless manifest sync script: $syncScript"
-}
-if (-not (Test-Path $swapScript)) {
-    throw "Missing headless manifest swap script: $swapScript"
-}
+$UnityExe = Resolve-UnityExe -ExePath $UnityExe
 
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
 $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$titleDefaults.seed }
@@ -429,7 +488,7 @@ if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
 
-$commitFull = & git -c "safe.directory=$projectPath" -C $projectPath rev-parse HEAD 2>&1
+$commitFull = & git -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
 }
@@ -467,21 +526,21 @@ $supervisorArgs = @(
     "--artifact-dir", $artifactsDir
 )
 
-$swapApplied = $false
-& $syncScript -ProjectPath $projectPath
-& $swapScript -ProjectPath $projectPath
-$swapApplied = $true
+$lockReasonValue = if ([string]::IsNullOrWhiteSpace($LockReason)) { "pipeline_smoke" } else { $LockReason }
+$lockPath = Acquire-BuildLock -Title $Title -QueueRoot $queueRootFull -Reason $lockReasonValue
+if (-not $lockPath) {
+    Write-Host ("BUILD_FAIL reason=build_lock_timeout title={0}" -f $Title)
+    exit 1
+}
 try {
     & dotnet @supervisorArgs
-}
-finally {
-    if ($swapApplied) {
-        & $swapScript -ProjectPath $projectPath -Restore
+    $supervisorExit = $LASTEXITCODE
+    if ($supervisorExit -ne 0) {
+        Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
     }
 }
-$supervisorExit = $LASTEXITCODE
-if ($supervisorExit -ne 0) {
-    Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
+finally {
+    Release-BuildLock -LockPath $lockPath
 }
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
