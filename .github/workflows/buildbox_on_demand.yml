@@ -94,10 +94,25 @@ jobs:
           if (-not (Test-Path $env:UNITY_EXE)) { throw "UNITY_EXE not found: $env:UNITY_EXE" }
 
           $tri = $env:TRI_ROOT
+          $projectRepoUrl = if ($title -eq 'godgame') { 'https://github.com/MoniVibe/Godgame.git' } else { 'https://github.com/MoniVibe/Space4x.git' }
+          $toolsRepoUrl = 'https://github.com/MoniVibe/HeadlessRebuildTool.git'
+          $puredotsRepoUrl = 'https://github.com/MoniVibe/PureDOTS.git'
+
+          function Ensure-OriginHttps {
+            param([string]$RepoPath, [string]$HttpsUrl)
+            if (-not (Test-Path (Join-Path $RepoPath ".git"))) { return }
+            & git -c "safe.directory=$RepoPath" -C $RepoPath remote get-url origin *> $null
+            if ($LASTEXITCODE -eq 0) {
+              & git -c "safe.directory=$RepoPath" -C $RepoPath remote set-url origin $HttpsUrl
+            } else {
+              & git -c "safe.directory=$RepoPath" -C $RepoPath remote add origin $HttpsUrl
+            }
+          }
 
           # Local repos expected at: TRI_ROOT\space4x and TRI_ROOT\godgame
           $repoPath = Join-Path $tri $title
           if (-not (Test-Path $repoPath)) { throw "Repo missing: $repoPath" }
+          Ensure-OriginHttps -RepoPath $repoPath -HttpsUrl $projectRepoUrl
 
           # Local tools expected at: TRI_ROOT\Tools\HeadlessRebuildTool\Polish\pipeline_smoke.ps1
           $pipeline = Join-Path $tri "Tools\\HeadlessRebuildTool\\Polish\\pipeline_smoke.ps1"
@@ -110,9 +125,10 @@ jobs:
           $toolsRepo = Split-Path -Parent (Split-Path -Parent $pipeline)
           if (Test-Path $toolsRepo) {
             try {
-              git -C $toolsRepo fetch --all --prune | Out-Null
-              git -C $toolsRepo checkout main | Out-Null
-              git -C $toolsRepo pull --ff-only | Out-Null
+              Ensure-OriginHttps -RepoPath $toolsRepo -HttpsUrl $toolsRepoUrl
+              git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch origin --prune | Out-Null
+              git -c "safe.directory=$toolsRepo" -C $toolsRepo checkout main | Out-Null
+              git -c "safe.directory=$toolsRepo" -C $toolsRepo pull --ff-only origin main | Out-Null
             } catch {
               Write-Warning "Failed to update tools repo: $($_.Exception.Message)"
             }
@@ -125,17 +141,41 @@ jobs:
           }
           $toolsCheckout = $toolsRef
           if (Test-Path (Join-Path $toolsRepo ".git")) {
-            & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
+            Ensure-OriginHttps -RepoPath $toolsRepo -HttpsUrl $toolsRepoUrl
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch origin --prune
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo show-ref --verify --quiet ("refs/remotes/origin/" + $toolsRef)
             if ($LASTEXITCODE -eq 0) { $toolsCheckout = "origin/$toolsRef" }
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo rev-parse --verify --quiet $toolsCheckout
+            if ($LASTEXITCODE -ne 0) {
+              & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch origin $toolsRef 2>$null
+              & git -c "safe.directory=$toolsRepo" -C $toolsRepo rev-parse --verify --quiet $toolsRef
+              if ($LASTEXITCODE -eq 0) {
+                $toolsCheckout = $toolsRef
+              } else {
+                Write-Warning "tools_ref '$toolsRef' not found; falling back to origin/main"
+                $toolsCheckout = "origin/main"
+              }
+            }
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsCheckout
           } else {
             $toolsRepo = Join-Path $env:GITHUB_WORKSPACE "tools_repo"
             if (Test-Path $toolsRepo) { Remove-Item -Recurse -Force $toolsRepo }
-            & git clone "https://github.com/MoniVibe/HeadlessRebuildTool.git" $toolsRepo
-            & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch --all --prune
+            & git clone $toolsRepoUrl $toolsRepo
+            Ensure-OriginHttps -RepoPath $toolsRepo -HttpsUrl $toolsRepoUrl
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch origin --prune
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo show-ref --verify --quiet ("refs/remotes/origin/" + $toolsRef)
             if ($LASTEXITCODE -eq 0) { $toolsCheckout = "origin/$toolsRef" }
+            & git -c "safe.directory=$toolsRepo" -C $toolsRepo rev-parse --verify --quiet $toolsCheckout
+            if ($LASTEXITCODE -ne 0) {
+              & git -c "safe.directory=$toolsRepo" -C $toolsRepo fetch origin $toolsRef 2>$null
+              & git -c "safe.directory=$toolsRepo" -C $toolsRepo rev-parse --verify --quiet $toolsRef
+              if ($LASTEXITCODE -eq 0) {
+                $toolsCheckout = $toolsRef
+              } else {
+                Write-Warning "tools_ref '$toolsRef' not found in cloned repo; falling back to origin/main"
+                $toolsCheckout = "origin/main"
+              }
+            }
             & git -c "safe.directory=$toolsRepo" -C $toolsRepo reset --hard $toolsCheckout
             $pipeline = Join-Path $toolsRepo "Polish\\pipeline_smoke.ps1"
           }
@@ -145,12 +185,19 @@ jobs:
           if (Test-Path $supervisorDest) {
             if (Test-Path (Join-Path $supervisorDest ".git")) {
               try {
-                & git -c "safe.directory=$supervisorDest" -C $supervisorDest fetch --all --prune
+                Ensure-OriginHttps -RepoPath $supervisorDest -HttpsUrl $toolsRepoUrl
+                & git -c "safe.directory=$supervisorDest" -C $supervisorDest fetch origin --prune
                 & git -c "safe.directory=$supervisorDest" -C $supervisorDest reset --hard origin/main
               } catch {
               }
             } elseif (Test-Path $supervisorSrc) {
-              Copy-Item -Path (Join-Path $supervisorSrc "*") -Destination $supervisorDest -Recurse -Force
+              $srcPath = (Resolve-Path $supervisorSrc).Path
+              $destPath = (Resolve-Path $supervisorDest).Path
+              if ($srcPath -ne $destPath) {
+                Copy-Item -Path (Join-Path $supervisorSrc "*") -Destination $supervisorDest -Recurse -Force
+              } else {
+                Write-Host "supervisor_sync=skip_same_path"
+              }
             }
           }
 
@@ -174,7 +221,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) { $refExists = $true }
 
           if (-not $refExists) {
-            Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'fetch', '--all', '--tags')) -Context "fetch repo"
+            Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'fetch', 'origin', '--prune', '--tags')) -Context "fetch repo"
           }
 
           $refToCheckout = $ref
@@ -198,7 +245,7 @@ jobs:
             if (Test-Path $headlessLock) {
               Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', '--', 'Packages/packages-lock.headless.json')) -Context "reset packages-lock.headless.json"
             }
-            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'fetch', '--all', '--tags')) -Context "fetch worktree"
+            Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'fetch', 'origin', '--prune', '--tags')) -Context "fetch worktree"
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard (pre-checkout)"
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'checkout', '-f', $refToCheckout)) -Context "checkout $refToCheckout"
             Invoke-Git -GitArgs ($gitWtArgs + @('-C', $wt, 'reset', '--hard')) -Context "reset hard"
@@ -209,12 +256,12 @@ jobs:
           $puredotsLink = Join-Path $wtRoot "puredots"
           if (-not (Test-Path $puredotsTarget)) {
             Write-Warning "PureDOTS repo missing at $puredotsTarget. Cloning."
-            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+            & git clone $puredotsRepoUrl $puredotsTarget
           }
           if (-not (Test-Path (Join-Path $puredotsTarget ".git"))) {
             Write-Warning "PureDOTS repo at $puredotsTarget has no .git. Recloning."
             Remove-Item -Recurse -Force $puredotsTarget
-            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+            & git clone $puredotsRepoUrl $puredotsTarget
           }
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
@@ -226,15 +273,15 @@ jobs:
             Write-Host ("puredots_ref_input={0}" -f $puredotsRef)
             $originExists = & git -C $puredotsTarget remote | Select-String -Pattern '^origin$'
             if ($null -eq $originExists) {
-              Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'add', 'origin', 'https://github.com/MoniVibe/PureDOTS.git') -Context "puredots remote add"
+              Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'add', 'origin', $puredotsRepoUrl) -Context "puredots remote add"
             } else {
-              Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'set-url', 'origin', 'https://github.com/MoniVibe/PureDOTS.git') -Context "puredots remote set-url"
+              Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'set-url', 'origin', $puredotsRepoUrl) -Context "puredots remote set-url"
             }
             $puredotsIndexLock = Join-Path $puredotsTarget ".git\\index.lock"
             if (Test-Path $puredotsIndexLock) {
               Remove-Item $puredotsIndexLock -Force
             }
-            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', '--all', '--prune') -Context "puredots fetch"
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', '--prune') -Context "puredots fetch"
             $puredotsCheckout = "origin/main"
             & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/main"
             if ($LASTEXITCODE -ne 0) { $puredotsCheckout = "origin/HEAD" }
