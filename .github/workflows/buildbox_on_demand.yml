@@ -50,9 +50,21 @@ on:
         description: "Optional HeadlessRebuildTool ref/sha for tools repo (blank = use workflow sha)"
         required: false
         default: ""
+      source_repo:
+        description: "Optional source repo for validator traceability (e.g. MoniVibe/Godgame)"
+        required: false
+        default: ""
+      source_pr:
+        description: "Optional source PR number for validator traceability"
+        required: false
+        default: ""
 
 permissions:
   contents: read
+
+concurrency:
+  group: validator-buildbox-lane
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -69,6 +81,43 @@ jobs:
           }
           if (-not (Test-Path $guard)) { throw "preflight_guard.ps1 not found on buildbox tools repo" }
           & $guard
+
+      - name: Guard validator-only dispatch
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $actor = '${{ github.actor }}'
+          $validatorActor = '${{ vars.VALIDATOR_ACTOR }}'
+          $validatorActorsCsv = '${{ vars.VALIDATOR_ACTORS }}'
+
+          $allowed = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          [void]$allowed.Add('github-actions[bot]')
+          if (-not [string]::IsNullOrWhiteSpace($validatorActor)) {
+            [void]$allowed.Add($validatorActor.Trim())
+          }
+          if (-not [string]::IsNullOrWhiteSpace($validatorActorsCsv)) {
+            foreach ($entry in ($validatorActorsCsv -split ',')) {
+              if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                [void]$allowed.Add($entry.Trim())
+              }
+            }
+          }
+
+          if (-not $allowed.Contains($actor)) {
+            $allowedList = ($allowed | Sort-Object) -join ', '
+            throw "validator-only gate: actor '$actor' is not allowed. Allowed actors: $allowedList"
+          }
+
+      - name: Emit validator trace
+        shell: pwsh
+        run: |
+          $sourceRepo = '${{ inputs.source_repo }}'
+          $sourcePr = '${{ inputs.source_pr }}'
+          if (-not [string]::IsNullOrWhiteSpace($sourceRepo) -or -not [string]::IsNullOrWhiteSpace($sourcePr)) {
+            Write-Host ("validator_trace source_repo={0} source_pr={1}" -f $sourceRepo, $sourcePr)
+          }
 
       - name: Run pipeline on desktop (local Tri install)
         shell: pwsh

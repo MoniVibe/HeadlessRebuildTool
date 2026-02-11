@@ -1,0 +1,89 @@
+name: validator-intake
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  intent-card-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate intent card sections
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- validator-intake -->";
+            const body = (context.payload.pull_request.body || "");
+            const bodyLower = body.toLowerCase();
+            const required = [
+              "## intent card",
+              "### what changed",
+              "### invariants",
+              "### acceptance checks",
+              "### risk flags",
+              "### validation routing",
+              "### notes for validator"
+            ];
+            const missing = required.filter(section => !bodyLower.includes(section));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request.number;
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+
+            const hasLabel = (name) => labels.includes(name);
+            const addLabel = async (name) => {
+              if (!hasLabel(name)) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pr, labels: [name] });
+              }
+            };
+            const removeLabel = async (name) => {
+              if (hasLabel(name)) {
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pr, name });
+                } catch (err) {
+                  if (err.status !== 404) throw err;
+                }
+              }
+            };
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr, per_page: 100
+            });
+            const existing = comments.find(c => c.user?.type === "Bot" && (c.body || "").includes(marker));
+
+            if (missing.length > 0) {
+              await addLabel("needs-intent-card");
+              await removeLabel("needs-validate");
+
+              const message =
+                `${marker}\n` +
+                `Validator intake blocked: missing required sections:\n` +
+                missing.map(s => `- \`${s}\``).join("\n") +
+                `\n\nAdd the missing sections to the PR body, then re-apply \`needs-validate\`.`;
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: existing.id, body: message
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: pr, body: message
+                });
+              }
+              core.setFailed(`Missing required intent card sections: ${missing.join(", ")}`);
+              return;
+            }
+
+            await removeLabel("needs-intent-card");
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: `${marker}\nValidator intake check passed.`
+              });
+            }
