@@ -244,6 +244,31 @@ function Get-ResultWaitTimeoutSeconds {
     return $DefaultSeconds
 }
 
+function Resolve-TaskScenarioId {
+    param(
+        [string]$TasksPath,
+        [string]$TaskId,
+        [string]$Fallback
+    )
+    if ([string]::IsNullOrWhiteSpace($TaskId)) { return $Fallback }
+    if (-not (Test-Path $TasksPath)) { return $Fallback }
+    try {
+        $tasksDoc = Get-Content -Raw -Path $TasksPath | ConvertFrom-Json
+    }
+    catch {
+        return $Fallback
+    }
+    if (-not $tasksDoc -or -not $tasksDoc.tasks) { return $Fallback }
+    $tasks = $tasksDoc.tasks
+    $prop = $tasks.PSObject.Properties[$TaskId]
+    if (-not $prop) { return $Fallback }
+    $task = $prop.Value
+    if ($task -and $task.scenario_id) { return $task.scenario_id }
+    if ($TaskId.StartsWith("S0.SPACE4X_")) { return "space4x" }
+    if ($TaskId.StartsWith("P1.SPACE4X_")) { return "puredots_samples" }
+    return $Fallback
+}
+
 function Find-ResultCandidates {
     param(
         [string]$ResultsDir,
@@ -742,55 +767,12 @@ Ensure-Directory $leasesDir
 Ensure-Directory $resultsDir
 Ensure-Directory $reportsDir
 
-$summaryJobPaths = New-Object System.Collections.Generic.List[string]
-$summaryResultZips = New-Object System.Collections.Generic.List[string]
-$summaryExtraLines = New-Object System.Collections.Generic.List[string]
-$summaryStatus = "SUCCESS"
-$summaryFailure = ""
-$summaryWritten = $false
-$summaryPipelineState = ""
-$summaryBuildState = "unknown"
-$summaryRunState = "unknown"
+$tasksPath = Join-Path $triRoot "Tools\\Tools\\Headless\\headless_tasks.json"
+$jobScenarioId = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $scenarioIdValue -Fallback $scenarioIdValue
 
-function Finalize-PipelineSummary {
-    param(
-        [string]$Status,
-        [string]$Failure
-    )
-    if ($summaryWritten) { return }
-    $summaryWritten = $true
-    if ($Status) { $script:summaryStatus = $Status }
-    if ($Failure) { $script:summaryFailure = $Failure }
-    if ([string]::IsNullOrWhiteSpace($script:summaryPipelineState)) {
-        $script:summaryPipelineState = if ($script:summaryStatus -eq "SUCCESS") { "finished" } else { "failed" }
-    }
-    if ([string]::IsNullOrWhiteSpace($script:summaryBuildState)) {
-        $script:summaryBuildState = "unknown"
-    }
-    if ([string]::IsNullOrWhiteSpace($script:summaryRunState)) {
-        $script:summaryRunState = "unknown"
-    }
-    $summaryExtraLines.Add("* pipeline_state: $script:summaryPipelineState") | Out-Null
-    $summaryExtraLines.Add("* build_state: $script:summaryBuildState") | Out-Null
-    $summaryExtraLines.Add("* run_state: $script:summaryRunState") | Out-Null
-    Write-PipelineSummary -ReportsDir $reportsDir `
-        -BuildId $buildId `
-        -Title $Title `
-        -ProjectPath $projectPath `
-        -Commit $commitFull `
-        -ArtifactZip $artifactZip `
-        -ScenarioId $scenarioIdValue `
-        -ScenarioRel $scenarioRelValue `
-        -GoalId $goalIdValue `
-        -GoalSpec $goalSpecValue `
-        -Seed $seedValue `
-        -TimeoutSec $timeoutValue `
-        -Args $argsValue `
-        -Status $summaryStatus `
-        -Failure $summaryFailure `
-        -JobPaths $summaryJobPaths.ToArray() `
-        -ResultZips $summaryResultZips.ToArray() `
-        -ExtraLines $summaryExtraLines.ToArray()
+$supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
+if (-not (Test-Path $supervisorProject)) {
+    throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
 }
 
 $supervisorProject = Resolve-FirstExisting -Candidates @(
@@ -878,7 +860,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
         job_id = $jobId
         commit = $commitFull
         build_id = $buildId
-        scenario_id = $scenarioIdValue
+        scenario_id = $jobScenarioId
         seed = [int]$seedValue
         timeout_sec = [int]$timeoutValue
         args = @($argsValue)

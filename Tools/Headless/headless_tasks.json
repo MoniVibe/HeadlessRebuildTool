@@ -810,6 +810,7 @@
       "project": "space4x",
       "runner": "space4x_loader",
       "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
+      "scenario_id": "space4x",
       "tick_budget": 300,
       "timeout_s": 600,
       "seed_policy": "none",
@@ -928,6 +929,117 @@
       "env": {
         "SPACE4X_HEADLESS_MINING_PROOF": "1",
         "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1"
+      }
+    },
+    "P1.SPACE4X_REWIND_GATE2": {
+      "project": "space4x",
+      "runner": "scenario_runner",
+      "scenario_path": "puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/scenario_space4x_rewind_gate2.json",
+      "scenario_id": "puredots_samples",
+      "tick_budget": 600,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        9102
+      ],
+      "default_pack": "time-rewind",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 45,
+      "required_bank": "",
+      "metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "ai.idle_with_work_ratio",
+        "ai.task_latency_ticks.mean",
+        "ai.task_latency_ticks.p95",
+        "ai.decision_churn_per_min",
+        "ai.intent_flip_count",
+        "move.stuck_ticks",
+        "move.mode_flip_count",
+        "move.collision_near_miss_count",
+        "move.collision_damage_events",
+        "power.deficit_time_s",
+        "power.battery_min_soc",
+        "module.spool_transitions",
+        "module.not_ready_time_s",
+        "telemetry.bytes_written",
+        "telemetry.truncated",
+        "telemetry.drop_count"
+      ],
+      "validate_metric_keys": [
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "telemetry.heartbeat"
+      ],
+      "validate_allow_invariant_failures": [
+        "telemetry.monotonic_tick"
+      ],
+      "thresholds": {
+        "space4x.hull.vessels": {
+          "min": 1
+        },
+        "space4x.departments.carriers": {
+          "min": 0
+        },
+        "ai.idle_with_work_ratio": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.mean": {
+          "min": 0
+        },
+        "ai.task_latency_ticks.p95": {
+          "min": 0
+        },
+        "ai.decision_churn_per_min": {
+          "min": 0
+        },
+        "ai.intent_flip_count": {
+          "min": 0
+        },
+        "move.stuck_ticks": {
+          "min": 0
+        },
+        "move.mode_flip_count": {
+          "min": 0
+        },
+        "move.collision_near_miss_count": {
+          "min": 0
+        },
+        "move.collision_damage_events": {
+          "min": 0
+        },
+        "power.deficit_time_s": {
+          "min": 0
+        },
+        "power.battery_min_soc": {
+          "min": 0
+        },
+        "module.spool_transitions": {
+          "min": 0
+        },
+        "module.not_ready_time_s": {
+          "min": 0
+        },
+        "telemetry.bytes_written": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        },
+        "telemetry.drop_count": {
+          "min": 0
+        }
+      },
+      "variance_band": {
+        "space4x.hull.vessels": 1000,
+        "space4x.departments.carriers": 1000
+      },
+      "env": {
+        "PUREDOTS_HEADLESS_TIME_PROOF": "1",
+        "PUREDOTS_HEADLESS_REWIND_PROOF": "1"
       }
     },
     "P0.TIME_REWIND_MICRO": {
