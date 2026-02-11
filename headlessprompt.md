@@ -1,7 +1,3 @@
-> STATUS: LEGACY REFERENCE. Nightly is EngineerTick + queue + runner + intel/scoreboard.
-> See: `Polish/Docs/HEADLESS_DOCS_INDEX.md`
-> Still useful for: WSL-only loop guidance and constraints.
-
 # WSL Loop Prompt (headlessctl only)
 
 You are the WSL headless agent. Do not run manual shell scenarios. Use Tools/Headless/headlessctl for all runs (canonical entrypoint; see headless_runbook.md).

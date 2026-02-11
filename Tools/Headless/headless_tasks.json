@@ -13,15 +13,10 @@
       ],
       "default_pack": "nightly-default",
       "tags": [
-        "nightly",
-        "fast_smoke"
+        "nightly"
       ],
       "nightly_order": 10,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
-      "required_bank": "",
+      "required_bank": "G0.GODGAME_SMOKE",
       "metric_keys": [
         "godgame.registry.villagers.total",
         "godgame.registry.storehouses.stored",
@@ -48,7 +43,9 @@
         "god.pile_haul_rate"
       ],
       "validate_metric_keys": [
-        "telemetry.truncated"
+        "godgame.registry.villagers.total",
+        "godgame.registry.storehouses.stored",
+        "telemetry.heartbeat"
       ],
       "thresholds": {
         "godgame.registry.villagers.total": {
@@ -135,118 +132,6 @@
         "GODGAME_HEADLESS_SMOKE_MIN_TICKS": "60"
       }
     },
-    "G1.GODGAME_STOREHOUSE_MICRO": {
-      "project": "godgame",
-      "runner": "godgame_loader",
-      "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_storehouse_micro.json",
-      "tick_budget": 300,
-      "timeout_s": 600,
-      "seed_policy": "none",
-      "default_seeds": [
-        42
-      ],
-      "default_pack": "nightly-default",
-      "tags": [
-        "nightly",
-        "fast_smoke"
-      ],
-      "nightly_order": 12,
-      "required_bank": "",
-      "metric_keys": [
-        "godgame.registry.villagers.total",
-        "godgame.registry.storehouses.stored",
-        "ai.idle_with_work_ratio",
-        "ai.task_latency_ticks.mean",
-        "ai.task_latency_ticks.p95",
-        "ai.decision_churn_per_min",
-        "ai.intent_flip_count",
-        "move.stuck_ticks",
-        "move.mode_flip_count",
-        "move.collision_near_miss_count",
-        "move.collision_damage_events",
-        "power.deficit_time_s",
-        "power.battery_min_soc",
-        "module.spool_transitions",
-        "module.not_ready_time_s",
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count"
-      ],
-      "validate_metric_keys": [
-        "godgame.registry.villagers.total",
-        "godgame.registry.storehouses.stored",
-        "telemetry.heartbeat"
-      ],
-      "thresholds": {
-        "godgame.registry.villagers.total": {
-          "min": 1
-        },
-        "godgame.registry.storehouses.stored": {
-          "min": 0
-        },
-        "ai.idle_with_work_ratio": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.mean": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.p95": {
-          "min": 0
-        },
-        "ai.decision_churn_per_min": {
-          "min": 0
-        },
-        "ai.intent_flip_count": {
-          "min": 0
-        },
-        "move.stuck_ticks": {
-          "min": 0
-        },
-        "move.mode_flip_count": {
-          "min": 0
-        },
-        "move.collision_near_miss_count": {
-          "min": 0
-        },
-        "move.collision_damage_events": {
-          "min": 0
-        },
-        "power.deficit_time_s": {
-          "min": 0
-        },
-        "power.battery_min_soc": {
-          "min": 0
-        },
-        "module.spool_transitions": {
-          "min": 0
-        },
-        "module.not_ready_time_s": {
-          "min": 0
-        },
-        "telemetry.bytes_written": {
-          "min": 0
-        },
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        },
-        "telemetry.drop_count": {
-          "min": 0
-        }
-      },
-      "variance_band": {
-        "godgame.registry.villagers.total": 1000,
-        "godgame.registry.storehouses.stored": 100000
-      },
-      "env": {
-        "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
-        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1",
-        "GODGAME_HEADLESS_EXIT_MIN_TICK": "60",
-        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60",
-        "GODGAME_HEADLESS_SMOKE_EXIT": "1",
-        "GODGAME_HEADLESS_SMOKE_MIN_TICKS": "60"
-      }
-    },
     "S0.SPACE4X_COLLISION": {
       "project": "space4x",
       "runner": "space4x_loader",
@@ -284,128 +169,6 @@
         "telemetry.bytes_written",
         "telemetry.truncated",
         "telemetry.drop_count",
-        "space4x.arc.distance_to_target",
-        "space4x.arc.target_reached",
-        "space4x.arc.target_reached_tick",
-        "s4x.heading_oscillation_score",
-        "s4x.turn_saturation_time_s",
-        "s4x.approach_mode_flip_rate"
-      ],
-      "validate_metric_keys": [
-        "space4x.arc.target_reached",
-        "telemetry.heartbeat"
-      ],
-      "thresholds": {
-        "space4x.hull.vessels": {
-          "min": 1
-        },
-        "space4x.departments.carriers": {
-          "min": 0
-        },
-        "ai.idle_with_work_ratio": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.mean": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.p95": {
-          "min": 0
-        },
-        "ai.decision_churn_per_min": {
-          "min": 0
-        },
-        "ai.intent_flip_count": {
-          "min": 0
-        },
-        "move.stuck_ticks": {
-          "min": 0
-        },
-        "move.mode_flip_count": {
-          "min": 0
-        },
-        "move.collision_near_miss_count": {
-          "min": 0
-        },
-        "move.collision_damage_events": {
-          "min": 0
-        },
-        "power.deficit_time_s": {
-          "min": 0
-        },
-        "power.battery_min_soc": {
-          "min": 0
-        },
-        "module.spool_transitions": {
-          "min": 0
-        },
-        "module.not_ready_time_s": {
-          "min": 0
-        },
-        "telemetry.bytes_written": {
-          "min": 0
-        },
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        },
-        "telemetry.drop_count": {
-          "min": 0
-        },
-        "s4x.heading_oscillation_score": {
-          "min": 0
-        },
-        "s4x.turn_saturation_time_s": {
-          "min": 0
-        },
-        "s4x.approach_mode_flip_rate": {
-          "min": 0
-        }
-      },
-      "variance_band": {
-        "space4x.hull.vessels": 1000,
-        "space4x.departments.carriers": 1000
-      },
-      "env": {
-        "SPACE4X_HEADLESS_MINING_PROOF": "0",
-        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
-        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
-      }
-    },
-    "S1.SPACE4X_ARC_MICRO": {
-      "project": "space4x",
-      "runner": "space4x_loader",
-      "scenario_path": "space4x/Assets/Scenarios/space4x_arc_micro.json",
-      "tick_budget": 300,
-      "timeout_s": 600,
-      "seed_policy": "none",
-      "default_seeds": [
-        1207
-      ],
-      "default_pack": "nightly-default",
-      "tags": [
-        "nightly"
-      ],
-      "nightly_order": 35,
-      "required_bank": "S1.SPACE4X_ARC_MICRO",
-      "metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "ai.idle_with_work_ratio",
-        "ai.task_latency_ticks.mean",
-        "ai.task_latency_ticks.p95",
-        "ai.decision_churn_per_min",
-        "ai.intent_flip_count",
-        "move.stuck_ticks",
-        "move.mode_flip_count",
-        "move.collision_near_miss_count",
-        "move.collision_damage_events",
-        "power.deficit_time_s",
-        "power.battery_min_soc",
-        "module.spool_transitions",
-        "module.not_ready_time_s",
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count",
         "s4x.heading_oscillation_score",
         "s4x.turn_saturation_time_s",
         "s4x.approach_mode_flip_rate"
@@ -481,336 +244,15 @@
         "space4x.departments.carriers": 1000
       },
       "env": {
-        "SPACE4X_HEADLESS_ARC_PROOF": "1",
-        "SPACE4X_HEADLESS_ARC_PROOF_EXIT": "1",
         "SPACE4X_HEADLESS_MINING_PROOF": "0",
         "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
-      }
-    },
-    "S1.SPACE4X_CREW_SENSORS_MICRO": {
-      "project": "space4x",
-      "runner": "space4x_loader",
-      "scenario_path": "space4x/Assets/Scenarios/space4x_crew_sensors_micro.json",
-      "tick_budget": 300,
-      "timeout_s": 600,
-      "seed_policy": "none",
-      "default_seeds": [
-        1101
-      ],
-      "default_pack": "nightly-default",
-      "tags": [
-        "nightly"
-      ],
-      "nightly_order": 36,
-      "required_bank": "S1.SPACE4X_CREW_SENSORS_MICRO",
-      "bank_strict": false,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
-      "metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "ai.idle_with_work_ratio",
-        "ai.task_latency_ticks.mean",
-        "ai.task_latency_ticks.p95",
-        "ai.decision_churn_per_min",
-        "ai.intent_flip_count",
-        "move.stuck_ticks",
-        "move.mode_flip_count",
-        "move.collision_near_miss_count",
-        "move.collision_damage_events",
-        "power.deficit_time_s",
-        "power.battery_min_soc",
-        "module.spool_transitions",
-        "module.not_ready_time_s",
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count",
-        "s4x.heading_oscillation_score",
-        "s4x.turn_saturation_time_s",
-        "s4x.approach_mode_flip_rate"
-      ],
-      "thresholds": {
-        "space4x.hull.vessels": {
-          "min": 1
-        },
-        "space4x.departments.carriers": {
-          "min": 0
-        },
-        "ai.idle_with_work_ratio": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.mean": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.p95": {
-          "min": 0
-        },
-        "ai.decision_churn_per_min": {
-          "min": 0
-        },
-        "ai.intent_flip_count": {
-          "min": 0
-        },
-        "move.stuck_ticks": {
-          "min": 0
-        },
-        "move.mode_flip_count": {
-          "min": 0
-        },
-        "move.collision_near_miss_count": {
-          "min": 0
-        },
-        "move.collision_damage_events": {
-          "min": 0
-        },
-        "power.deficit_time_s": {
-          "min": 0
-        },
-        "power.battery_min_soc": {
-          "min": 0
-        },
-        "module.spool_transitions": {
-          "min": 0
-        },
-        "module.not_ready_time_s": {
-          "min": 0
-        },
-        "telemetry.bytes_written": {
-          "min": 0
-        },
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        },
-        "telemetry.drop_count": {
-          "min": 0
-        },
-        "s4x.heading_oscillation_score": {
-          "min": 0
-        },
-        "s4x.turn_saturation_time_s": {
-          "min": 0
-        },
-        "s4x.approach_mode_flip_rate": {
-          "min": 0
-        }
-      },
-      "variance_band": {
-        "space4x.hull.vessels": 1000,
-        "space4x.departments.carriers": 1000
-      },
-      "env": {
-        "SPACE4X_HEADLESS_CREW_PROOF": "1",
-        "SPACE4X_HEADLESS_CREW_PROOF_EXIT": "1",
-        "SPACE4X_HEADLESS_ARC_PROOF": "0",
-        "SPACE4X_HEADLESS_MINING_PROOF": "0",
-        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
-        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
-      }
-    },
-    "S1D.SPACE4X_CREW_SENSORS_MICRO_DEV": {
-      "project": "space4x",
-      "runner": "space4x_loader",
-      "scenario_path": "space4x/Assets/Scenarios/space4x_crew_sensors_micro.json",
-      "tick_budget": 300,
-      "timeout_s": 600,
-      "seed_policy": "none",
-      "default_seeds": [
-        1101
-      ],
-      "default_pack": "nightly-default",
-      "tags": [
-        "dev"
-      ],
-      "required_bank": "",
-      "metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "ai.idle_with_work_ratio",
-        "ai.task_latency_ticks.mean",
-        "ai.task_latency_ticks.p95",
-        "ai.decision_churn_per_min",
-        "ai.intent_flip_count",
-        "move.stuck_ticks",
-        "move.mode_flip_count",
-        "move.collision_near_miss_count",
-        "move.collision_damage_events",
-        "power.deficit_time_s",
-        "power.battery_min_soc",
-        "module.spool_transitions",
-        "module.not_ready_time_s",
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count",
-        "s4x.heading_oscillation_score",
-        "s4x.turn_saturation_time_s",
-        "s4x.approach_mode_flip_rate"
-      ],
-      "thresholds": {
-        "space4x.hull.vessels": {
-          "min": 1
-        },
-        "space4x.departments.carriers": {
-          "min": 0
-        },
-        "ai.idle_with_work_ratio": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.mean": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.p95": {
-          "min": 0
-        },
-        "ai.decision_churn_per_min": {
-          "min": 0
-        },
-        "ai.intent_flip_count": {
-          "min": 0
-        },
-        "move.stuck_ticks": {
-          "min": 0
-        },
-        "move.mode_flip_count": {
-          "min": 0
-        },
-        "move.collision_near_miss_count": {
-          "min": 0
-        },
-        "move.collision_damage_events": {
-          "min": 0
-        },
-        "power.deficit_time_s": {
-          "min": 0
-        },
-        "power.battery_min_soc": {
-          "min": 0
-        },
-        "module.spool_transitions": {
-          "min": 0
-        },
-        "module.not_ready_time_s": {
-          "min": 0
-        },
-        "telemetry.bytes_written": {
-          "min": 0
-        },
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        },
-        "telemetry.drop_count": {
-          "min": 0
-        },
-        "s4x.heading_oscillation_score": {
-          "min": 0
-        },
-        "s4x.turn_saturation_time_s": {
-          "min": 0
-        },
-        "s4x.approach_mode_flip_rate": {
-          "min": 0
-        }
-      },
-      "variance_band": {
-        "space4x.hull.vessels": 1000,
-        "space4x.departments.carriers": 1000
-      },
-      "env": {
-        "SPACE4X_HEADLESS_CREW_PROOF": "1",
-        "SPACE4X_HEADLESS_CREW_PROOF_EXIT": "1",
-        "SPACE4X_HEADLESS_ARC_PROOF": "0",
-        "SPACE4X_HEADLESS_MINING_PROOF": "0",
-        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
-        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
-      }
-    },
-    "S2.SPACE4X_CREW_SENSORS_CAUSALITY_MICRO": {
-      "project": "space4x",
-      "runner": "space4x_loader",
-      "scenario_path": "space4x/Assets/Scenarios/space4x_crew_sensors_causality_micro.json",
-      "tick_budget": 3600,
-      "timeout_s": 1200,
-      "seed_policy": "none",
-      "default_seeds": [
-        1101
-      ],
-      "default_pack": "nightly-default",
-      "tags": [
-        "nightly"
-      ],
-      "nightly_order": 37,
-      "required_bank": "S2.SPACE4X_CREW_SENSORS_CAUSALITY_MICRO",
-      "bank_strict": false,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
-      "metric_keys": [
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count",
-        "perf.tick_total_ms.p95",
-        "perf.tick_total_ms.max",
-        "perf.reserved_bytes_peak"
-      ],
-      "validate_metric_keys": [
-        "telemetry.truncated"
-      ],
-      "thresholds": {
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        }
-      }
-    },
-    "P1.GODGAME_PERF_PHASE1_SMOKE": {
-      "project": "godgame",
-      "runner": "godgame_loader",
-      "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
-      "tick_budget": 1200,
-      "timeout_s": 900,
-      "seed_policy": "none",
-      "default_seeds": [
-        42
-      ],
-      "default_pack": "perf-phase1",
-      "tags": [
-        "nightly",
-        "perf-phase1"
-      ],
-      "nightly_order": 46,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
-      "required_bank": "",
-      "metric_keys": [
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count",
-        "perf.tick_total_ms.p95",
-        "perf.tick_total_ms.max",
-        "perf.reserved_bytes_peak"
-      ],
-      "validate_metric_keys": [
-        "telemetry.truncated"
-      ],
-      "thresholds": {
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        }
       }
     },
     "S0.SPACE4X_SMOKE": {
       "project": "space4x",
       "runner": "space4x_loader",
       "scenario_path": "space4x/Assets/Scenarios/space4x_smoke.json",
-      "scenario_id": "space4x",
       "tick_budget": 300,
       "timeout_s": 600,
       "seed_policy": "none",
@@ -822,10 +264,6 @@
         "nightly"
       ],
       "nightly_order": 20,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
       "required_bank": "S0.SPACE4X_SMOKE",
       "metric_keys": [
         "space4x.hull.vessels",
@@ -851,7 +289,9 @@
         "s4x.approach_mode_flip_rate"
       ],
       "validate_metric_keys": [
-        "telemetry.truncated"
+        "space4x.hull.vessels",
+        "space4x.departments.carriers",
+        "telemetry.heartbeat"
       ],
       "validate_allow_error_codes": [
         "bank_failed"
@@ -931,117 +371,6 @@
         "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1"
       }
     },
-    "P1.SPACE4X_REWIND_GATE2": {
-      "project": "space4x",
-      "runner": "scenario_runner",
-      "scenario_path": "puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/scenario_space4x_rewind_gate2.json",
-      "scenario_id": "puredots_samples",
-      "tick_budget": 600,
-      "timeout_s": 600,
-      "seed_policy": "none",
-      "default_seeds": [
-        9102
-      ],
-      "default_pack": "time-rewind",
-      "tags": [
-        "nightly"
-      ],
-      "nightly_order": 45,
-      "required_bank": "",
-      "metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "ai.idle_with_work_ratio",
-        "ai.task_latency_ticks.mean",
-        "ai.task_latency_ticks.p95",
-        "ai.decision_churn_per_min",
-        "ai.intent_flip_count",
-        "move.stuck_ticks",
-        "move.mode_flip_count",
-        "move.collision_near_miss_count",
-        "move.collision_damage_events",
-        "power.deficit_time_s",
-        "power.battery_min_soc",
-        "module.spool_transitions",
-        "module.not_ready_time_s",
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count"
-      ],
-      "validate_metric_keys": [
-        "space4x.hull.vessels",
-        "space4x.departments.carriers",
-        "telemetry.heartbeat"
-      ],
-      "validate_allow_invariant_failures": [
-        "telemetry.monotonic_tick"
-      ],
-      "thresholds": {
-        "space4x.hull.vessels": {
-          "min": 1
-        },
-        "space4x.departments.carriers": {
-          "min": 0
-        },
-        "ai.idle_with_work_ratio": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.mean": {
-          "min": 0
-        },
-        "ai.task_latency_ticks.p95": {
-          "min": 0
-        },
-        "ai.decision_churn_per_min": {
-          "min": 0
-        },
-        "ai.intent_flip_count": {
-          "min": 0
-        },
-        "move.stuck_ticks": {
-          "min": 0
-        },
-        "move.mode_flip_count": {
-          "min": 0
-        },
-        "move.collision_near_miss_count": {
-          "min": 0
-        },
-        "move.collision_damage_events": {
-          "min": 0
-        },
-        "power.deficit_time_s": {
-          "min": 0
-        },
-        "power.battery_min_soc": {
-          "min": 0
-        },
-        "module.spool_transitions": {
-          "min": 0
-        },
-        "module.not_ready_time_s": {
-          "min": 0
-        },
-        "telemetry.bytes_written": {
-          "min": 0
-        },
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        },
-        "telemetry.drop_count": {
-          "min": 0
-        }
-      },
-      "variance_band": {
-        "space4x.hull.vessels": 1000,
-        "space4x.departments.carriers": 1000
-      },
-      "env": {
-        "PUREDOTS_HEADLESS_TIME_PROOF": "1",
-        "PUREDOTS_HEADLESS_REWIND_PROOF": "1"
-      }
-    },
     "P0.TIME_REWIND_MICRO": {
       "project": "godgame",
       "runner": "scenario_runner",
@@ -1057,10 +386,6 @@
         "nightly"
       ],
       "nightly_order": 40,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
       "required_bank": "",
       "metric_keys": [
         "storehouse.count",
@@ -1083,7 +408,9 @@
         "telemetry.drop_count"
       ],
       "validate_metric_keys": [
-        "telemetry.truncated"
+        "storehouse.count",
+        "storehouse.stored.total",
+        "telemetry.heartbeat"
       ],
       "validate_allow_invariant_failures": [
         "telemetry.monotonic_tick"
@@ -1152,55 +479,6 @@
       "env": {
         "PUREDOTS_HEADLESS_TIME_PROOF": "1",
         "PUREDOTS_HEADLESS_REWIND_PROOF": "1"
-      }
-    },
-    "P0.PUREDOTS_DRIFT_MICRO": {
-      "project": "godgame",
-      "runner": "scenario_runner",
-      "scenario_path": "puredots/Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/drift_micro.json",
-      "tick_budget": 3600,
-      "timeout_s": 1200,
-      "seed_policy": "none",
-      "default_seeds": [
-        1337
-      ],
-      "default_pack": "nightly-default",
-      "tags": [
-        "nightly"
-      ],
-      "nightly_order": 41,
-      "allow_exit_codes": [
-        0,
-        10
-      ],
-      "required_bank": "",
-      "metric_keys": [
-        "telemetry.bytes_written",
-        "telemetry.truncated",
-        "telemetry.drop_count",
-        "telemetry.heartbeat"
-      ],
-      "validate_metric_keys": [
-        "telemetry.truncated",
-        "telemetry.heartbeat"
-      ],
-      "thresholds": {
-        "telemetry.bytes_written": {
-          "min": 0
-        },
-        "telemetry.truncated": {
-          "min": 0,
-          "max": 0
-        },
-        "telemetry.drop_count": {
-          "min": 0
-        },
-        "telemetry.heartbeat": {
-          "min": 1
-        }
-      },
-      "env": {
-        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     }
   }

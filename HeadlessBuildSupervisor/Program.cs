@@ -22,13 +22,7 @@ internal static class Program
     private const string EditorLogName = "editor.log";
     private const string EditorPrevLogName = "editor-prev.log";
     private const string EditorLogMissingName = "editor_log_missing.txt";
-    private const string HeartbeatName = "heartbeat.jsonl";
-    private const string ProgressName = "build_progress.json";
-    private const string HangSummaryName = "build_hang.json";
-    private const int HeartbeatIntervalSeconds = 30;
-    private const string UnityProjectLockSignature = "another unity instance is running with this project open";
     private static readonly TimeSpan LogReadRetryWindow = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan ProjectLockTimeout = TimeSpan.FromSeconds(30);
     private const int LogReadRetryDelayMs = 100;
 
     private static int Main(string[] args)
@@ -50,8 +44,7 @@ internal static class Program
         var logger = new Logger(supervisorLog);
         logger.Info($"start build_id={options.BuildId} commit={options.Commit} staging={stagingDir}");
 
-        var unityLog = Path.Combine(logsDir, $"unity_full_{options.BuildId}.log");
-        var unityLogLegacy = Path.Combine(logsDir, "unity_build.log");
+        var unityLog = Path.Combine(logsDir, "unity_build.log");
         var reportJsonPath = Path.Combine(logsDir, BuildReportJsonName);
         var reportTextPath = Path.Combine(logsDir, BuildReportTextName);
         var outcomePath = Path.Combine(logsDir, BuildOutcomeName);
@@ -64,7 +57,6 @@ internal static class Program
         UnityRunResult? runResult = null;
 
         var attempts = options.MaxRetries + 1;
-        var lockRetryUsed = false;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             if (attempt > 1)
@@ -75,62 +67,33 @@ internal static class Program
 
             logger.Info($"attempt {attempt}/{attempts}");
             runResult = RunUnity(options, stagingDir, unityLog, logger);
-            if (File.Exists(unityLog))
+
+            var outcomeResult = TryReadOutcomeResult(outcomePath);
+            var hasOutcome = !string.IsNullOrWhiteSpace(outcomeResult);
+            var outcomeSucceeded = hasOutcome && outcomeResult.Equals("Succeeded", StringComparison.OrdinalIgnoreCase);
+            var exitOk = runResult.ExitCode == 0;
+
+            if (runResult.TimedOut)
             {
-                TryCopyFileWithRetries(unityLog, unityLogLegacy, logger);
+                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
+                failureMessage = "Unity build timed out.";
             }
-
-            var projectLockDetected = DetectUnityProjectLock(logsDir, options.BuildId, logger);
-            if (projectLockDetected)
+            else if (exitOk && outcomeSucceeded)
             {
-                failureSignature = FailureSignature.UnityProjectLock;
-                failureMessage = "UNITY_PROJECT_LOCK";
-                if (!lockRetryUsed)
-                {
-                    lockRetryUsed = true;
-                    logger.Warn("unity_project_lock_detected");
-                    KillUnityProcessesForLock(includeHub: false, logger: logger);
-                    DeleteUnityLockfiles(options.ProjectPath, logger);
-                    if (attempt == attempts)
-                    {
-                        attempts++;
-                    }
-                    continue;
-                }
-
-                logger.Warn("unity_project_lock_persistent");
-                KillUnityProcessesForLock(includeHub: true, logger: logger);
-                failureMessage = "UNITY_PROJECT_LOCK_PERSISTENT";
+                success = true;
+                break;
             }
             else
             {
-                var outcomeResult = TryReadOutcomeResult(outcomePath);
-                var hasOutcome = !string.IsNullOrWhiteSpace(outcomeResult);
-                var outcomeSucceeded = hasOutcome && outcomeResult.Equals("Succeeded", StringComparison.OrdinalIgnoreCase);
-                var exitOk = runResult.ExitCode == 0;
-
-                if (runResult.TimedOut)
-                {
-                    failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
-                    failureMessage = "Unity build timed out.";
-                }
-                else if (exitOk && outcomeSucceeded)
-                {
-                    success = true;
-                    break;
-                }
-                else
-                {
-                    failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
-                    failureMessage = hasOutcome
-                        ? $"Unity exit={runResult.ExitCode} outcome={outcomeResult}"
-                        : $"Unity exit={runResult.ExitCode} outcome=missing";
-                }
+                failureSignature = DetectFailureSignature(unityLog, runResult, outcomeResult, logger);
+                failureMessage = hasOutcome
+                    ? $"Unity exit={runResult.ExitCode} outcome={outcomeResult}"
+                    : $"Unity exit={runResult.ExitCode} outcome=missing";
             }
 
-            CaptureEditorLogs(logsDir, options.BuildId, logger);
+            CaptureEditorLogs(logsDir, logger);
 
-            if (!projectLockDetected && attempt < attempts && ShouldRetry(failureSignature, runResult))
+            if (attempt < attempts && ShouldRetry(failureSignature, runResult))
             {
                 logger.Info($"retrying after signature={failureSignature}");
                 CleanCaches(options.ProjectPath, failureSignature, logger);
@@ -173,14 +136,9 @@ internal static class Program
         if (!success)
         {
             WriteLogTail(unityLog, Path.Combine(logsDir, "unity_build_tail.txt"), options.TailLines, logger);
-            WritePrimaryErrorSnippet(unityLog, Path.Combine(logsDir, "primary_error_snippet.txt"), logger);
             WriteProcessSnapshot(Path.Combine(logsDir, "process_snapshot.txt"), logger);
             CopyCrashArtifacts(options.ProjectPath, Path.Combine(logsDir, "crash"), logger);
         }
-
-        var hangSummaryPath = Path.Combine(logsDir, HangSummaryName);
-        WriteHangSummary(hangSummaryPath, Path.Combine(logsDir, HeartbeatName), Path.Combine(logsDir, "unity_exit.json"), outcomePath, success, logger);
-        CopyBuildLogs(buildDir, logsDir, logger);
 
         var zipTemp = Path.Combine(options.ArtifactDir, $"artifact_{options.BuildId}.zip.tmp");
         var zipFinal = Path.Combine(options.ArtifactDir, $"artifact_{options.BuildId}.zip");
@@ -269,13 +227,6 @@ internal static class Program
         }
 
         Directory.CreateDirectory(buildOut);
-        KillUnityProcessesForProject(options.ProjectPath, logger);
-        DeleteUnityLockfiles(options.ProjectPath, logger);
-        if (!TryAcquireProjectMutex(options.ProjectPath, logger, out var projectMutex))
-        {
-            File.AppendAllText(unityLog, $"UNITY_PROJECT_MUTEX_TIMEOUT project={options.ProjectPath}{Environment.NewLine}", Encoding.ASCII);
-            return new UnityRunResult(1, false);
-        }
         var args = new List<string>
         {
             "-batchmode",
@@ -309,18 +260,11 @@ internal static class Program
             args.Add(options.Notes);
         }
 
-        var logsDir = Path.GetDirectoryName(unityLog) ?? artifactRoot;
-        var stdoutPath = Path.Combine(logsDir, $"unity_stdout_{options.BuildId}.log");
-        var stderrPath = Path.Combine(logsDir, $"unity_stderr_{options.BuildId}.log");
         var psi = new ProcessStartInfo
         {
             FileName = options.UnityExe,
             UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
+            CreateNoWindow = true
         };
 
         foreach (var arg in args)
@@ -329,75 +273,12 @@ internal static class Program
         }
 
         logger.Info($"unity_start exe={options.UnityExe}");
-        logger.Info($"unity_args {FormatArgsForLog(args)}");
-        logger.Info($"unity_stdout path={stdoutPath}");
-        logger.Info($"unity_stderr path={stderrPath}");
         using var job = new JobObject();
         using var process = Process.Start(psi);
         if (process == null)
         {
-            ReleaseProjectMutex(projectMutex, logger);
             throw new InvalidOperationException("Failed to start Unity process.");
         }
-        var heartbeatPath = Path.Combine(logsDir, HeartbeatName);
-        var progressPath = Path.Combine(logsDir, ProgressName);
-        var heartbeatStop = new ManualResetEventSlim(false);
-        WriteBuildStart(Path.Combine(logsDir, "build_start.json"), options, process, unityLog, stdoutPath, stderrPath, args, logger);
-        WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "start", logger);
-        var heartbeatThread = new Thread(() =>
-        {
-            try
-            {
-                while (!heartbeatStop.Wait(TimeSpan.FromSeconds(HeartbeatIntervalSeconds)))
-                {
-                    if (process.HasExited)
-                    {
-                        break;
-                    }
-
-                    WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "tick", logger);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.Warn($"heartbeat_loop_failed err={ex.Message}");
-            }
-        })
-        {
-            IsBackground = true,
-            Name = $"heartbeat_{options.BuildId}"
-        };
-        heartbeatThread.Start();
-        using var stdoutWriter = new StreamWriter(stdoutPath, false, Encoding.UTF8) { AutoFlush = true };
-        using var stderrWriter = new StreamWriter(stderrPath, false, Encoding.UTF8) { AutoFlush = true };
-        var stdoutLock = new object();
-        var stderrLock = new object();
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data == null)
-            {
-                return;
-            }
-
-            lock (stdoutLock)
-            {
-                stdoutWriter.WriteLine(e.Data);
-            }
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data == null)
-            {
-                return;
-            }
-
-            lock (stderrLock)
-            {
-                stderrWriter.WriteLine(e.Data);
-            }
-        };
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
 
         job.Assign(process);
         var timedOut = !process.WaitForExit((int)options.Timeout.TotalMilliseconds);
@@ -408,407 +289,20 @@ internal static class Program
             TryKillProcess(process);
             WaitForProcessExit(process, TimeSpan.FromSeconds(2), logger);
             KillStrayUnityProcesses(unityLog, artifactRoot, options.ExecuteMethod, logger);
-            heartbeatStop.Set();
-            WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "timeout", logger);
-            WriteUnityExit(Path.Combine(logsDir, "unity_exit.json"), process, timedOut, logger);
-            ReleaseProjectMutex(projectMutex, logger);
             return new UnityRunResult(process.HasExited ? process.ExitCode : 124, timedOut);
         }
 
         process.WaitForExit();
         logger.Info($"unity_exit pid={process.Id} exit={process.ExitCode}");
-        heartbeatStop.Set();
-        WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "exit", logger);
-        WriteUnityExit(Path.Combine(logsDir, "unity_exit.json"), process, timedOut, logger);
-        ReleaseProjectMutex(projectMutex, logger);
         return new UnityRunResult(process.ExitCode, timedOut);
     }
 
-    private static void WriteBuildStart(
-        string path,
-        Options options,
-        Process process,
-        string unityLog,
-        string stdoutPath,
-        string stderrPath,
-        IReadOnlyList<string> args,
-        Logger logger)
-    {
-        try
-        {
-            var sb = new StringBuilder();
-            sb.Append("{");
-            AppendJsonField(sb, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
-            AppendJsonField(sb, "build_id", options.BuildId, prependComma: true);
-            AppendJsonField(sb, "commit", options.Commit, prependComma: true);
-            AppendJsonField(sb, "project_path", options.ProjectPath, prependComma: true);
-            AppendJsonField(sb, "unity_exe", options.UnityExe, prependComma: true);
-            AppendJsonField(sb, "pid", process.Id.ToString(), prependComma: true);
-            AppendJsonField(sb, "args", FormatArgsForLog(args), prependComma: true);
-            AppendJsonField(sb, "unity_log", unityLog, prependComma: true);
-            AppendJsonField(sb, "stdout_log", stdoutPath, prependComma: true);
-            AppendJsonField(sb, "stderr_log", stderrPath, prependComma: true);
-            sb.Append("}");
-            File.WriteAllText(path, sb.ToString(), Encoding.ASCII);
-            logger.Info($"build_start_written path={path}");
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"build_start_write_failed err={ex.Message}");
-        }
-    }
-
-    private static void WriteUnityExit(string path, Process process, bool timedOut, Logger logger)
-    {
-        try
-        {
-            var hasExited = process.HasExited;
-            var exitCode = hasExited ? process.ExitCode.ToString() : string.Empty;
-            var sb = new StringBuilder();
-            sb.Append("{");
-            AppendJsonField(sb, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
-            AppendJsonField(sb, "pid", process.Id.ToString(), prependComma: true);
-            AppendJsonField(sb, "has_exited", hasExited ? "true" : "false", prependComma: true);
-            AppendJsonField(sb, "exit_code", exitCode, prependComma: true);
-            AppendJsonField(sb, "timed_out", timedOut ? "true" : "false", prependComma: true);
-            sb.Append("}");
-            File.WriteAllText(path, sb.ToString(), Encoding.ASCII);
-            logger.Info($"unity_exit_written path={path}");
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"unity_exit_write_failed err={ex.Message}");
-        }
-    }
-
-    private static void WriteHeartbeatSample(
-        string heartbeatPath,
-        string progressPath,
-        Process process,
-        string unityLog,
-        string stdoutPath,
-        string stderrPath,
-        string state,
-        Logger logger)
-    {
-        try
-        {
-            var sb = new StringBuilder();
-            sb.Append("{");
-            AppendJsonField(sb, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
-            AppendJsonField(sb, "state", state ?? string.Empty, prependComma: true);
-            AppendJsonField(sb, "pid", process.Id.ToString(), prependComma: true);
-
-            var hasExited = false;
-            string exitCode = string.Empty;
-            try
-            {
-                process.Refresh();
-                hasExited = process.HasExited;
-                if (hasExited)
-                {
-                    exitCode = process.ExitCode.ToString();
-                }
-                AppendJsonField(sb, "has_exited", hasExited ? "true" : "false", prependComma: true);
-                AppendJsonField(sb, "exit_code", exitCode, prependComma: true);
-                AppendJsonField(sb, "cpu_total_ms", ((long)process.TotalProcessorTime.TotalMilliseconds).ToString(), prependComma: true);
-                AppendJsonField(sb, "working_set_bytes", process.WorkingSet64.ToString(), prependComma: true);
-                AppendJsonField(sb, "private_bytes", process.PrivateMemorySize64.ToString(), prependComma: true);
-                AppendJsonField(sb, "handles", process.HandleCount.ToString(), prependComma: true);
-                AppendJsonField(sb, "threads", process.Threads.Count.ToString(), prependComma: true);
-            }
-            catch (Exception ex)
-            {
-                AppendJsonField(sb, "process_error", ex.GetType().Name, prependComma: true);
-            }
-
-            AppendFileStat(sb, "unity_log", unityLog);
-            AppendFileStat(sb, "stdout_log", stdoutPath);
-            AppendFileStat(sb, "stderr_log", stderrPath);
-            sb.Append("}");
-
-            Directory.CreateDirectory(Path.GetDirectoryName(heartbeatPath) ?? ".");
-            File.AppendAllText(heartbeatPath, sb + Environment.NewLine, Encoding.ASCII);
-            File.WriteAllText(progressPath, sb.ToString(), Encoding.ASCII);
-
-            if (!string.Equals(state, "tick", StringComparison.OrdinalIgnoreCase))
-            {
-                logger.Info($"heartbeat_{state} path={heartbeatPath}");
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"heartbeat_write_failed err={ex.Message}");
-        }
-    }
-
-    private sealed class HeartbeatSample
-    {
-        public DateTime Utc { get; init; }
-        public string State { get; init; } = string.Empty;
-        public bool HasExited { get; init; }
-        public int? ExitCode { get; init; }
-        public long? CpuTotalMs { get; init; }
-        public long? WorkingSetBytes { get; init; }
-        public long? LogBytes { get; init; }
-        public DateTime? LogMtimeUtc { get; init; }
-    }
-
-    private static void WriteHangSummary(
-        string summaryPath,
-        string heartbeatPath,
-        string unityExitPath,
-        string outcomePath,
-        bool success,
-        Logger logger)
-    {
-        try
-        {
-            var summary = new StringBuilder();
-            summary.Append("{");
-            AppendJsonField(summary, "utc", DateTime.UtcNow.ToString("O"), prependComma: false);
-            AppendJsonField(summary, "success", success ? "true" : "false", prependComma: true);
-
-            var outcomeResult = TryReadOutcomeResult(outcomePath);
-            if (!string.IsNullOrWhiteSpace(outcomeResult))
-            {
-                AppendJsonField(summary, "outcome", outcomeResult, prependComma: true);
-            }
-
-            HeartbeatSample? last = null;
-            HeartbeatSample? previous = null;
-            if (File.Exists(heartbeatPath))
-            {
-                ReadLastHeartbeats(heartbeatPath, out last, out previous);
-            }
-
-            if (last != null)
-            {
-                AppendJsonField(summary, "last_state", last.State, prependComma: true);
-                AppendJsonField(summary, "last_utc", last.Utc.ToString("O"), prependComma: true);
-                AppendJsonField(summary, "last_has_exited", last.HasExited ? "true" : "false", prependComma: true);
-                if (last.ExitCode.HasValue)
-                {
-                    AppendJsonField(summary, "last_exit_code", last.ExitCode.Value.ToString(), prependComma: true);
-                }
-                if (last.CpuTotalMs.HasValue)
-                {
-                    AppendJsonField(summary, "last_cpu_total_ms", last.CpuTotalMs.Value.ToString(), prependComma: true);
-                }
-                if (last.WorkingSetBytes.HasValue)
-                {
-                    AppendJsonField(summary, "last_working_set_bytes", last.WorkingSetBytes.Value.ToString(), prependComma: true);
-                }
-                if (last.LogBytes.HasValue)
-                {
-                    AppendJsonField(summary, "last_log_bytes", last.LogBytes.Value.ToString(), prependComma: true);
-                }
-                if (last.LogMtimeUtc.HasValue)
-                {
-                    AppendJsonField(summary, "last_log_mtime_utc", last.LogMtimeUtc.Value.ToString("O"), prependComma: true);
-                }
-            }
-
-            if (previous != null && last != null)
-            {
-                var cpuDelta = last.CpuTotalMs.HasValue && previous.CpuTotalMs.HasValue
-                    ? last.CpuTotalMs.Value - previous.CpuTotalMs.Value
-                    : (long?)null;
-                if (cpuDelta.HasValue)
-                {
-                    AppendJsonField(summary, "cpu_delta_ms", cpuDelta.Value.ToString(), prependComma: true);
-                }
-            }
-
-            var classification = "OK";
-            var reason = string.Empty;
-            if (!success)
-            {
-                classification = "UNKNOWN";
-                if (last != null)
-                {
-                    var staleSeconds = last.LogMtimeUtc.HasValue
-                        ? (DateTime.UtcNow - last.LogMtimeUtc.Value).TotalSeconds
-                        : double.NaN;
-                    var cpuDelta = last != null && previous != null && last.CpuTotalMs.HasValue && previous.CpuTotalMs.HasValue
-                        ? last.CpuTotalMs.Value - previous.CpuTotalMs.Value
-                        : (long?)null;
-
-                    if (!double.IsNaN(staleSeconds) && staleSeconds >= 300 && cpuDelta.HasValue && cpuDelta.Value < 50)
-                    {
-                        classification = "HANG_STALLED";
-                        reason = $"log_stale_sec={staleSeconds:F0} cpu_delta_ms={cpuDelta}";
-                    }
-                    else if (!double.IsNaN(staleSeconds) && staleSeconds >= 120 && last.HasExited == false)
-                    {
-                        classification = "HANG_SUSPECTED";
-                        reason = $"log_stale_sec={staleSeconds:F0}";
-                    }
-                    else
-                    {
-                        classification = "CRASH_OR_FAIL";
-                    }
-                }
-            }
-
-            AppendJsonField(summary, "classification", classification, prependComma: true);
-            if (!string.IsNullOrWhiteSpace(reason))
-            {
-                AppendJsonField(summary, "reason", reason, prependComma: true);
-            }
-
-            summary.Append("}");
-            File.WriteAllText(summaryPath, summary.ToString(), Encoding.ASCII);
-            logger.Info($"hang_summary_written path={summaryPath} classification={classification}");
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"hang_summary_failed err={ex.Message}");
-        }
-    }
-
-    private static void ReadLastHeartbeats(string heartbeatPath, out HeartbeatSample? last, out HeartbeatSample? previous)
-    {
-        last = null;
-        previous = null;
-        var lines = File.ReadAllLines(heartbeatPath);
-        for (var i = lines.Length - 1; i >= 0 && (last == null || previous == null); i--)
-        {
-            var line = lines[i];
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-            var sample = TryParseHeartbeat(line);
-            if (sample == null)
-            {
-                continue;
-            }
-            if (last == null)
-            {
-                last = sample;
-            }
-            else if (previous == null)
-            {
-                previous = sample;
-            }
-        }
-    }
-
-    private static HeartbeatSample? TryParseHeartbeat(string line)
-    {
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(line);
-            var root = doc.RootElement;
-            var sample = new HeartbeatSample
-            {
-                Utc = root.TryGetProperty("utc", out var utcProp) && utcProp.ValueKind == System.Text.Json.JsonValueKind.String
-                    ? DateTime.Parse(utcProp.GetString() ?? string.Empty).ToUniversalTime()
-                    : DateTime.MinValue,
-                State = root.TryGetProperty("state", out var stateProp) ? stateProp.GetString() ?? string.Empty : string.Empty,
-                HasExited = root.TryGetProperty("has_exited", out var exitedProp) && exitedProp.ValueKind == System.Text.Json.JsonValueKind.String
-                    ? string.Equals(exitedProp.GetString(), "true", StringComparison.OrdinalIgnoreCase)
-                    : (exitedProp.ValueKind == System.Text.Json.JsonValueKind.True),
-                ExitCode = TryGetLong(root, "exit_code") is long exitVal ? (int)exitVal : null,
-                CpuTotalMs = TryGetLong(root, "cpu_total_ms"),
-                WorkingSetBytes = TryGetLong(root, "working_set_bytes"),
-                LogBytes = TryGetLong(root, "unity_log_bytes"),
-                LogMtimeUtc = TryGetDate(root, "unity_log_mtime_utc")
-            };
-            return sample;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static long? TryGetLong(System.Text.Json.JsonElement root, string name)
-    {
-        if (!root.TryGetProperty(name, out var prop))
-        {
-            return null;
-        }
-        if (prop.ValueKind == System.Text.Json.JsonValueKind.Number && prop.TryGetInt64(out var value))
-        {
-            return value;
-        }
-        if (prop.ValueKind == System.Text.Json.JsonValueKind.String && long.TryParse(prop.GetString(), out var parsed))
-        {
-            return parsed;
-        }
-        return null;
-    }
-
-    private static DateTime? TryGetDate(System.Text.Json.JsonElement root, string name)
-    {
-        if (!root.TryGetProperty(name, out var prop))
-        {
-            return null;
-        }
-        if (prop.ValueKind == System.Text.Json.JsonValueKind.String && DateTime.TryParse(prop.GetString(), out var parsed))
-        {
-            return parsed.ToUniversalTime();
-        }
-        return null;
-    }
-
-    private static void AppendFileStat(StringBuilder sb, string label, string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-            {
-                AppendJsonField(sb, $"{label}_exists", "false", prependComma: true);
-                return;
-            }
-
-            var info = new FileInfo(path);
-            AppendJsonField(sb, $"{label}_exists", "true", prependComma: true);
-            AppendJsonField(sb, $"{label}_bytes", info.Length.ToString(), prependComma: true);
-            AppendJsonField(sb, $"{label}_mtime_utc", info.LastWriteTimeUtc.ToString("O"), prependComma: true);
-        }
-        catch
-        {
-            AppendJsonField(sb, $"{label}_exists", "unknown", prependComma: true);
-        }
-    }
-
-    private static string FormatArgsForLog(IReadOnlyList<string> args)
-    {
-        var sb = new StringBuilder();
-        for (var i = 0; i < args.Count; i++)
-        {
-            var arg = args[i];
-            var needsQuote = arg.IndexOfAny(new[] { ' ', '\t', '"' }) >= 0;
-            if (needsQuote)
-            {
-                sb.Append('"');
-                sb.Append(arg.Replace("\"", "\\\""));
-                sb.Append('"');
-            }
-            else
-            {
-                sb.Append(arg);
-            }
-
-            if (i < args.Count - 1)
-            {
-                sb.Append(' ');
-            }
-        }
-
-        return sb.ToString();
-    }
-
-    private static void CaptureEditorLogs(string logsDir, string buildId, Logger logger)
+    private static void CaptureEditorLogs(string logsDir, Logger logger)
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var editorDir = Path.Combine(localAppData, "Unity", "Editor");
         var editorLog = Path.Combine(editorDir, "Editor.log");
         var editorPrev = Path.Combine(editorDir, "Editor-prev.log");
-        var upmLog = Path.Combine(editorDir, "upm.log");
         var missingPath = string.Empty;
 
         if (File.Exists(editorLog))
@@ -817,8 +311,6 @@ internal static class Program
             {
                 logger.Info($"editor_log_captured src={editorLog}");
             }
-
-            TryCopyFileWithRetries(editorLog, Path.Combine(logsDir, $"Editor_global_{buildId}.log"), logger);
         }
         else
         {
@@ -835,11 +327,6 @@ internal static class Program
         else if (string.IsNullOrWhiteSpace(missingPath))
         {
             missingPath = editorPrev;
-        }
-
-        if (File.Exists(upmLog))
-        {
-            TryCopyFileWithRetries(upmLog, Path.Combine(logsDir, $"upm_global_{buildId}.log"), logger);
         }
 
         if (!string.IsNullOrWhiteSpace(missingPath))
@@ -977,310 +464,6 @@ internal static class Program
         return false;
     }
 
-    private static void KillUnityProcessesForProject(string projectPath, Logger logger)
-    {
-        var matches = FindUnityProcessesForProject(projectPath, logger);
-        if (matches.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var pid in matches)
-        {
-            try
-            {
-                using var process = Process.GetProcessById(pid);
-                process.Kill(true);
-                logger.Info($"unity_project_killed pid={pid}");
-            }
-            catch (Exception ex)
-            {
-                logger.Warn($"unity_project_kill_failed pid={pid} err={ex.Message}");
-            }
-        }
-
-        Thread.Sleep(2000);
-        var remaining = FindUnityProcessesForProject(projectPath, logger);
-        if (remaining.Count > 0)
-        {
-            logger.Warn($"unity_project_kill_remaining pids={string.Join(",", remaining)}");
-        }
-    }
-
-    private static void KillUnityProcessesForLock(bool includeHub, Logger logger)
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Unity",
-            "Unity.exe",
-            "UnityPackageManager",
-            "UnityCrashHandler64",
-            "UnityLicensingClient"
-        };
-        if (includeHub)
-        {
-            names.Add("UnityHub");
-            names.Add("UnityHub.exe");
-        }
-
-        var clauses = new List<string>();
-        foreach (var name in names)
-        {
-            clauses.Add($"Name='{name}'");
-        }
-
-        var query = $"SELECT ProcessId, Name FROM Win32_Process WHERE {string.Join(" OR ", clauses)}";
-        var killed = new List<int>();
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(query);
-            foreach (ManagementObject process in searcher.Get())
-            {
-                if (process["ProcessId"] is uint pid)
-                {
-                    try
-                    {
-                        using var target = Process.GetProcessById((int)pid);
-                        target.Kill(true);
-                        killed.Add((int)pid);
-                        logger.Info($"unity_lock_killed name={process["Name"]} pid={pid}");
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.Warn($"unity_lock_kill_failed name={process["Name"]} pid={pid} err={ex.Message}");
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"unity_lock_kill_scan_failed err={ex.Message}");
-        }
-
-        if (killed.Count > 0)
-        {
-            Thread.Sleep(2000);
-        }
-    }
-
-    private static bool DetectUnityProjectLock(string logsDir, string buildId, Logger logger)
-    {
-        var stdoutPath = Path.Combine(logsDir, $"unity_stdout_{buildId}.log");
-        var stderrPath = Path.Combine(logsDir, $"unity_stderr_{buildId}.log");
-        if (LogContainsUnityProjectLock(stdoutPath) || LogContainsUnityProjectLock(stderrPath))
-        {
-            logger.Warn("unity_project_lock_signature_detected");
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool LogContainsUnityProjectLock(string path)
-    {
-        if (!File.Exists(path))
-        {
-            return false;
-        }
-
-        try
-        {
-            foreach (var line in File.ReadLines(path))
-            {
-                if (line.IndexOf(UnityProjectLockSignature, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    return true;
-                }
-            }
-        }
-        catch
-        {
-        }
-
-        return false;
-    }
-
-    private static List<int> FindUnityProcessesForProject(string projectPath, Logger logger)
-    {
-        var matches = new List<int>();
-        if (string.IsNullOrWhiteSpace(projectPath))
-        {
-            return matches;
-        }
-
-        var normalized = NormalizeProjectPath(projectPath);
-        var normalizedAlt = normalized.Replace('\\', '/');
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return matches;
-        }
-
-        try
-        {
-            using var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine, Name FROM Win32_Process WHERE Name='Unity.exe' OR Name='Unity'");
-            foreach (ManagementObject process in searcher.Get())
-            {
-                var commandLine = process["CommandLine"]?.ToString();
-                if (string.IsNullOrWhiteSpace(commandLine))
-                {
-                    continue;
-                }
-
-                var cmd = commandLine.ToLowerInvariant();
-                if (!cmd.Contains("-projectpath"))
-                {
-                    continue;
-                }
-
-                if (!(cmd.Contains(normalized) || cmd.Contains(normalizedAlt)))
-                {
-                    continue;
-                }
-
-                if (process["ProcessId"] is uint pid)
-                {
-                    matches.Add((int)pid);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"unity_project_scan_failed err={ex.Message}");
-        }
-
-        return matches;
-    }
-
-    private static void DeleteUnityLockfiles(string projectPath, Logger logger)
-    {
-        if (string.IsNullOrWhiteSpace(projectPath))
-        {
-            return;
-        }
-
-        foreach (var relPath in new[] { "Temp\\UnityLockfile", "Library\\UnityLockfile" })
-        {
-            try
-            {
-                var fullPath = Path.Combine(projectPath, relPath);
-                if (File.Exists(fullPath))
-                {
-                    File.Delete(fullPath);
-                    logger.Info($"unity_lockfile_deleted path={fullPath}");
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.Warn($"unity_lockfile_delete_failed path={relPath} err={ex.Message}");
-            }
-        }
-    }
-
-    private static bool TryAcquireProjectMutex(string projectPath, Logger logger, out Mutex? mutex)
-    {
-        mutex = null;
-        var normalized = NormalizeProjectPath(projectPath);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            logger.Warn("unity_project_mutex_missing_project_path");
-            return false;
-        }
-
-        var hash = Sha256Hex(normalized);
-        var name = $"Global\\ANVILOOP_UNITY_PROJECT_{hash}";
-        try
-        {
-            mutex = new Mutex(false, name);
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"unity_project_mutex_create_failed name={name} err={ex.Message}");
-            return false;
-        }
-
-        try
-        {
-            if (mutex.WaitOne(ProjectLockTimeout))
-            {
-                logger.Info($"unity_project_mutex_acquired name={name}");
-                return true;
-            }
-        }
-        catch (AbandonedMutexException)
-        {
-            logger.Warn($"unity_project_mutex_abandoned name={name}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"unity_project_mutex_wait_failed name={name} err={ex.Message}");
-        }
-
-        var pids = FindUnityProcessesForProject(projectPath, logger);
-        logger.Warn($"unity_project_mutex_timeout name={name} project={normalized} pids={string.Join(",", pids)}");
-        return false;
-    }
-
-    private static void ReleaseProjectMutex(Mutex? mutex, Logger logger)
-    {
-        if (mutex == null)
-        {
-            return;
-        }
-
-        try
-        {
-            mutex.ReleaseMutex();
-        }
-        catch (ApplicationException)
-        {
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"unity_project_mutex_release_failed err={ex.Message}");
-        }
-        finally
-        {
-            mutex.Dispose();
-        }
-    }
-
-    private static string NormalizeProjectPathInput(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        var trimmed = path.Trim();
-        var wslMatch = Regex.Match(trimmed, "^/mnt/([a-zA-Z])/(.*)$");
-        if (wslMatch.Success)
-        {
-            var drive = wslMatch.Groups[1].Value.ToUpperInvariant();
-            var rest = wslMatch.Groups[2].Value.Replace('/', '\\');
-            trimmed = $"{drive}:\\{rest}";
-        }
-
-        var driveMatches = Regex.Matches(trimmed, "[A-Za-z]:[\\\\/]");
-        if (driveMatches.Count > 0)
-        {
-            trimmed = trimmed.Substring(driveMatches[^1].Index);
-        }
-
-        return Path.GetFullPath(trimmed);
-    }
-
-    private static string NormalizeProjectPath(string path)
-    {
-        var full = NormalizeProjectPathInput(path);
-        if (string.IsNullOrWhiteSpace(full))
-        {
-            return string.Empty;
-        }
-
-        return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
-    }
-
     private static string NormalizePathForMatch(string path)
     {
         return string.IsNullOrWhiteSpace(path) ? string.Empty : path.Trim().ToLowerInvariant();
@@ -1358,13 +541,6 @@ internal static class Program
                 targets.Add(Path.Combine(projectPath, "Library", "Artifacts"));
                 targets.Add(Path.Combine(projectPath, "Library", "AssetImportState"));
                 break;
-            case FailureSignature.PPtrCast:
-                targets.Add(Path.Combine(projectPath, "Library", "Artifacts"));
-                targets.Add(Path.Combine(projectPath, "Library", "SourceAssetDB"));
-                targets.Add(Path.Combine(projectPath, "Library", "ScriptAssemblies"));
-                targets.Add(Path.Combine(projectPath, "Library", "AssetImportState"));
-                targets.Add(Path.Combine(projectPath, "Temp"));
-                break;
             default:
                 return;
         }
@@ -1390,7 +566,7 @@ internal static class Program
 
     private static bool ShouldRetry(FailureSignature signature, UnityRunResult result)
     {
-        if (signature == FailureSignature.BeeStall || signature == FailureSignature.ImportLoop || signature == FailureSignature.PPtrCast)
+        if (signature == FailureSignature.BeeStall || signature == FailureSignature.ImportLoop)
         {
             return true;
         }
@@ -1426,11 +602,6 @@ internal static class Program
             if (ContainsStrictLicenseFailure(text))
             {
                 return FailureSignature.LicenseError;
-            }
-
-            if (ContainsIgnoreCase(text, "PPtr cast failed"))
-            {
-                return FailureSignature.PPtrCast;
             }
 
             if (Regex.IsMatch(text, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
@@ -2036,8 +1207,6 @@ internal static class Program
             FailureSignature.BeeStall => "BEE_STALL",
             FailureSignature.InfraFail => "INFRA_FAIL",
             FailureSignature.LogLocked => "LOG_LOCKED",
-            FailureSignature.UnityProjectLock => "UNITY_PROJECT_LOCK",
-            FailureSignature.PPtrCast => "PPTR_CAST",
             _ => "UNKNOWN"
         };
     }
@@ -2066,85 +1235,6 @@ internal static class Program
 
         File.WriteAllText(tailPath, tail, Encoding.ASCII);
         logger.Info("unity_log_tail_written");
-    }
-
-    private static void WritePrimaryErrorSnippet(string unityLog, string snippetPath, Logger logger)
-    {
-        if (!File.Exists(unityLog))
-        {
-            File.WriteAllText(snippetPath, "unity_log_missing", Encoding.ASCII);
-            return;
-        }
-
-        var context = new Queue<string>(5);
-        var matched = false;
-        var capture = new List<string>();
-        var remaining = 0;
-
-        try
-        {
-            using var stream = new FileStream(unityLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream, Encoding.UTF8, true);
-            while (!reader.EndOfStream)
-            {
-                var line = reader.ReadLine() ?? string.Empty;
-                if (context.Count == 5)
-                {
-                    context.Dequeue();
-                }
-                context.Enqueue(line);
-
-                if (!matched && IsPrimaryErrorSnippetLine(line))
-                {
-                    matched = true;
-                    capture.AddRange(context);
-                    capture.Add(line);
-                    remaining = 25;
-                    continue;
-                }
-
-                if (matched && remaining > 0)
-                {
-                    capture.Add(line);
-                    remaining--;
-                }
-
-                if (matched && remaining == 0)
-                {
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"primary_error_snippet_failed err={ex.GetType().Name}");
-        }
-
-        if (capture.Count == 0)
-        {
-            File.WriteAllText(snippetPath, "primary_error_not_found", Encoding.ASCII);
-            return;
-        }
-
-        File.WriteAllLines(snippetPath, capture, Encoding.ASCII);
-        logger.Info("primary_error_snippet_written");
-    }
-
-    private static bool IsPrimaryErrorSnippetLine(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return false;
-        }
-
-        if (Regex.IsMatch(line, "error\\s+CS\\d+", RegexOptions.IgnoreCase))
-        {
-            return true;
-        }
-
-        return line.IndexOf("[Error]", StringComparison.OrdinalIgnoreCase) >= 0
-            || line.IndexOf("PPtr cast failed", StringComparison.OrdinalIgnoreCase) >= 0
-            || line.IndexOf("Bee.BeeException", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static string ReadTail(string unityLog, int maxLines, Logger logger, out bool logLocked)
@@ -2317,44 +1407,6 @@ internal static class Program
 
         logger.Info($"zip_created files={files.Length}");
     }
-
-    private static void CopyBuildLogs(string buildDir, string logsDir, Logger logger)
-    {
-        if (string.IsNullOrWhiteSpace(buildDir) || string.IsNullOrWhiteSpace(logsDir))
-        {
-            return;
-        }
-
-        if (!Directory.Exists(buildDir))
-        {
-            return;
-        }
-
-        var targets = new[]
-        {
-            "*HeadlessBuildReport*.log",
-            "*HeadlessBuildFailure*.log"
-        };
-
-        var destDir = Path.Combine(logsDir, "build");
-        Directory.CreateDirectory(destDir);
-
-        foreach (var pattern in targets)
-        {
-            foreach (var file in Directory.GetFiles(buildDir, pattern, SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var dest = Path.Combine(destDir, Path.GetFileName(file));
-                    File.Copy(file, dest, true);
-                }
-                catch (Exception ex)
-                {
-                    logger.Warn($"build_log_copy_failed path={file} err={ex.GetType().Name}");
-                }
-            }
-        }
-    }
     private enum FailureSignature
     {
         BuildTimeout,
@@ -2364,8 +1416,6 @@ internal static class Program
         BeeStall,
         InfraFail,
         LogLocked,
-        UnityProjectLock,
-        PPtrCast,
         Unknown
     }
 
@@ -2421,7 +1471,7 @@ internal static class Program
         public List<string> DefaultArgs { get; } = new List<string>();
         public List<string> Scenarios { get; } = new List<string>();
         public string Notes { get; private set; } = string.Empty;
-        public TimeSpan Timeout { get; private set; } = TimeSpan.FromMinutes(60);
+        public TimeSpan Timeout { get; private set; } = TimeSpan.FromMinutes(30);
         public int MaxRetries { get; private set; } = 1;
         public int TailLines { get; private set; } = 200;
 
@@ -2464,7 +1514,7 @@ internal static class Program
             }
 
             options.UnityExe = ReadRequired(map, "unity-exe");
-            options.ProjectPath = NormalizeProjectPathInput(ReadRequired(map, "project-path"));
+            options.ProjectPath = ReadRequired(map, "project-path");
             options.BuildId = ReadRequired(map, "build-id");
             options.Commit = ReadRequired(map, "commit");
             options.ArtifactDir = ReadRequired(map, "artifact-dir");
@@ -2472,7 +1522,7 @@ internal static class Program
             options.StagingDir = ReadOptional(map, "staging-dir", string.Empty);
             options.BuildOut = ReadOptional(map, "build-out", string.Empty);
             options.Notes = ReadOptional(map, "notes", string.Empty);
-            options.Timeout = TimeSpan.FromMinutes(ReadOptionalInt(map, "timeout-minutes", 60));
+            options.Timeout = TimeSpan.FromMinutes(ReadOptionalInt(map, "timeout-minutes", 30));
             options.MaxRetries = ReadOptionalInt(map, "max-retries", 1);
             options.TailLines = ReadOptionalInt(map, "tail-lines", 200);
 

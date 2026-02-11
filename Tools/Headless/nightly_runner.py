@@ -4,8 +4,6 @@ import json
 import os
 import subprocess
 import sys
-import time
-from datetime import datetime, timezone
 
 
 def resolve_state_dir():
@@ -22,43 +20,6 @@ def resolve_state_dir():
 
 def resolve_tasks_path():
     return os.path.join(os.path.dirname(__file__), "headless_tasks.json")
-
-
-def resolve_nightly_lock_path(state_dir):
-    return os.path.join(state_dir, "ops", "locks", "nightly.lock")
-
-
-def should_skip_for_nightly_lock(lock_path, ttl_sec):
-    if not os.path.exists(lock_path):
-        return False, None
-    try:
-        age = time.time() - os.path.getmtime(lock_path)
-        if age > ttl_sec:
-            os.remove(lock_path)
-            return False, None
-    except Exception as exc:
-        return True, f"nightly_lock_unremovable:{exc}"
-    return True, "nightly_lock"
-
-
-def write_nightly_lock(lock_path, tag, tasks):
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    payload = {
-        "started_utc": datetime.now(timezone.utc).isoformat(),
-        "pid": os.getpid(),
-        "tag": tag,
-        "tasks": tasks
-    }
-    with open(lock_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
-
-
-def clear_nightly_lock(lock_path):
-    try:
-        if os.path.exists(lock_path):
-            os.remove(lock_path)
-    except Exception:
-        pass
 
 
 def load_tasks(tasks_path):
@@ -80,23 +41,6 @@ def task_sort_key(task_id, task):
     if isinstance(order, float):
         return (int(order), task_id)
     return (1000, task_id)
-
-
-def is_fast_smoke(task):
-    tags = task.get("tags") or []
-    return "fast_smoke" in tags
-
-
-def prioritize_fast_smoke(task_ids, task_data):
-    fast = []
-    rest = []
-    for task_id in task_ids:
-        task = task_data.get(task_id, {})
-        if is_fast_smoke(task):
-            fast.append(task_id)
-        else:
-            rest.append(task_id)
-    return fast + rest
 
 
 def select_tasks(task_data, tag, task_ids):
@@ -217,26 +161,9 @@ def main():
     parser = argparse.ArgumentParser(description="Run nightly headless tasks.")
     parser.add_argument("--tag", default="nightly", help="Task tag to select.")
     parser.add_argument("--tasks", default="", help="Comma-separated task ids to run.")
-    parser.add_argument("--gate", action="store_true", help="Run S2/S3 gate tasks before other work.")
-    parser.add_argument("--gate-hours", type=int, default=24, help="Skip gate tasks if last green is newer than hours.")
     args = parser.parse_args()
 
     state_dir = resolve_state_dir()
-    nightly_lock_path = resolve_nightly_lock_path(state_dir)
-    nightly_lock_ttl = int(os.environ.get("TRI_NIGHTLY_LOCK_TTL_SEC", "21600"))
-    skip_for_lock, lock_reason = should_skip_for_nightly_lock(nightly_lock_path, nightly_lock_ttl)
-    if skip_for_lock:
-        summary = {
-            "ok": True,
-            "skipped": True,
-            "reason": lock_reason,
-            "tag": args.tag,
-            "tasks": []
-        }
-        summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
-        with open(summary_path, "w", encoding="utf-8") as handle:
-            json.dump(summary, handle, indent=2, sort_keys=True)
-        return
     lock_path = os.path.join(state_dir, "ops", "locks", "build.lock")
     if os.path.exists(lock_path):
         summary = {
@@ -251,188 +178,112 @@ def main():
             json.dump(summary, handle, indent=2, sort_keys=True)
         return
 
-    session_lock = None
+    tasks_path = resolve_tasks_path()
+    task_data = load_tasks(tasks_path)
+    task_override = parse_task_list(args.tasks)
     try:
-        session_lock, _ = run_headlessctl(["claim_session_lock", "--ttl", "5400", "--purpose", "nightly_runner"])
-        if not session_lock.get("acquired"):
-            summary = {
-                "ok": False,
-                "skipped": True,
-                "reason": "session_lock",
-                "tag": args.tag,
-                "tasks": [],
-                "lock": session_lock.get("lock"),
-                "lock_path": session_lock.get("lock_path")
-            }
-            summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
-            with open(summary_path, "w", encoding="utf-8") as handle:
-                json.dump(summary, handle, indent=2, sort_keys=True)
-            return
-
-        write_nightly_lock(nightly_lock_path, args.tag, [])
-
-        tasks_path = resolve_tasks_path()
-        task_data = load_tasks(tasks_path)
-        task_override = parse_task_list(args.tasks)
-        try:
-            selected_tasks = select_tasks(task_data, args.tag, task_override)
-        except ValueError as exc:
-            summary = {
-                "ok": False,
-                "skipped": False,
-                "reason": "invalid_tasks",
-                "error": str(exc),
-                "tag": args.tag,
-                "tasks": task_override
-            }
-            summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
-            with open(summary_path, "w", encoding="utf-8") as handle:
-                json.dump(summary, handle, indent=2, sort_keys=True)
-            sys.exit(1)
-
-        if not task_override:
-            selected_tasks = prioritize_fast_smoke(selected_tasks, task_data)
-
-        if not selected_tasks and not args.gate:
-            summary = {
-                "ok": False,
-                "skipped": False,
-                "reason": "no_tasks",
-                "tag": args.tag,
-                "tasks": []
-            }
-            summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
-            with open(summary_path, "w", encoding="utf-8") as handle:
-                json.dump(summary, handle, indent=2, sort_keys=True)
-            sys.exit(1)
-
-        artifact_dir = os.path.join(os.getcwd(), "nightly_artifacts")
-        os.makedirs(artifact_dir, exist_ok=True)
-
+        selected_tasks = select_tasks(task_data, args.tag, task_override)
+    except ValueError as exc:
         summary = {
-            "ok": True,
+            "ok": False,
             "skipped": False,
+            "reason": "invalid_tasks",
+            "error": str(exc),
             "tag": args.tag,
-            "tasks": selected_tasks,
-            "runs": [],
-            "gate_runs": []
+            "tasks": task_override
         }
-        write_nightly_lock(nightly_lock_path, args.tag, selected_tasks)
-        overall_fail = False
-
-        gate_tasks = ["S2.SPACE4X_CREW_SENSORS_CAUSALITY_MICRO", "S3.SPACE4X_CREW_ENTITY_TRANSFER_MICRO"]
-        if args.gate:
-            selected_tasks = [task_id for task_id in selected_tasks if task_id not in gate_tasks]
-            summary["tasks"] = selected_tasks
-            gate_fail = False
-            for task_id in gate_tasks:
-                previous_run = find_previous_run(state_dir, task_id, None)
-                skip_gate = False
-                if previous_run:
-                    ended = previous_run.get("ended_utc")
-                    if ended:
-                        try:
-                            from datetime import datetime, timezone, timedelta
-                            if ended.endswith("Z"):
-                                ended = ended[:-1] + "+00:00"
-                            ended_dt = datetime.fromisoformat(ended)
-                            if datetime.now(timezone.utc) - ended_dt < timedelta(hours=args.gate_hours):
-                                if previous_run.get("exit_code") == 0:
-                                    bank_status = previous_run.get("bank_status") or {}
-                                    if bank_status.get("status") == "PASS":
-                                        skip_gate = True
-                        except Exception:
-                            pass
-                if skip_gate:
-                    summary["gate_runs"].append({
-                        "task_id": task_id,
-                        "skipped": True,
-                        "reason": "recent_green"
-                    })
-                    continue
-                run_result, _ = run_headlessctl(["run_task", task_id])
-                summary["gate_runs"].append({
-                    "task_id": task_id,
-                    "run_id": run_result.get("run_id"),
-                    "ok": run_result.get("ok", False),
-                    "exit_code": run_result.get("exit_code"),
-                    "bank": (run_result.get("bank_status") or {}).get("status")
-                })
-                if not run_result.get("ok", False):
-                    gate_fail = True
-            if gate_fail:
-                summary["ok"] = False
-                summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
-                with open(summary_path, "w", encoding="utf-8") as handle:
-                    json.dump(summary, handle, indent=2, sort_keys=True)
-                sys.exit(1)
-
-        for task_id in selected_tasks:
-            run_result, _ = run_headlessctl(["run_task", task_id])
-            run_id = run_result.get("run_id")
-            seed_run_ids = run_result.get("seed_run_ids") or []
-            evaluation_runs = seed_run_ids if seed_run_ids else [run_id]
-
-            failures = []
-            metrics_summary = run_result.get("metrics_summary", {})
-            for eval_run_id in evaluation_runs:
-                metrics_result, _ = run_headlessctl(["get_metrics", eval_run_id])
-                failures.extend(evaluate_run(run_result, metrics_result))
-                if not metrics_summary:
-                    metrics_summary = metrics_result.get("metrics_summary", {})
-
-            unique_run_ids = [run_id] + [rid for rid in seed_run_ids if rid and rid != run_id]
-            bundle_paths = []
-            for bundle_run_id in unique_run_ids:
-                if not bundle_run_id:
-                    continue
-                bundle_result, _ = run_headlessctl(["bundle_artifacts", bundle_run_id])
-                bundle_path = bundle_result.get("bundle_path")
-                if bundle_path and os.path.exists(bundle_path):
-                    target_path = os.path.join(artifact_dir, os.path.basename(bundle_path))
-                    if target_path != bundle_path:
-                        try:
-                            with open(bundle_path, "rb") as src, open(target_path, "wb") as dst:
-                                dst.write(src.read())
-                        except Exception:
-                            target_path = bundle_path
-                    bundle_paths.append(target_path)
-
-            previous_run = find_previous_run(state_dir, task_id, run_id)
-            top_deltas = []
-            previous_run_id = None
-            if previous_run:
-                previous_run_id = previous_run.get("run_id")
-                top_deltas = compute_top_deltas(previous_run.get("metrics_summary", {}), metrics_summary)
-
-            run_entry = {
-                "task_id": task_id,
-                "run_id": run_id,
-                "seed_run_ids": seed_run_ids,
-                "ok": run_result.get("ok", False),
-                "error_code": run_result.get("error_code"),
-                "error": run_result.get("error"),
-                "failures": failures,
-                "previous_run_id": previous_run_id,
-                "top_metric_deltas": top_deltas,
-                "bundle_paths": bundle_paths
-            }
-            summary["runs"].append(run_entry)
-
-            if failures:
-                overall_fail = True
-
-        summary["ok"] = not overall_fail
         summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
         with open(summary_path, "w", encoding="utf-8") as handle:
             json.dump(summary, handle, indent=2, sort_keys=True)
+        sys.exit(1)
 
-        if overall_fail:
-            sys.exit(1)
-    finally:
-        if session_lock and session_lock.get("acquired"):
-            run_headlessctl(["release_session_lock", "--run-id", session_lock.get("run_id") or ""])
-        clear_nightly_lock(nightly_lock_path)
+    if not selected_tasks:
+        summary = {
+            "ok": False,
+            "skipped": False,
+            "reason": "no_tasks",
+            "tag": args.tag,
+            "tasks": []
+        }
+        summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, indent=2, sort_keys=True)
+        sys.exit(1)
+
+    artifact_dir = os.path.join(os.getcwd(), "nightly_artifacts")
+    os.makedirs(artifact_dir, exist_ok=True)
+
+    summary = {
+        "ok": True,
+        "skipped": False,
+        "tag": args.tag,
+        "tasks": selected_tasks,
+        "runs": []
+    }
+    overall_fail = False
+
+    for task_id in selected_tasks:
+        run_result, _ = run_headlessctl(["run_task", task_id])
+        run_id = run_result.get("run_id")
+        seed_run_ids = run_result.get("seed_run_ids") or []
+        evaluation_runs = seed_run_ids if seed_run_ids else [run_id]
+
+        failures = []
+        metrics_summary = run_result.get("metrics_summary", {})
+        for eval_run_id in evaluation_runs:
+            metrics_result, _ = run_headlessctl(["get_metrics", eval_run_id])
+            failures.extend(evaluate_run(run_result, metrics_result))
+            if not metrics_summary:
+                metrics_summary = metrics_result.get("metrics_summary", {})
+
+        unique_run_ids = [run_id] + [rid for rid in seed_run_ids if rid and rid != run_id]
+        bundle_paths = []
+        for bundle_run_id in unique_run_ids:
+            if not bundle_run_id:
+                continue
+            bundle_result, _ = run_headlessctl(["bundle_artifacts", bundle_run_id])
+            bundle_path = bundle_result.get("bundle_path")
+            if bundle_path and os.path.exists(bundle_path):
+                target_path = os.path.join(artifact_dir, os.path.basename(bundle_path))
+                if target_path != bundle_path:
+                    try:
+                        with open(bundle_path, "rb") as src, open(target_path, "wb") as dst:
+                            dst.write(src.read())
+                    except Exception:
+                        target_path = bundle_path
+                bundle_paths.append(target_path)
+
+        previous_run = find_previous_run(state_dir, task_id, run_id)
+        top_deltas = []
+        previous_run_id = None
+        if previous_run:
+            previous_run_id = previous_run.get("run_id")
+            top_deltas = compute_top_deltas(previous_run.get("metrics_summary", {}), metrics_summary)
+
+        run_entry = {
+            "task_id": task_id,
+            "run_id": run_id,
+            "seed_run_ids": seed_run_ids,
+            "ok": run_result.get("ok", False),
+            "error_code": run_result.get("error_code"),
+            "error": run_result.get("error"),
+            "failures": failures,
+            "previous_run_id": previous_run_id,
+            "top_metric_deltas": top_deltas,
+            "bundle_paths": bundle_paths
+        }
+        summary["runs"].append(run_entry)
+
+        if failures:
+            overall_fail = True
+
+    summary["ok"] = not overall_fail
+    summary_path = os.path.join(os.getcwd(), "nightly_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=2, sort_keys=True)
+
+    if overall_fail:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

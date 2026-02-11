@@ -7,7 +7,6 @@ import os
 import re
 import selectors
 import shutil
-import socket
 import subprocess
 import sys
 import tarfile
@@ -17,7 +16,6 @@ import uuid
 TOOL_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
 DEFAULT_TIMEOUT_S = 600
-DEFAULT_SESSION_LOCK_TTL_SEC = 90 * 60
 
 
 def eprint(msg):
@@ -109,22 +107,6 @@ def get_build_state_path(state_dir):
     return os.path.join(state_dir, "ops", "locks", "build.state.json")
 
 
-def get_session_lock_path(state_dir):
-    return os.path.join(state_dir, "ops", "locks", "nightly_session.lock")
-
-
-def get_legacy_session_lock_paths():
-    paths = []
-    queue_root = os.environ.get("POLISH_QUEUE_ROOT") or os.environ.get("POLISH_QUEUE")
-    if queue_root:
-        paths.append(os.path.join(queue_root, "reports", "nightly_session.lock"))
-    if os.name == "nt":
-        paths.append(r"C:\polish\queue\reports\nightly_session.lock")
-    else:
-        paths.append("/mnt/c/polish/queue/reports/nightly_session.lock")
-    return [path for path in dict.fromkeys(paths) if path]
-
-
 def check_build_lock(state_dir):
     if os.environ.get("HEADLESSCTL_IGNORE_LOCK") == "1":
         return None
@@ -149,165 +131,6 @@ def check_build_lock(state_dir):
 def load_json(path):
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def parse_utc(value):
-    if not value:
-        return None
-    try:
-        if value.endswith("Z"):
-            value = value[:-1] + "+00:00"
-        return datetime.datetime.fromisoformat(value)
-    except Exception:
-        return None
-
-
-def is_session_lock_stale(lock_path, data, ttl_sec):
-    now = datetime.datetime.now(datetime.timezone.utc)
-    started = parse_utc(data.get("started_utc") if data else None)
-    if started:
-        if (now - started).total_seconds() > ttl_sec:
-            return True
-    try:
-        mtime = os.path.getmtime(lock_path)
-        mtime_dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
-        if (now - mtime_dt).total_seconds() > ttl_sec:
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def read_session_lock(lock_path):
-    try:
-        return load_json(lock_path)
-    except Exception:
-        return None
-
-
-def reclaim_legacy_lock(path, ttl_sec):
-    if not os.path.exists(path):
-        return {"found": False}
-    data = read_session_lock(path)
-    if not is_session_lock_stale(path, data or {}, ttl_sec):
-        return {"found": True, "stale": False, "path": path, "lock": data}
-    stamp = utc_now().replace(":", "").replace("Z", "")
-    stale_path = f"{path}.stale.{stamp}"
-    try:
-        os.replace(path, stale_path)
-    except Exception:
-        try:
-            os.remove(path)
-        except Exception:
-            pass
-    return {"found": True, "stale": True, "path": path, "stale_path": stale_path, "lock": data}
-
-
-def check_legacy_locks(ttl_sec):
-    for path in get_legacy_session_lock_paths():
-        outcome = reclaim_legacy_lock(path, ttl_sec)
-        if not outcome.get("found"):
-            continue
-        if outcome.get("stale"):
-            return {"reclaimed": True, "path": path, "stale_path": outcome.get("stale_path")}
-        return {"locked": True, "path": path, "lock": outcome.get("lock")}
-    return {"reclaimed": False}
-
-
-def claim_session_lock(state_dir, ttl_sec, purpose):
-    lock_path = get_session_lock_path(state_dir)
-    ensure_dir(os.path.dirname(lock_path))
-    now = utc_now()
-    host = socket.gethostname()
-    run_id = str(uuid.uuid4())
-    payload = {
-        "run_id": run_id,
-        "pid": os.getpid(),
-        "host": host,
-        "started_utc": now,
-        "purpose": purpose
-    }
-
-    legacy = check_legacy_locks(ttl_sec)
-    if legacy.get("locked"):
-        return {
-            "acquired": False,
-            "lock_path": legacy.get("path"),
-            "lock": legacy.get("lock"),
-            "warning": "legacy_session_lock_present"
-        }
-
-    while True:
-        if os.path.exists(lock_path):
-            data = read_session_lock(lock_path)
-            if is_session_lock_stale(lock_path, data or {}, ttl_sec):
-                stale_suffix = now.replace(":", "").replace("Z", "")
-                stale_path = f"{lock_path}.stale.{stale_suffix}"
-                try:
-                    os.replace(lock_path, stale_path)
-                except Exception:
-                    pass
-                continue
-            return {
-                "acquired": False,
-                "lock_path": lock_path,
-                "lock": data
-            }
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            continue
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
-        return {
-            "acquired": True,
-            "lock_path": lock_path,
-            "lock": payload
-        }
-
-
-def release_session_lock(state_dir, run_id=None):
-    lock_path = get_session_lock_path(state_dir)
-    if not os.path.exists(lock_path):
-        return {"released": False, "lock_path": lock_path, "lock": None}
-    data = read_session_lock(lock_path)
-    if run_id and data and data.get("run_id") and data.get("run_id") != run_id:
-        return {"released": False, "lock_path": lock_path, "lock": data}
-    try:
-        os.remove(lock_path)
-        return {"released": True, "lock_path": lock_path, "lock": data}
-    except Exception:
-        return {"released": False, "lock_path": lock_path, "lock": data}
-
-
-def show_session_lock(state_dir):
-    lock_path = get_session_lock_path(state_dir)
-    data = read_session_lock(lock_path) if os.path.exists(lock_path) else None
-    return {"lock_path": lock_path, "lock": data}
-
-
-def cleanup_session_locks(state_dir, ttl_sec):
-    reclaimed = []
-    legacy = check_legacy_locks(ttl_sec)
-    if legacy.get("reclaimed"):
-        reclaimed.append(legacy.get("path"))
-
-    lock_path = get_session_lock_path(state_dir)
-    if os.path.exists(lock_path):
-        data = read_session_lock(lock_path)
-        if is_session_lock_stale(lock_path, data or {}, ttl_sec):
-            stamp = utc_now().replace(":", "").replace("Z", "")
-            stale_path = f"{lock_path}.stale.{stamp}"
-            try:
-                os.replace(lock_path, stale_path)
-                reclaimed.append(lock_path)
-            except Exception:
-                try:
-                    os.remove(lock_path)
-                    reclaimed.append(lock_path)
-                except Exception:
-                    pass
-    return reclaimed
 
 
 def ensure_dir(path):
@@ -340,159 +163,6 @@ def resolve_pointer_binary(state_dir, project):
         eprint(f"HEADLESSCTL: using current build pointer for {project}: {executable}")
         return executable
     return None
-
-
-def parse_session_lock_args(args):
-    ttl = DEFAULT_SESSION_LOCK_TTL_SEC
-    purpose = "nightly"
-    run_id = None
-    idx = 0
-    while idx < len(args):
-        token = args[idx]
-        if token == "--ttl" and idx + 1 < len(args):
-            try:
-                ttl = int(args[idx + 1])
-            except Exception:
-                pass
-            idx += 2
-            continue
-        if token == "--purpose" and idx + 1 < len(args):
-            purpose = args[idx + 1]
-            idx += 2
-            continue
-        if token == "--run-id" and idx + 1 < len(args):
-            run_id = args[idx + 1]
-            idx += 2
-            continue
-        idx += 1
-    return ttl, purpose, run_id
-
-
-def parse_cleanup_runs_args(args):
-    days = None
-    keep_per_task = None
-    max_bytes = None
-    idx = 0
-    while idx < len(args):
-        token = args[idx]
-        if token == "--days" and idx + 1 < len(args):
-            try:
-                days = int(args[idx + 1])
-            except Exception:
-                pass
-            idx += 2
-            continue
-        if token == "--keep-per-task" and idx + 1 < len(args):
-            try:
-                keep_per_task = int(args[idx + 1])
-            except Exception:
-                pass
-            idx += 2
-            continue
-        if token == "--max-bytes" and idx + 1 < len(args):
-            try:
-                max_bytes = int(args[idx + 1])
-            except Exception:
-                pass
-            idx += 2
-            continue
-        idx += 1
-    return days, keep_per_task, max_bytes
-
-
-def iter_runs(state_dir):
-    runs_dir = os.path.join(state_dir, "runs")
-    if not os.path.isdir(runs_dir):
-        return []
-    entries = []
-    for name in os.listdir(runs_dir):
-        run_path = os.path.join(runs_dir, name)
-        if not os.path.isdir(run_path):
-            continue
-        result_path = os.path.join(run_path, "result.json")
-        result = None
-        ended_utc = None
-        task_id = None
-        if os.path.exists(result_path):
-            try:
-                result = load_json(result_path)
-                ended_utc = result.get("ended_utc") or result.get("started_utc")
-                task_id = result.get("task_id")
-            except Exception:
-                result = None
-        entries.append({
-            "run_id": name,
-            "path": run_path,
-            "result": result,
-            "ended_utc": ended_utc,
-            "task_id": task_id
-        })
-    return entries
-
-
-def run_dir_size(path):
-    total = 0
-    for root, _, files in os.walk(path):
-        for fname in files:
-            try:
-                total += os.path.getsize(os.path.join(root, fname))
-            except Exception:
-                pass
-    return total
-
-
-def cleanup_runs(state_dir, days, keep_per_task, max_bytes):
-    entries = iter_runs(state_dir)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    removed = []
-
-    if days is not None:
-        cutoff = now - datetime.timedelta(days=days)
-        kept = []
-        for entry in entries:
-            ended = parse_utc(entry.get("ended_utc"))
-            if ended and ended < cutoff:
-                removed.append(entry["run_id"])
-                shutil.rmtree(entry["path"], ignore_errors=True)
-            else:
-                kept.append(entry)
-        entries = kept
-
-    if keep_per_task is not None:
-        by_task = {}
-        for entry in entries:
-            task_id = entry.get("task_id") or "unknown"
-            by_task.setdefault(task_id, []).append(entry)
-        kept = []
-        for task_id, runs in by_task.items():
-            runs.sort(key=lambda item: parse_utc(item.get("ended_utc")) or now, reverse=True)
-            kept.extend(runs[:keep_per_task])
-            for entry in runs[keep_per_task:]:
-                removed.append(entry["run_id"])
-                shutil.rmtree(entry["path"], ignore_errors=True)
-        entries = kept
-
-    if max_bytes is not None:
-        entries.sort(key=lambda item: parse_utc(item.get("ended_utc")) or now, reverse=True)
-        total_bytes = 0
-        kept = []
-        sizes = {}
-        for entry in entries:
-            size = run_dir_size(entry["path"])
-            sizes[entry["run_id"]] = size
-            total_bytes += size
-            kept.append(entry)
-        if total_bytes > max_bytes:
-            for entry in reversed(kept):
-                if total_bytes <= max_bytes:
-                    break
-                run_id = entry["run_id"]
-                size = sizes.get(run_id, 0)
-                removed.append(run_id)
-                total_bytes -= size
-                shutil.rmtree(entry["path"], ignore_errors=True)
-
-    return removed
 
 
 def find_binary(tri_root, state_dir, project):
@@ -682,27 +352,6 @@ def resolve_scenario_path(tri_root, scenario_path):
         return scenario_path
     return os.path.join(tri_root, scenario_path)
 
-def copy_scenario_templates(src_path, run_dir):
-    if not src_path:
-        return
-    scenario_dir = os.path.dirname(src_path)
-    if not scenario_dir:
-        return
-    templates_dir = os.path.join(scenario_dir, "Templates")
-    if not os.path.isdir(templates_dir):
-        return
-    dest_dir = os.path.join(run_dir, "Templates")
-    os.makedirs(dest_dir, exist_ok=True)
-    for name in os.listdir(templates_dir):
-        if not name.lower().endswith(".json"):
-            continue
-        src_file = os.path.join(templates_dir, name)
-        dest_file = os.path.join(dest_dir, name)
-        try:
-            shutil.copy2(src_file, dest_file)
-        except Exception as exc:
-            eprint(f"HEADLESSCTL: failed to copy template {src_file} -> {dest_file}: {exc}")
-
 
 def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
     if seed_value is None:
@@ -720,7 +369,6 @@ def override_seed_if_supported(src_path, run_dir, seed_value, runner_kind):
     dest_path = os.path.join(run_dir, "scenario_seed_override.json")
     with open(dest_path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, sort_keys=True)
-    copy_scenario_templates(src_path, run_dir)
     return dest_path, seed_value
 
 
@@ -864,29 +512,6 @@ def scan_telemetry(telemetry_path, run_dir, pack_caps):
     if isinstance(cap_bytes, int) and cap_bytes > 0:
         under_cap = size_bytes <= cap_bytes
 
-    telemetry_truncated = 0 if under_cap else 1
-    last_tick_value = last_tick if isinstance(last_tick, int) else None
-    metrics_summary["telemetry.bytes_written"] = size_bytes
-    metrics_summary["telemetry.truncated"] = telemetry_truncated
-    metrics_stats["telemetry.bytes_written"] = {
-        "count": 1,
-        "min": size_bytes,
-        "max": size_bytes,
-        "mean": float(size_bytes),
-        "stdev": 0.0,
-        "last": size_bytes,
-        "last_tick": last_tick_value
-    }
-    metrics_stats["telemetry.truncated"] = {
-        "count": 1,
-        "min": telemetry_truncated,
-        "max": telemetry_truncated,
-        "mean": float(telemetry_truncated),
-        "stdev": 0.0,
-        "last": telemetry_truncated,
-        "last_tick": last_tick_value
-    }
-
     invariants = [
         {"name": "telemetry.parse_errors", "ok": parse_errors == 0, "value": parse_errors},
         {"name": "telemetry.monotonic_tick", "ok": monotonic_ok, "first_tick": first_tick, "last_tick": last_tick},
@@ -957,9 +582,6 @@ def run_task_internal(task_id, seed, pack_name):
         return build_error_result("task_not_found", f"task not found: {task_id}"), 2
 
     task = tasks[task_id]
-    task_scenario_id = task.get("scenario_id")
-    if not task_scenario_id:
-        return build_error_result("scenario_id_missing", f"task missing scenario_id: {task_id}"), 2
     if pack_name is None:
         pack_name = task.get("default_pack") or "nightly-default"
 
@@ -972,15 +594,6 @@ def run_task_internal(task_id, seed, pack_name):
     runner = task.get("runner")
     scenario_path = task.get("scenario_path")
     required_bank = task.get("required_bank")
-    allow_exit_codes = task.get("allow_exit_codes")
-    if allow_exit_codes is None:
-        allow_exit_codes = [0]
-    elif isinstance(allow_exit_codes, (int, float)):
-        allow_exit_codes = [int(allow_exit_codes)]
-    else:
-        allow_exit_codes = [int(code) for code in allow_exit_codes]
-    if 0 not in allow_exit_codes:
-        allow_exit_codes.append(0)
     timeout_s = task.get("timeout_s")
     if not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
         timeout_s = DEFAULT_TIMEOUT_S
@@ -1114,7 +727,6 @@ def run_task_internal(task_id, seed, pack_name):
 
     invariant_fail = any(inv.get("ok") is False for inv in invariants)
     bank_required = bool(required_bank)
-    bank_strict = task.get("bank_strict", True)
     bank_status = None
     if bank_required:
         for bank in bank_results:
@@ -1129,13 +741,12 @@ def run_task_internal(task_id, seed, pack_name):
     ok = True
     error_code = "none"
     error = None
-    warnings = []
 
     if timed_out:
         ok = False
         error_code = "timeout"
         error = f"timeout_s={timeout_s}"
-    elif exit_code is not None and exit_code not in allow_exit_codes:
+    elif exit_code not in (0, None):
         ok = False
         error_code = "run_failed"
         error = f"exit_code={exit_code}"
@@ -1144,12 +755,9 @@ def run_task_internal(task_id, seed, pack_name):
         error_code = "telemetry_missing"
         error = "telemetry output missing"
     if bank_required and not bank_ok:
-        if bank_strict:
-            ok = False
-            error_code = "bank_failed"
-            error = f"required bank {required_bank} not PASS"
-        else:
-            warnings.append(f"required bank {required_bank} not PASS")
+        ok = False
+        error_code = "bank_failed"
+        error = f"required bank {required_bank} not PASS"
     if invariant_fail:
         ok = False
         error_code = "invariant_failed"
@@ -1196,7 +804,6 @@ def run_task_internal(task_id, seed, pack_name):
         "bank_required": required_bank,
         "bank_results": bank_results,
         "bank_status": bank_status,
-        "warnings": warnings,
         "telemetry_path": telemetry_path if telemetry_ok else None,
         "metrics_summary": metrics_summary,
         "metrics_stats": metrics_stats,
@@ -1886,83 +1493,6 @@ def main():
 
     if cmd == "validate":
         validate()
-
-    if cmd == "claim_session_lock":
-        tri_root = resolve_tri_root()
-        state_dir = resolve_state_dir(tri_root)
-        ttl, purpose, _ = parse_session_lock_args(args)
-        result = claim_session_lock(state_dir, ttl, purpose)
-        acquired = result.get("acquired", False)
-        lock = result.get("lock")
-        emit_result({
-            "ok": acquired,
-            "error_code": "none" if acquired else "locked",
-            "error": None if acquired else "session lock already held",
-            "run_id": lock.get("run_id") if lock else None,
-            "acquired": acquired,
-            "lock_path": result.get("lock_path"),
-            "lock": lock,
-            "warning": result.get("warning"),
-            "ttl_sec": ttl
-        }, 0 if acquired else 3)
-
-    if cmd == "release_session_lock":
-        tri_root = resolve_tri_root()
-        state_dir = resolve_state_dir(tri_root)
-        _, _, run_id = parse_session_lock_args(args)
-        result = release_session_lock(state_dir, run_id)
-        emit_result({
-            "ok": True,
-            "error_code": "none",
-            "error": None,
-            "run_id": result.get("lock", {}).get("run_id") if result.get("lock") else None,
-            "released": result.get("released"),
-            "lock_path": result.get("lock_path"),
-            "lock": result.get("lock")
-        }, 0)
-
-    if cmd == "show_session_lock":
-        tri_root = resolve_tri_root()
-        state_dir = resolve_state_dir(tri_root)
-        result = show_session_lock(state_dir)
-        lock = result.get("lock")
-        emit_result({
-            "ok": lock is None,
-            "error_code": "none" if lock is None else "locked",
-            "error": None if lock is None else "session lock present",
-            "run_id": lock.get("run_id") if lock else None,
-            "lock_path": result.get("lock_path"),
-            "lock": lock
-        }, 0)
-
-    if cmd == "cleanup_locks":
-        tri_root = resolve_tri_root()
-        state_dir = resolve_state_dir(tri_root)
-        ttl, _, _ = parse_session_lock_args(args)
-        reclaimed = cleanup_session_locks(state_dir, ttl)
-        emit_result({
-            "ok": True,
-            "error_code": "none",
-            "error": None,
-            "run_id": None,
-            "reclaimed": reclaimed
-        }, 0)
-
-    if cmd == "cleanup_runs":
-        tri_root = resolve_tri_root()
-        state_dir = resolve_state_dir(tri_root)
-        days, keep_per_task, max_bytes = parse_cleanup_runs_args(args)
-        removed = cleanup_runs(state_dir, days, keep_per_task, max_bytes)
-        emit_result({
-            "ok": True,
-            "error_code": "none",
-            "error": None,
-            "run_id": None,
-            "removed": removed,
-            "days": days,
-            "keep_per_task": keep_per_task,
-            "max_bytes": max_bytes
-        }, 0)
 
     emit_result({
         "ok": False,

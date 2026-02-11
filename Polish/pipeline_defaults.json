@@ -1,33 +1,25 @@
 {
-  "tri_root_candidates": [
-    "C:\\Dev\\unity_clean",
-    "C:\\Dev\\Tri",
-    "C:\\dev\\Tri",
-    "C:\\dev\\tri",
-    "C:\\Dev\\unity",
-    "C:\\dev\\unity"
-  ],
   "titles": {
     "space4x": {
       "project_path": "space4x",
-      "queue_root": "C:\\polish\\anviloop\\space4x\\queue",
-      "scenario_id": "space4x_collision_micro",
-      "scenario_rel": "Assets/Scenarios/space4x_collision_micro.json",
+      "scenario_id": "space4x",
       "seed": 7,
       "timeout_sec": 90,
       "args": [
+        "--scenario",
+        "/mnt/c/dev/Tri/space4x/Assets/Scenarios/space4x_collision_micro.json",
         "--telemetryEnabled",
         "1"
       ]
     },
     "godgame": {
       "project_path": "godgame",
-      "queue_root": "C:\\polish\\anviloop\\godgame\\queue",
-      "scenario_id": "godgame_smoke",
-      "scenario_rel": "Assets/Scenarios/Godgame/godgame_smoke.json",
+      "scenario_id": "godgame",
       "seed": 42,
       "timeout_sec": 120,
       "args": [
+        "--scenario",
+        "/mnt/c/dev/Tri/godgame/Assets/Scenarios/Godgame/godgame_smoke.json",
         "--telemetryEnabled",
         "1"
       ]

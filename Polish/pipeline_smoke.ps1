@@ -4,17 +4,11 @@ param(
     [string]$Title,
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
-    [string]$ProjectPathOverride,
     [string]$QueueRoot = "C:\\polish\\queue",
     [string]$ScenarioId,
-    [string]$ScenarioRel,
-    [string]$GoalId,
-    [string]$GoalSpec,
     [int]$Seed,
     [int]$TimeoutSec,
     [string[]]$Args,
-    [hashtable]$Env,
-    [string]$EnvJson,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 1800
@@ -23,105 +17,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Assert-BuildboxOnly {
-    $allowLocal = $env:ALLOW_LOCAL_PIPELINE_SMOKE
-    if ($allowLocal -and $allowLocal.Trim() -ne "0") {
-        return
-    }
-
-    $signals = @(
-        $env:BUILD_BOX,
-        $env:BUILDBOX,
-        $env:BUILD_BOX_RUN,
-        $env:GITHUB_ACTIONS,
-        $env:CI
-    ) | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -ne "" }
-
-    $hasBuildboxSignal = $false
-    foreach ($signal in $signals) {
-        if ($signal -match '^(1|true|yes)$') {
-            $hasBuildboxSignal = $true
-            break
-        }
-    }
-
-    if (-not $hasBuildboxSignal) {
-        throw "USE BUILDBOX: pipeline_smoke.ps1 is blocked locally. Run this via Buildbox (on-demand workflow) or set ALLOW_LOCAL_PIPELINE_SMOKE=1 for an explicit override."
-    }
-}
-
-Assert-BuildboxOnly
-
 function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
-function Normalize-ProjectPathInput {
-    param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
-    $trim = $Path.Trim()
-    # If a WSL path is provided, convert to Windows path for Unity.
-    $wslMatch = [regex]::Match($trim, '^/mnt/([a-z])/(.*)$')
-    if ($wslMatch.Success) {
-        $drive = $wslMatch.Groups[1].Value.ToUpperInvariant()
-        $rest = $wslMatch.Groups[2].Value -replace '/', '\'
-        return ("{0}:\{1}" -f $drive, $rest)
-    }
-    # If path contains an embedded absolute drive segment, keep the last one.
-    $driveMatches = [regex]::Matches($trim, '[A-Za-z]:[\\/]')
-    if ($driveMatches.Count -gt 0) {
-        $trim = $trim.Substring($driveMatches[$driveMatches.Count - 1].Index)
-    }
-    return $trim
-}
-
-function Ensure-GitSafeDirectory {
-    param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return }
-    $full = [System.IO.Path]::GetFullPath($Path)
-    try {
-        & git config --global --add safe.directory $full | Out-Null
-    }
-    catch {
-        # Best-effort only; continue if git config fails.
-    }
-}
-
-function Resolve-GitDir {
-    param([string]$RepoPath)
-    if ([string]::IsNullOrWhiteSpace($RepoPath)) { return "" }
-    $gitPath = Join-Path $RepoPath ".git"
-    if (-not (Test-Path $gitPath)) { return "" }
-    $gitItem = Get-Item $gitPath -ErrorAction SilentlyContinue
-    if ($null -eq $gitItem) { return "" }
-    if ($gitItem.Attributes -band [System.IO.FileAttributes]::Directory) {
-        return $gitPath
-    }
-    $line = Get-Content $gitPath -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($line -match '^gitdir:\s*(.+)$') {
-        $dir = $Matches[1].Trim()
-        if (-not [System.IO.Path]::IsPathRooted($dir)) {
-            $dir = Join-Path $RepoPath $dir
-        }
-        return $dir
-    }
-    return ""
-}
-
 function Convert-ToWslPath {
     param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
-    $raw = $Path.Trim()
-    if ($raw -match '^/mnt/[a-z]/') {
-        return ($raw -replace '\\', '/')
-    }
-    $driveMatches = [regex]::Matches($raw, '[A-Za-z]:[\\/]')
-    if ($driveMatches.Count -gt 0) {
-        $raw = $raw.Substring($driveMatches[$driveMatches.Count - 1].Index)
-    }
-    $full = [System.IO.Path]::GetFullPath($raw)
+    $full = [System.IO.Path]::GetFullPath($Path)
     $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
     if ($match.Success) {
         $drive = $match.Groups[1].Value.ToLowerInvariant()
@@ -129,109 +33,6 @@ function Convert-ToWslPath {
         return "/mnt/$drive/$rest"
     }
     return ($full -replace '\\', '/')
-}
-
-function Normalize-ScenarioRel {
-    param([string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
-    $normalized = $Value -replace '\\', '/'
-    if ($normalized -match '^[A-Za-z]:/' -or $normalized.StartsWith('/')) {
-        $assetsIndex = $normalized.IndexOf('Assets/')
-        if ($assetsIndex -ge 0) {
-            return $normalized.Substring($assetsIndex)
-        }
-        throw "ScenarioRel must be relative or contain Assets/: $Value"
-    }
-    return $normalized.TrimStart("./")
-}
-
-function Get-ScenarioIdFromRel {
-    param([string]$ScenarioRel)
-    if ([string]::IsNullOrWhiteSpace($ScenarioRel)) { return "" }
-    $name = [System.IO.Path]::GetFileNameWithoutExtension($ScenarioRel)
-    if ([string]::IsNullOrWhiteSpace($name)) { return "" }
-    return $name
-}
-
-function Normalize-GoalSpecPath {
-    param(
-        [string]$GoalSpecPath,
-        [string]$RepoRoot
-    )
-    if ([string]::IsNullOrWhiteSpace($GoalSpecPath)) { return "" }
-    $normalized = $GoalSpecPath -replace '\\', '/'
-    if ($normalized -match '^[A-Za-z]:/' -or $normalized.StartsWith('/')) {
-        $root = ($RepoRoot -replace '\\', '/').TrimEnd('/')
-        if ($normalized.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $normalized.Substring($root.Length).TrimStart('/')
-        }
-        return $normalized
-    }
-    return $normalized.TrimStart("./")
-}
-
-function ConvertTo-EnvMap {
-    param(
-        [hashtable]$Env,
-        [string]$EnvJson
-    )
-    $map = @{}
-    if (-not [string]::IsNullOrWhiteSpace($EnvJson)) {
-        try {
-            $parsed = $EnvJson | ConvertFrom-Json
-        } catch {
-            throw "EnvJson is invalid JSON."
-        }
-        if ($parsed) {
-            foreach ($prop in $parsed.PSObject.Properties) {
-                $map[$prop.Name] = $prop.Value
-            }
-        }
-    }
-    if ($Env) {
-        foreach ($key in $Env.Keys) {
-            $map[$key] = $Env[$key]
-        }
-    }
-    return $map
-}
-
-function Get-ScenarioRelFromArgs {
-    param([string[]]$ArgsIn)
-    if (-not $ArgsIn) { return "" }
-    for ($i = 0; $i -lt $ArgsIn.Count; $i++) {
-        $token = $ArgsIn[$i]
-        if ($token -in @("--scenario", "-scenario")) {
-            if ($i + 1 -lt $ArgsIn.Count) {
-                return $ArgsIn[$i + 1]
-            }
-            continue
-        }
-        if ($token -like "--scenario=*") {
-            return $token.Substring(11)
-        }
-        if ($token -like "-scenario=*") {
-            return $token.Substring(10)
-        }
-    }
-    return ""
-}
-
-function Strip-ScenarioArgs {
-    param([string[]]$ArgsIn)
-    if (-not $ArgsIn) { return @() }
-    $output = New-Object System.Collections.Generic.List[string]
-    for ($i = 0; $i -lt $ArgsIn.Count; $i++) {
-        $token = $ArgsIn[$i]
-        if ($token -in @("--scenario", "-scenario")) {
-            $i++
-            continue
-        }
-        if ($token -like "--scenario=*") { continue }
-        if ($token -like "-scenario=*") { continue }
-        $output.Add($token)
-    }
-    return ,$output.ToArray()
 }
 
 function Get-ResultWaitTimeoutSeconds {
@@ -242,31 +43,6 @@ function Get-ResultWaitTimeoutSeconds {
         return $parsed
     }
     return $DefaultSeconds
-}
-
-function Resolve-TaskScenarioId {
-    param(
-        [string]$TasksPath,
-        [string]$TaskId,
-        [string]$Fallback
-    )
-    if ([string]::IsNullOrWhiteSpace($TaskId)) { return $Fallback }
-    if (-not (Test-Path $TasksPath)) { return $Fallback }
-    try {
-        $tasksDoc = Get-Content -Raw -Path $TasksPath | ConvertFrom-Json
-    }
-    catch {
-        return $Fallback
-    }
-    if (-not $tasksDoc -or -not $tasksDoc.tasks) { return $Fallback }
-    $tasks = $tasksDoc.tasks
-    $prop = $tasks.PSObject.Properties[$TaskId]
-    if (-not $prop) { return $Fallback }
-    $task = $prop.Value
-    if ($task -and $task.scenario_id) { return $task.scenario_id }
-    if ($TaskId.StartsWith("S0.SPACE4X_")) { return "space4x" }
-    if ($TaskId.StartsWith("P1.SPACE4X_")) { return "puredots_samples" }
-    return $Fallback
 }
 
 function Find-ResultCandidates {
@@ -464,215 +240,8 @@ function Get-ArtifactPreflight {
     }
 }
 
-function Get-FirstErrorLine {
-    param([string]$Text)
-    if ([string]::IsNullOrWhiteSpace($Text)) { return "" }
-    $lines = $Text -split "`r?`n"
-    foreach ($line in $lines) {
-        if ($line -match '\[Error\]' -or $line -match 'error CS\d+' -or $line -match 'PPtr cast failed') {
-            return $line.Trim()
-        }
-    }
-    return ""
-}
-
-function Get-ArtifactSummary {
-    param([string]$ZipPath)
-    if (-not (Test-Path $ZipPath)) { return $null }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-    try {
-        $summary = [ordered]@{}
-        $outcomeText = Read-ZipEntryText -Archive $archive -EntryPath "logs/build_outcome.json"
-        if ($outcomeText) {
-            try {
-                $outcome = $outcomeText | ConvertFrom-Json
-                if ($outcome.result) { $summary.result = $outcome.result }
-                if ($outcome.message) { $summary.message = $outcome.message }
-            }
-            catch {
-            }
-        }
-        $reportText = Read-ZipEntryText -Archive $archive -EntryPath "build/Space4X_HeadlessBuildReport.log"
-        $firstError = Get-FirstErrorLine -Text $reportText
-        if (-not $firstError) {
-            $tailText = Read-ZipEntryText -Archive $archive -EntryPath "logs/unity_build_tail.txt"
-            $firstError = Get-FirstErrorLine -Text $tailText
-        }
-        if ($firstError) { $summary.first_error = $firstError }
-        return $summary
-    }
-    finally {
-        $archive.Dispose()
-    }
-}
-
-function Write-PipelineSummary {
-    param(
-        [string]$ReportsDir,
-        [string]$BuildId,
-        [string]$Title,
-        [string]$ProjectPath,
-        [string]$Commit,
-        [string]$ArtifactZip,
-        [string]$ScenarioId,
-        [string]$ScenarioRel,
-        [string]$GoalId,
-        [string]$GoalSpec,
-        [int]$Seed,
-        [int]$TimeoutSec,
-        [string[]]$Args,
-        [string]$Status,
-        [string]$Failure,
-        [string[]]$JobPaths,
-        [string[]]$ResultZips,
-        [string[]]$ExtraLines
-    )
-    if ([string]::IsNullOrWhiteSpace($ReportsDir)) { return }
-    Ensure-Directory $ReportsDir
-
-    $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add("# Pipeline Smoke Summary")
-    $lines.Add("")
-    $lines.Add("* status: $Status")
-    if ($Failure) { $lines.Add("* failure: $Failure") }
-    if ($BuildId) { $lines.Add("* build_id: $BuildId") }
-    if ($Commit) { $lines.Add("* commit: $Commit") }
-    if ($Title) { $lines.Add("* title: $Title") }
-    if ($ProjectPath) { $lines.Add("* project_path: $ProjectPath") }
-    if ($ArtifactZip) { $lines.Add("* artifact: $ArtifactZip") }
-    if ($ScenarioId) { $lines.Add("* scenario_id: $ScenarioId") }
-    if ($ScenarioRel) { $lines.Add("* scenario_rel: $ScenarioRel") }
-    if ($GoalId) { $lines.Add("* goal_id: $GoalId") }
-    if ($GoalSpec) { $lines.Add("* goal_spec: $GoalSpec") }
-    if ($Seed) { $lines.Add("* seed: $Seed") }
-    if ($TimeoutSec) { $lines.Add("* timeout_sec: $TimeoutSec") }
-    if ($Args -and $Args.Count -gt 0) { $lines.Add("* args: " + ([string]::Join(" ", $Args))) }
-    if ($ExtraLines -and $ExtraLines.Count -gt 0) {
-        foreach ($line in $ExtraLines) { $lines.Add($line) }
-    }
-
-    if ($ArtifactZip -and (Test-Path $ArtifactZip)) {
-        $artifactSummary = Get-ArtifactSummary -ZipPath $ArtifactZip
-        if ($artifactSummary) {
-            $resultValue = $artifactSummary["result"]
-            $messageValue = $artifactSummary["message"]
-            $firstErrorValue = $artifactSummary["first_error"]
-            if ($resultValue) { $lines.Add("* build_result: $resultValue") }
-            if ($messageValue) { $lines.Add("* build_message: $messageValue") }
-            if ($firstErrorValue) { $lines.Add("* build_first_error: $firstErrorValue") }
-        }
-    }
-
-    if ($JobPaths -and $JobPaths.Count -gt 0) {
-        $lines.Add("")
-        $lines.Add("## Jobs")
-        foreach ($job in $JobPaths) { $lines.Add("- $job") }
-    }
-
-    if ($ResultZips -and $ResultZips.Count -gt 0) {
-        $lines.Add("")
-        $lines.Add("## Results")
-        foreach ($zip in $ResultZips) {
-            $details = Get-ResultDetails -ZipPath $zip
-            $summary = Format-ResultSummary -Index 1 -Total 1 -Details $details
-            $lines.Add("- $zip")
-            $lines.Add("  $summary")
-        }
-    }
-
-    $outPath = if ($BuildId) { Join-Path $ReportsDir ("pipeline_smoke_summary_{0}.md" -f $BuildId) } else { Join-Path $ReportsDir "pipeline_smoke_summary_unknown.md" }
-    Set-Content -Path $outPath -Value ($lines -join "`r`n") -Encoding ascii
-    $latestPath = Join-Path $ReportsDir "pipeline_smoke_summary_latest.md"
-    Copy-Item -Path $outPath -Destination $latestPath -Force
-}
-
-function Invoke-PPtrFileIdScan {
-    param(
-        [string]$FirstError,
-        [string]$ProjectPath,
-        [string]$ReportsDir,
-        [string]$TriRoot
-    )
-    if ([string]::IsNullOrWhiteSpace($FirstError)) { return $null }
-    if ($FirstError -notmatch 'FileID\\s+(\\d+)') { return $null }
-
-    $fileId = $matches[1]
-    if ([string]::IsNullOrWhiteSpace($fileId)) { return $null }
-
-    $scanScript = $null
-    $candidates = @(
-        (Join-Path $TriRoot "Tools\\HeadlessRebuildTool\\Polish\\Ops\\find_unity_fileid_reference.ps1"),
-        (Join-Path $TriRoot "Tools\\Polish\\Ops\\find_unity_fileid_reference.ps1"),
-        (Join-Path $TriRoot "Polish\\Ops\\find_unity_fileid_reference.ps1")
-    )
-    foreach ($cand in $candidates) {
-        if ([string]::IsNullOrWhiteSpace($cand)) { continue }
-        if (Test-Path $cand) { $scanScript = $cand; break }
-    }
-    if (-not $scanScript) { return $null }
-
-    Ensure-Directory $ReportsDir
-    $outPath = Join-Path $ReportsDir ("pptr_fileid_{0}.log" -f $fileId)
-    try {
-        & $scanScript -FileId $fileId -Root $ProjectPath -IncludePackages -OutFile $outPath | Out-Null
-    } catch {
-    }
-    if (Test-Path $outPath) { return $outPath }
-    return $null
-}
-
-function Get-FirstPPtrErrorFromArtifact {
-    param([string]$ZipPath)
-    if (-not (Test-Path $ZipPath)) { return "" }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-    try {
-        $pptrText = Read-ZipEntryText -Archive $archive -EntryPath "logs/primary_error_snippet.txt"
-        if (-not $pptrText) {
-            $entry = $archive.Entries | Where-Object { $_.Name -ieq "primary_error_snippet.txt" } | Select-Object -First 1
-            if ($entry) {
-                $reader = New-Object System.IO.StreamReader($entry.Open())
-                try { $pptrText = $reader.ReadToEnd() } finally { $reader.Dispose() }
-            }
-        }
-        if (-not $pptrText) {
-            $pptrText = Read-ZipEntryText -Archive $archive -EntryPath "logs/unity_build_tail.txt"
-            if (-not $pptrText) {
-                $entry = $archive.Entries | Where-Object { $_.Name -ieq "unity_build_tail.txt" } | Select-Object -First 1
-                if ($entry) {
-                    $reader = New-Object System.IO.StreamReader($entry.Open())
-                    try { $pptrText = $reader.ReadToEnd() } finally { $reader.Dispose() }
-                }
-            }
-        }
-        return Get-FirstErrorLine -Text $pptrText
-    }
-    finally {
-        $archive.Dispose()
-    }
-}
-
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$triRoot = $env:TRI_ROOT
-if ([string]::IsNullOrWhiteSpace($triRoot) -or -not (Test-Path $triRoot)) {
-    $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
-} else {
-    $triRoot = (Resolve-Path $triRoot).Path
-}
-
-function Resolve-FirstExisting {
-    param(
-        [string[]]$Candidates,
-        [string]$Description
-    )
-    foreach ($candidate in $Candidates) {
-        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
-        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
-    }
-    $attempts = ($Candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`r`n- "
-    throw "Missing $Description. Tried:`r`n- $attempts"
-}
+$triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
 if (-not (Test-Path $defaultsPath)) {
     throw "Missing defaults file: $defaultsPath"
@@ -686,11 +255,6 @@ if (-not $titleDefaults) {
 }
 
 $projectPath = Join-Path $triRoot $titleDefaults.project_path
-if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
-    $projectPath = $ProjectPathOverride
-}
-$projectPath = Normalize-ProjectPathInput $projectPath
-$projectPath = [System.IO.Path]::GetFullPath($projectPath)
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
@@ -699,48 +263,22 @@ if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
 }
 
-$syncScript = Resolve-FirstExisting -Candidates @(
-    (Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"),
-    (Join-Path $triRoot "sync_headless_manifest.ps1")
-) -Description "headless manifest sync script"
-
-$swapScript = Resolve-FirstExisting -Candidates @(
-    (Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"),
-    (Join-Path $triRoot "Tools\\use_headless_manifest_windows.ps1"),
-    (Join-Path $triRoot "use_headless_manifest_windows.ps1")
-) -Description "headless manifest swap script"
+$syncScript = Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"
+$swapScript = Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"
+if (-not (Test-Path $syncScript)) {
+    throw "Missing headless manifest sync script: $syncScript"
+}
+if (-not (Test-Path $swapScript)) {
+    throw "Missing headless manifest swap script: $swapScript"
+}
 
 $scenarioIdValue = if ($PSBoundParameters.ContainsKey("ScenarioId")) { $ScenarioId } else { $titleDefaults.scenario_id }
-$scenarioRelValue = if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $ScenarioRel } else { $titleDefaults.scenario_rel }
-$goalIdValue = if ($PSBoundParameters.ContainsKey("GoalId")) { $GoalId } else { "" }
-$goalSpecValue = if ($PSBoundParameters.ContainsKey("GoalSpec")) { Normalize-GoalSpecPath -GoalSpecPath $GoalSpec -RepoRoot $triRoot } else { "" }
 $seedValue = if ($PSBoundParameters.ContainsKey("Seed")) { $Seed } else { [int]$titleDefaults.seed }
 $timeoutValue = if ($PSBoundParameters.ContainsKey("TimeoutSec")) { $TimeoutSec } else { [int]$titleDefaults.timeout_sec }
 $argsValue = if ($PSBoundParameters.ContainsKey("Args")) { $Args } else { $titleDefaults.args }
 if ($null -eq $argsValue) { $argsValue = @() }
-if (-not $scenarioRelValue) {
-    $scenarioRelValue = Get-ScenarioRelFromArgs $argsValue
-}
-if ($scenarioRelValue) {
-    $scenarioRelValue = Normalize-ScenarioRel $scenarioRelValue
-    $argsValue = Strip-ScenarioArgs $argsValue
-}
-if (-not $PSBoundParameters.ContainsKey("ScenarioId") -and $scenarioRelValue) {
-    $derivedScenarioId = Get-ScenarioIdFromRel $scenarioRelValue
-    if ($derivedScenarioId) {
-        $scenarioIdValue = $derivedScenarioId
-    }
-}
 if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
-}
-
-$envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
-
-Ensure-GitSafeDirectory $projectPath
-$gitDirPath = Resolve-GitDir $projectPath
-if (-not [string]::IsNullOrWhiteSpace($gitDirPath)) {
-    Ensure-GitSafeDirectory $gitDirPath
 }
 
 $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
@@ -767,18 +305,10 @@ Ensure-Directory $leasesDir
 Ensure-Directory $resultsDir
 Ensure-Directory $reportsDir
 
-$tasksPath = Join-Path $triRoot "Tools\\Tools\\Headless\\headless_tasks.json"
-$jobScenarioId = Resolve-TaskScenarioId -TasksPath $tasksPath -TaskId $scenarioIdValue -Fallback $scenarioIdValue
-
 $supervisorProject = Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"
 if (-not (Test-Path $supervisorProject)) {
     throw "HeadlessBuildSupervisor.csproj not found: $supervisorProject"
 }
-
-$supervisorProject = Resolve-FirstExisting -Candidates @(
-    (Join-Path $triRoot "Tools\\HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj"),
-    (Join-Path $triRoot "HeadlessBuildSupervisor\\HeadlessBuildSupervisor.csproj")
-) -Description "HeadlessBuildSupervisor.csproj"
 
 $supervisorArgs = @(
     "run", "--project", $supervisorProject, "--",
@@ -805,42 +335,22 @@ $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
 }
-$global:LASTEXITCODE = 0
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
 if (-not (Test-Path $artifactZip)) {
-    $summaryFailure = "artifact_missing"
-    $summaryBuildState = "failed"
-    $summaryRunState = "skipped"
-    Finalize-PipelineSummary -Status "FAIL" -Failure "artifact_missing"
     throw "Artifact zip not found: $artifactZip"
 }
 
 $preflight = Get-ArtifactPreflight -ZipPath $artifactZip
 if (-not $preflight.ok) {
-    $firstErrorLine = Get-FirstPPtrErrorFromArtifact -ZipPath $artifactZip
-    if ($firstErrorLine -and $firstErrorLine -match 'PPtr cast failed') {
-        $pptrReport = Invoke-PPtrFileIdScan -FirstError $firstErrorLine -ProjectPath $projectPath -ReportsDir $reportsDir -TriRoot $triRoot
-        if ($pptrReport) {
-            $summaryExtraLines.Add("* pptr_scan_report: $pptrReport") | Out-Null
-        }
-    }
     $summary = "BUILD_FAIL reason={0}" -f $preflight.reason
     if ($preflight.result) { $summary += " result=$($preflight.result)" }
     if ($preflight.message) { $summary += " message=$($preflight.message)" }
     Write-Host $summary
-    $summaryFailure = $summary
-    $summaryBuildState = "failed"
-    $summaryRunState = "skipped"
-    Finalize-PipelineSummary -Status "FAIL" -Failure $summary
     exit 1
-}
-else {
-    $summaryBuildState = "built"
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
-$repoRootWsl = Convert-ToWslPath $projectPath
 Write-Host ("build_id={0} commit={1}" -f $buildId, $commitFull)
 Write-Host ("artifact={0}" -f $artifactZip)
 
@@ -860,7 +370,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
         job_id = $jobId
         commit = $commitFull
         build_id = $buildId
-        scenario_id = $jobScenarioId
+        scenario_id = $scenarioIdValue
         seed = [int]$seedValue
         timeout_sec = [int]$timeoutValue
         args = @($argsValue)
@@ -868,19 +378,6 @@ for ($i = 1; $i -le $Repeat; $i++) {
         feature_flags = [ordered]@{}
         artifact_uri = $artifactUri
         created_utc = $createdUtc
-        repo_root = $repoRootWsl
-    }
-    if ($scenarioRelValue) {
-        $job.scenario_rel = $scenarioRelValue
-    }
-    if ($goalIdValue) {
-        $job.goal_id = $goalIdValue
-    }
-    if ($goalSpecValue) {
-        $job.goal_spec = $goalSpecValue
-    }
-    if ($envMap.Count -gt 0) {
-        $job.env = $envMap
     }
 
     $jobJson = $job | ConvertTo-Json -Depth 6
@@ -890,7 +387,6 @@ for ($i = 1; $i -le $Repeat; $i++) {
     Move-Item -Path $jobTempPath -Destination $jobPath -Force
 
     Write-Host ("job={0}" -f $jobPath)
-    $summaryJobPaths.Add($jobPath) | Out-Null
 
     if ($WaitForResult) {
         $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
@@ -944,35 +440,20 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $alternateNames = if ($alternates) { $alternates | Select-Object -ExpandProperty Name } else { @() }
             $alternateList = if (@($alternateNames).Count -gt 0) { [string]::Join(", ", @($alternateNames)) } else { "(none)" }
             Write-Host ("Timed out waiting for {0}; found alternates: {1}" -f $resultZip, $alternateList)
-            $summaryFailure = "result_timeout"
-            $summaryRunState = "failed"
-            Finalize-PipelineSummary -Status "FAIL" -Failure "Timed out waiting for result: $resultZip"
             throw "Timed out waiting for result: $resultZip"
         }
 
         $details = Get-ResultDetails -ZipPath $resultZip
         $summary = Format-ResultSummary -Index $i -Total $Repeat -Details $details
         Write-Host $summary
-        $summaryResultZips.Add($resultZip) | Out-Null
-        if ($details.exit_reason -in @("SUCCESS", "OK_WITH_WARNINGS")) {
-            $summaryRunState = "ran"
-        } else {
-            $summaryRunState = "failed"
-        }
 
         if ($details.exit_reason -in @("INFRA_FAIL", "CRASH", "HANG_TIMEOUT")) {
             Write-Host ("stop_reason={0}" -f $details.exit_reason)
-            $summaryFailure = "stop_reason=$($details.exit_reason)"
-            $summaryRunState = "failed"
-            Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 2
         }
 
         if ([string]::IsNullOrWhiteSpace($details.determinism_hash)) {
             Write-Host ("stop_reason=determinism_hash_missing run_index={0}" -f $i)
-            $summaryFailure = "determinism_hash_missing"
-            $summaryRunState = "failed"
-            Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 3
         }
 
@@ -986,17 +467,7 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $baselineInv = Get-ResultInvariants -ZipPath $baselineZip
             $currentInv = Get-ResultInvariants -ZipPath $resultZip
             Write-InvariantDiff -Baseline $baselineInv -Current $currentInv -BaselineLabel ("run{0}" -f $baselineIndex) -CurrentLabel ("run{0}" -f $i)
-            $summaryFailure = "determinism_hash_divergence"
-            $summaryRunState = "failed"
-            Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
             exit 3
         }
     }
-    else {
-        $summaryRunState = "queued"
-    }
 }
-
-Finalize-PipelineSummary -Status "SUCCESS" -Failure ""
-$global:LASTEXITCODE = 0
-return

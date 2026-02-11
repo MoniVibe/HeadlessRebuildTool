@@ -33,24 +33,6 @@ Build output is published to:
 - `FORCE_LINUX_UNITY`: `1` forces Linux Unity.
 - `PUBLISH_ROOT`: Override publish root for the selected script (default `${TRI_ROOT}/Tools/builds/godgame` or `${TRI_ROOT}/Tools/builds/space4x`).
 
-## Bug hunt suite (headless)
-Queue a compact bug-hunt run across core micro scenarios (no local tests):
-
-```powershell
-pwsh .\Polish\Ops\bug_hunt_suite.ps1 -Title space4x -Ref <branch> -PuredotsRef <branch>
-```
-
-Optional isolation flags:
-
-```powershell
-pwsh .\Polish\Ops\bug_hunt_suite.ps1 -Title space4x -Ref <branch> -Disable "combat,vegetation"
-```
-
-The suite forwards env flags via the queue:
-- `PUREDOTS_BUGHUNT=1`
-- `PUREDOTS_SHUTDOWN_AUDIT=1`
-- `PUREDOTS_BUGHUNT_DISABLE=<comma list>`
-
 ## Ops bus state dir (shared WSL + Windows)
 - WSL: `TRI_STATE_DIR=/home/<user>/Tri/.tri/state` (ext4).
 - Windows: `TRI_STATE_DIR=\\wsl$\\<Distro>\\home\\<user>\\Tri\\.tri\\state`.

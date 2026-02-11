@@ -9,7 +9,6 @@ EXIT_REASON_TEST_FAIL="TEST_FAIL"
 EXIT_REASON_CRASH="CRASH"
 EXIT_REASON_HANG="HANG_TIMEOUT"
 EXIT_REASON_INFRA="INFRA_FAIL"
-EXIT_REASON_WARN="OK_WITH_WARNINGS"
 
 EXIT_CODE_SUCCESS=0
 EXIT_CODE_TEST_FAIL=10
@@ -33,9 +32,6 @@ TOOLS_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TRIAGE_SCRIPT="${TOOLS_ROOT}/Polish/Tools/extract_triage.py"
 DEFAULT_REPORTS_DIR="/mnt/c/polish/queue/reports"
 DEFAULT_TELEMETRY_MAX_BYTES=52428800
-SCENARIO_MAP_FILE="${TOOLS_ROOT}/Polish/WSL/scenario_map.json"
-SCENARIO_LOOKUP_STATUS=""
-SCENARIO_LOOKUP_DETAIL=""
 log() {
   echo "wsl_runner: $*" >&2
 }
@@ -45,8 +41,7 @@ usage() {
 Usage: wsl_runner.sh --queue <path> [--workdir <path>] [--once|--daemon]
                     [--heartbeat-interval <sec>] [--diag-timeout <sec>]
                     [--print-summary] [--requeue-stale-leases --ttl-sec <sec>]
-                    [--emit-triage-on-fail] [--reports-dir <path>] [--telemetry-max-bytes <bytes>]
-                    [--status-interval <sec>] [--self-test]
+                    [--emit-triage-on-fail] [--reports-dir <path>] [--telemetry-max-bytes <bytes>] [--self-test]
 
 Options:
   --queue <path>              Queue root (required unless --self-test).
@@ -59,7 +54,6 @@ Options:
   --emit-triage-on-fail        Emit triage summary JSON on failures (default).
   --reports-dir <path>         Triage reports directory (default: /mnt/c/polish/queue/reports).
   --telemetry-max-bytes <bytes> Telemetry output cap in bytes (default: 52428800).
-  --status-interval <sec>      Emit a periodic idle status line while daemonized (default: 0 = off).
   --requeue-stale-leases      Requeue stale leases (helper mode).
   --ttl-sec <sec>             TTL seconds for stale leases (default: 600).
   --self-test                 Run local self-test scenarios.
@@ -197,258 +191,6 @@ resolve_artifact_uri() {
   fi
 
   echo "$uri"
-}
-
-is_absolute_path() {
-  local value="$1"
-  if [[ "$value" == /* ]]; then
-    return 0
-  fi
-  if [[ "$value" =~ ^[A-Za-z]:[\\/].* ]]; then
-    return 0
-  fi
-  if [[ "$value" == \\\\* || "$value" == //wsl$/* ]]; then
-    return 0
-  fi
-  return 1
-}
-
-normalize_rel_path() {
-  local value="$1"
-  value="${value//\\//}"
-  value="${value#./}"
-  echo "$value"
-}
-
-resolve_repo_root() {
-  local job_root="$1"
-  local candidate=""
-  for candidate in "$job_root" "${TRI_REPO_ROOT:-}" "${TRI_ROOT:-}"; do
-    if [ -n "$candidate" ] && [ -d "$candidate" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-  if [ -d "/mnt/c/dev/unity_clean" ]; then
-    echo "/mnt/c/dev/unity_clean"
-    return 0
-  fi
-  if [ -d "/mnt/c/dev/Tri" ]; then
-    echo "/mnt/c/dev/Tri"
-    return 0
-  fi
-  echo ""
-}
-
-scenario_map_lookup() {
-  local map_file="$1"
-  local scenario_id="$2"
-  if [ -z "$scenario_id" ] || [ -z "$map_file" ] || [ ! -f "$map_file" ]; then
-    echo ""
-    return 0
-  fi
-  if [ "$HAVE_JQ" -eq 1 ]; then
-    jq -r --arg id "$scenario_id" '
-      if type == "object" then
-        (.[$id] | select(type == "string")) // empty
-      elif type == "array" then
-        (map(select((.scenario_id // .scenarioId // .id) == $id)) | . as $m |
-          if ($m | length) == 1 then
-            ($m[0].scenario_rel | select(type == "string")) // empty
-          elif ($m | length) > 1 then
-            "__ambiguous__:" + (($m | map(.scenario_rel) | map(select(type == "string")) | .[0:5] | join(";")) // "")
-          else
-            empty
-          end)
-      else
-        empty
-      end
-    ' "$map_file" 2>/dev/null || true
-    return 0
-  fi
-  "$PYTHON_BIN" - "$map_file" "$scenario_id" <<'PY'
-import json,sys
-path=sys.argv[1]
-key=sys.argv[2]
-try:
-    with open(path,"r",encoding="utf-8") as handle:
-        data=json.load(handle)
-except Exception:
-    data={}
-value=""
-if isinstance(data, dict):
-    value=data.get(key,"")
-elif isinstance(data, list):
-    matches=[]
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        item_id=item.get("scenario_id") or item.get("scenarioId") or item.get("id")
-        if item_id == key:
-            matches.append(item.get("scenario_rel",""))
-    matches=[m for m in matches if isinstance(m,str)]
-    if len(matches) == 1:
-        value=matches[0]
-    elif len(matches) > 1:
-        value="__ambiguous__:" + ";".join(matches[:5])
-if isinstance(value,str):
-    print(value)
-else:
-    print("")
-PY
-}
-
-scan_repo_for_scenario_id() {
-  local repo_root="$1"
-  local scenario_id="$2"
-  if [ -z "$repo_root" ] || [ -z "$scenario_id" ] || [ ! -d "$repo_root" ]; then
-    echo ""
-    return 0
-  fi
-  "$PYTHON_BIN" - "$repo_root" "$scenario_id" <<'PY'
-import json,os,sys
-root=sys.argv[1]
-target=sys.argv[2]
-
-def add_path(paths, path):
-    if os.path.isdir(path):
-        paths.append(path)
-
-def candidate_roots(root):
-    roots=[]
-    add_path(roots, os.path.join(root,"Assets","Scenarios"))
-    add_path(roots, os.path.join(root,"Packages"))
-    try:
-        for entry in os.scandir(root):
-            if not entry.is_dir():
-                continue
-            add_path(roots, os.path.join(entry.path,"Assets","Scenarios"))
-            add_path(roots, os.path.join(entry.path,"Packages"))
-    except FileNotFoundError:
-        pass
-    expanded=[]
-    for base in roots:
-        if os.path.basename(base) == "Packages":
-            try:
-                for pkg in os.scandir(base):
-                    if not pkg.is_dir():
-                        continue
-                    candidate=os.path.join(pkg.path,"Scenarios")
-                    if os.path.isdir(candidate):
-                        expanded.append(candidate)
-            except FileNotFoundError:
-                pass
-        else:
-            expanded.append(base)
-    return expanded
-
-def read_scenario_id(path):
-    try:
-        with open(path,"r",encoding="utf-8") as handle:
-            data=json.load(handle)
-    except Exception:
-        return None
-    if isinstance(data, dict):
-        return data.get("scenarioId") or data.get("scenario_id") or data.get("id")
-    return None
-
-matches=[]
-for base in candidate_roots(root):
-    for dirpath, dirnames, filenames in os.walk(base):
-        parts=set(dirpath.split(os.sep))
-        if "Templates" in parts:
-            continue
-        for name in filenames:
-            if not name.endswith(".json"):
-                continue
-            if name == "README.json":
-                continue
-            path=os.path.join(dirpath, name)
-            scenario_id=read_scenario_id(path)
-            if scenario_id == target:
-                rel=os.path.relpath(path, root).replace("\\","/")
-                matches.append(rel)
-
-def is_assets_path(path):
-    return "/Assets/Scenarios/" in f"/{path.strip('/')}/"
-
-assets=[m for m in matches if is_assets_path(m)]
-if len(assets) == 1:
-    print(assets[0])
-    raise SystemExit(0)
-if len(assets) > 1:
-    print("__ambiguous__:" + ";".join(sorted(assets)[:5]))
-    raise SystemExit(0)
-if len(matches) == 1:
-    print(matches[0])
-    raise SystemExit(0)
-if len(matches) > 1:
-    print("__ambiguous__:" + ";".join(sorted(matches)[:5]))
-    raise SystemExit(0)
-print("__notfound__")
-PY
-}
-
-map_scenario_id_to_rel() {
-  local scenario_id="$1"
-  local repo_root="$2"
-  SCENARIO_LOOKUP_STATUS=""
-  SCENARIO_LOOKUP_DETAIL=""
-  if [ -z "$scenario_id" ]; then
-    SCENARIO_LOOKUP_STATUS="missing_id"
-    echo ""
-    return 0
-  fi
-  local map_file="$SCENARIO_MAP_FILE"
-  if [ -n "$repo_root" ] && [ -f "${repo_root}/scenario_map.json" ]; then
-    map_file="${repo_root}/scenario_map.json"
-  fi
-  local scenario_rel
-  scenario_rel="$(scenario_map_lookup "$map_file" "$scenario_id")"
-  case "$scenario_rel" in
-    __ambiguous__:* )
-      SCENARIO_LOOKUP_STATUS="ambiguous"
-      SCENARIO_LOOKUP_DETAIL="${scenario_rel#__ambiguous__:}"
-      scenario_rel=""
-      ;;
-  esac
-  if [ -z "$scenario_rel" ] && [ -z "$SCENARIO_LOOKUP_STATUS" ]; then
-    scenario_rel="$(scan_repo_for_scenario_id "$repo_root" "$scenario_id")"
-    case "$scenario_rel" in
-      __ambiguous__:* )
-        SCENARIO_LOOKUP_STATUS="ambiguous"
-        SCENARIO_LOOKUP_DETAIL="${scenario_rel#__ambiguous__:}"
-        scenario_rel=""
-        ;;
-      __notfound__ )
-        SCENARIO_LOOKUP_STATUS="notfound"
-        scenario_rel=""
-        ;;
-    esac
-  fi
-  if [ -n "$scenario_rel" ]; then
-    SCENARIO_LOOKUP_STATUS="ok"
-  elif [ -z "$SCENARIO_LOOKUP_STATUS" ]; then
-    SCENARIO_LOOKUP_STATUS="notfound"
-  fi
-  echo "$scenario_rel"
-}
-
-resolve_scenario_path() {
-  local scenario_rel="$1"
-  local repo_root="$2"
-  local normalized
-  normalized="$(normalize_rel_path "$scenario_rel")"
-  if is_absolute_path "$normalized"; then
-    resolve_artifact_uri "$normalized"
-    return 0
-  fi
-  if [ -z "$repo_root" ]; then
-    echo "$normalized"
-    return 0
-  fi
-  repo_root="${repo_root%/}"
-  echo "${repo_root}/${normalized}"
 }
 
 json_valid() {
@@ -758,135 +500,6 @@ scenario_file_not_found_present() {
   tail_match "$CURRENT_PLAYER_LOG" "$pattern" || tail_match "$CURRENT_STDOUT_LOG" "$pattern" || tail_match "$CURRENT_STDERR_LOG" "$pattern"
 }
 
-required_questions_unknown_present() {
-  local out_dir="$1"
-  local report_path="${out_dir}/operator_report.json"
-  if [ -f "$report_path" ] && [ -n "$PYTHON_BIN" ]; then
-    "$PYTHON_BIN" - "$report_path" <<'PY'
-import json,sys
-path=sys.argv[1]
-try:
-    with open(path,"r",encoding="utf-8") as handle:
-        data=json.load(handle)
-except Exception:
-    raise SystemExit(1)
-
-def truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (list, dict, str)):
-        return len(value) > 0
-    return False
-
-def has_unknown_required_questions(obj):
-    if not isinstance(obj, dict):
-        return False
-    questions = obj.get("questions")
-    if isinstance(questions, list):
-        for item in questions:
-            if not isinstance(item, dict):
-                continue
-            if item.get("required") is True:
-                status = str(item.get("status", "")).lower()
-                if status in ("unknown", "missing"):
-                    return True
-                if item.get("unknown_reason"):
-                    return True
-    return False
-
-if has_unknown_required_questions(data):
-    raise SystemExit(0)
-
-def scan(obj):
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            key_norm=str(key).lower()
-            if key_norm in ("required_questions_unknown", "unknown_required_questions", "required_questions_missing",
-                            "required_questions_unanswered", "required_questions_unresolved"):
-                if truthy(value):
-                    return True
-            if key_norm in ("required_questions", "questions", "question_status", "question_statuses"):
-                if scan(value):
-                    return True
-            if scan(value):
-                return True
-    elif isinstance(obj, list):
-        for item in obj:
-            if scan(item):
-                return True
-    return False
-
-raise SystemExit(0 if scan(data) else 1)
-PY
-    if [ $? -eq 0 ]; then
-      return 0
-    fi
-  fi
-
-  local pattern='required questions|questions unknown|unknown required questions|required questions unknown'
-  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
-}
-
-shutdown_exit_request_present() {
-  local out_dir="$1"
-  local inv_path="${out_dir}/invariants.json"
-  local progress_path="${out_dir}/progress.json"
-  if [ -z "$PYTHON_BIN" ]; then
-    return 1
-  fi
-  if [ ! -f "$inv_path" ] && [ ! -f "$progress_path" ]; then
-    return 1
-  fi
-  "$PYTHON_BIN" - "$inv_path" "$progress_path" <<'PY'
-import json,sys,os
-inv_path=sys.argv[1]
-progress_path=sys.argv[2]
-
-def load(path):
-    if not path or not os.path.exists(path):
-        return None
-    try:
-        with open(path,"r",encoding="utf-8") as handle:
-            return json.load(handle)
-    except Exception:
-        return None
-
-def has_exit_request(data):
-    if not isinstance(data, dict):
-        return False
-    progress=data.get("progress")
-    if isinstance(progress, dict):
-        last_phase=str(progress.get("last_phase","")).lower()
-        last_checkpoint=str(progress.get("last_checkpoint","")).lower()
-        if last_checkpoint == "exit_request":
-            return True
-        if last_phase == "shutdown" and last_checkpoint in ("exit_request","exit","quit"):
-            return True
-    last_checkpoint=str(data.get("last_checkpoint","")).lower()
-    if last_checkpoint == "exit_request":
-        return True
-    return False
-
-inv=load(inv_path)
-if has_exit_request(inv):
-    raise SystemExit(0)
-
-prog=load(progress_path)
-if has_exit_request(prog):
-    raise SystemExit(0)
-
-raise SystemExit(1)
-PY
-  local status=$?
-  if [ "$status" -eq 0 ]; then
-    return 0
-  fi
-
-  local pattern='HeadlessExitSystem\] Quit requested'
-  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
-  return $?
-}
-
 exit_by_signal() {
   local process_exit_code="$1"
   if [ "$process_exit_code" -ge 128 ]; then
@@ -941,7 +554,6 @@ exit_code_for_reason() {
   local reason="$1"
   case "$reason" in
     "$EXIT_REASON_SUCCESS") echo "$EXIT_CODE_SUCCESS" ;;
-    "$EXIT_REASON_WARN") echo "$EXIT_CODE_SUCCESS" ;;
     "$EXIT_REASON_TEST_FAIL") echo "$EXIT_CODE_TEST_FAIL" ;;
     "$EXIT_REASON_INFRA") echo "$EXIT_CODE_INFRA_FAIL" ;;
     "$EXIT_REASON_CRASH") echo "$EXIT_CODE_CRASH" ;;
@@ -1157,16 +769,10 @@ write_meta_json() {
   local failure_signature="${13}"
   local artifact_paths_json="${14}"
   local runner_host="${15}"
-  local original_exit_reason="${16}"
-  local original_exit_code="${17}"
-  local goal_id="${18}"
-  local goal_spec="${19}"
-  local required_bank="${20}"
 
   "$PYTHON_BIN" - "$meta_path" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$exit_code" \
-    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank" <<'PY'
+    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" <<'PY'
 import json,sys
 meta_path=sys.argv[1]
 job_id=sys.argv[2]
@@ -1183,11 +789,6 @@ repro_command=sys.argv[12]
 failure_signature=sys.argv[13]
 artifact_paths_json=sys.argv[14]
 runner_host=sys.argv[15]
-original_exit_reason=sys.argv[16]
-original_exit_code=sys.argv[17]
-goal_id=sys.argv[18]
-goal_spec=sys.argv[19]
-required_bank=sys.argv[20]
 
 try:
     seed_val=int(seed_raw)
@@ -1201,10 +802,6 @@ try:
     exit_code_val=int(exit_code)
 except Exception:
     exit_code_val=1
-try:
-    original_exit_code_val=int(original_exit_code)
-except Exception:
-    original_exit_code_val=None
 try:
     artifact_paths=json.loads(artifact_paths_json) if artifact_paths_json else {}
 except Exception:
@@ -1227,17 +824,6 @@ meta={
     "runner_host": runner_host,
     "runner_env": "wsl"
 }
-
-if original_exit_reason:
-    meta["original_exit_reason"] = original_exit_reason
-if original_exit_code_val is not None:
-    meta["original_exit_code"] = original_exit_code_val
-if goal_id:
-    meta["goal_id"] = goal_id
-if goal_spec:
-    meta["goal_spec"] = goal_spec
-if required_bank:
-    meta["required_bank"] = required_bank
 
 with open(meta_path,"w",encoding="utf-8") as handle:
     json.dump(meta, handle, indent=2, sort_keys=True)
@@ -1535,85 +1121,6 @@ print(" ".join([p for p in parts if p]))
 PY
 }
 
-update_pipeline_summary() {
-  local queue_dir="$1"
-  local build_id="$2"
-  local run_state="$3"
-  local exit_reason="$4"
-  local job_id="$5"
-
-  if [ -z "$queue_dir" ] || [ -z "$build_id" ] || [ -z "$run_state" ]; then
-    return 0
-  fi
-
-  local reports_dir="${queue_dir%/}/reports"
-  local latest_path="${reports_dir}/pipeline_smoke_summary_latest.md"
-  local build_path="${reports_dir}/pipeline_smoke_summary_${build_id}.md"
-
-  "$PYTHON_BIN" - "$build_id" "$run_state" "$exit_reason" "$job_id" "$latest_path" "$build_path" <<'PY'
-import os
-import sys
-
-build_id = sys.argv[1]
-run_state = sys.argv[2]
-exit_reason = sys.argv[3]
-job_id = sys.argv[4]
-paths = sys.argv[5:]
-
-def update_file(path: str) -> None:
-    if not path or not os.path.isfile(path):
-        return
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            lines = handle.read().splitlines()
-    except Exception:
-        return
-
-    def get_field(name: str) -> str:
-        prefix = f"* {name}:"
-        for line in lines:
-            if line.startswith(prefix):
-                return line.split(":", 1)[1].strip()
-        return ""
-
-    existing_build_id = get_field("build_id")
-    if existing_build_id and build_id and existing_build_id != build_id:
-        return
-
-    updated_lines = []
-    run_state_written = False
-    for line in lines:
-        if line.startswith("* run_state:"):
-            updated_lines.append(f"* run_state: {run_state}")
-            run_state_written = True
-        else:
-            updated_lines.append(line)
-
-    if not run_state_written:
-        insert_at = None
-        for idx, line in enumerate(updated_lines):
-            if line.strip() == "":
-                insert_at = idx
-                break
-        if insert_at is None:
-            updated_lines.append(f"* run_state: {run_state}")
-        else:
-            updated_lines.insert(insert_at, f"* run_state: {run_state}")
-
-    if updated_lines == lines:
-        return
-
-    try:
-        with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
-            handle.write("\r\n".join(updated_lines))
-    except Exception:
-        return
-
-for path in paths:
-    update_file(path)
-PY
-}
-
 requeue_stale_leases() {
   local queue_dir="$1"
   local ttl_sec="$2"
@@ -1707,14 +1214,9 @@ run_job() {
   local commit=""
   local build_id=""
   local scenario_id=""
-  local scenario_rel=""
-  local repo_root=""
   local seed=""
   local timeout_sec=""
   local artifact_uri=""
-  local goal_id=""
-  local goal_spec=""
-  local required_bank=""
   local param_overrides_json="{}"
   local feature_flags_json="{}"
 
@@ -1730,43 +1232,15 @@ run_job() {
     commit="$(json_get_string "$lease_path" "commit")"
     build_id="$(json_get_string "$lease_path" "build_id")"
     scenario_id="$(json_get_string "$lease_path" "scenario_id")"
-    scenario_rel="$(json_get_string "$lease_path" "scenario_rel")"
-    repo_root="$(json_get_string "$lease_path" "repo_root")"
     seed="$(json_get_string "$lease_path" "seed")"
     timeout_sec="$(json_get_string "$lease_path" "timeout_sec")"
     artifact_uri="$(json_get_string "$lease_path" "artifact_uri")"
-    goal_id="$(json_get_string "$lease_path" "goal_id")"
-    goal_spec="$(json_get_string "$lease_path" "goal_spec")"
-    required_bank="$(json_get_string "$lease_path" "required_bank")"
     param_overrides_json="$(json_get_object_sorted "$lease_path" "param_overrides")"
     feature_flags_json="$(json_get_object_sorted "$lease_path" "feature_flags")"
   fi
 
-  repo_root="$(resolve_repo_root "$repo_root")"
-  if [ -z "$scenario_rel" ] && [ -n "$scenario_id" ]; then
-    scenario_rel="$(map_scenario_id_to_rel "$scenario_id" "$repo_root")"
-  fi
-  if [ -n "$scenario_rel" ]; then
-    scenario_rel="$(normalize_rel_path "$scenario_rel")"
-  fi
-
-  if [ -z "$error_context" ] && [ -n "$scenario_id" ] && [ -z "$scenario_rel" ]; then
-    case "$SCENARIO_LOOKUP_STATUS" in
-      ambiguous)
-        if [ -n "$SCENARIO_LOOKUP_DETAIL" ]; then
-          echo "$SCENARIO_LOOKUP_DETAIL" > "${out_dir}/scenario_id_ambiguous_candidates.txt"
-          log "scenario_id_ambiguous_candidates=${SCENARIO_LOOKUP_DETAIL}"
-        fi
-        error_context="scenario_id_ambiguous:${scenario_id}"
-        ;;
-      notfound|missing_id|"")
-        error_context="scenario_id_not_found:${scenario_id}"
-        ;;
-    esac
-  fi
-
-  if [ -z "$error_context" ] && [ -z "$scenario_id" ] && [ -z "$scenario_rel" ]; then
-    error_context="scenario_missing"
+  if [ -z "$error_context" ] && [ -z "$scenario_id" ]; then
+    error_context="scenario_id_missing"
   fi
   if [ -z "$error_context" ] && [ -z "$seed" ]; then
     error_context="seed_missing"
@@ -1851,12 +1325,9 @@ run_job() {
     fi
   fi
 
-  if [ -z "$error_context" ] && [ -n "$scenario_id" ] && [ -z "$scenario_rel" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
+  if [ -z "$error_context" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
     if ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
-      local scenario_prefix="${scenario_id%%_*}"
-      if [ -z "$scenario_prefix" ] || ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_prefix"; then
-        error_context="scenario_not_supported:${scenario_id}"
-      fi
+      error_context="scenario_not_supported:${scenario_id}"
     fi
   fi
 
@@ -1889,24 +1360,9 @@ run_job() {
       perf_telemetry_env="${out_dir}/perf_telemetry.ndjson"
     fi
 
-    local scenario_arg_value=""
-    if [ -n "$scenario_rel" ]; then
-      scenario_arg_value="$(resolve_scenario_path "$scenario_rel" "$repo_root")"
-      if ! is_absolute_path "$scenario_arg_value" && [ -z "$repo_root" ]; then
-        error_context="repo_root_missing"
-      fi
-    elif [ -n "$scenario_id" ]; then
-      scenario_arg_value="$scenario_id"
-    fi
-
-    if [ -n "$error_context" ]; then
-      :
-    else
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
     if ! args_include_flag "--scenario" "${final_args[@]}"; then
-      if [ -n "$scenario_arg_value" ]; then
-        final_args+=("--scenario" "$scenario_arg_value")
-      fi
+      final_args+=("--scenario" "$scenario_id")
     fi
     if ! args_include_flag "--seed" "${final_args[@]}"; then
       final_args+=("--seed" "$seed")
@@ -1923,7 +1379,6 @@ run_job() {
     fi
 
     repro_command="$(build_repro_command "$entrypoint_path" "$param_overrides_json" "$feature_flags_json" "${final_args[@]}")"
-    fi
   fi
 
   local diag_ran=0
@@ -1990,35 +1445,6 @@ run_job() {
     runner_exit_code="$(exit_code_for_reason "$exit_reason")"
   fi
 
-  local original_exit_reason=""
-  local original_exit_code=""
-  local signature_exit_reason="$exit_reason"
-  local signature_exit_code="$runner_exit_code"
-if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
-  original_exit_reason="$exit_reason"
-  original_exit_code="$runner_exit_code"
-  exit_reason="$EXIT_REASON_WARN"
-  runner_exit_code="$EXIT_CODE_SUCCESS"
-  signature_exit_reason="$original_exit_reason"
-  signature_exit_code="$original_exit_code"
-elif [ "$exit_reason" = "$EXIT_REASON_HANG" ] && shutdown_exit_request_present "$out_dir"; then
-  original_exit_reason="$exit_reason"
-  original_exit_code="$runner_exit_code"
-  exit_reason="$EXIT_REASON_SUCCESS"
-  runner_exit_code="$EXIT_CODE_SUCCESS"
-  signature_exit_reason="$original_exit_reason"
-  signature_exit_code="$original_exit_code"
-elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
-  if required_questions_unknown_present "$out_dir"; then
-    original_exit_reason="$exit_reason"
-      original_exit_code="$runner_exit_code"
-      exit_reason="$EXIT_REASON_WARN"
-      runner_exit_code="$EXIT_CODE_SUCCESS"
-      signature_exit_reason="$original_exit_reason"
-      signature_exit_code="$original_exit_code"
-    fi
-  fi
-
   if [ "$diag_ran" -eq 0 ]; then
     local diag_reason="post_exit"
     if [ -n "$error_context" ]; then
@@ -2035,7 +1461,7 @@ elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq 
     error_line="$(extract_error_line)"
   fi
   local raw_signature
-  raw_signature="$(normalize_signature "${signature_exit_reason}|${scenario_id}|${error_line}|exit_code=${signature_exit_code}")"
+  raw_signature="$(normalize_signature "${exit_reason}|${scenario_id}|${error_line}|exit_code=${runner_exit_code}")"
   local failure_signature
   failure_signature="$(hash_signature "$raw_signature")"
 
@@ -2048,13 +1474,7 @@ elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq 
   fi
   printf '%s\n' "$repro_command" > "${out_dir}/repro.txt"
 
-  local watchdog_exit_reason="$exit_reason"
-  local watchdog_exit_code="$runner_exit_code"
-  if [ -n "$original_exit_reason" ]; then
-    watchdog_exit_reason="$original_exit_reason"
-    watchdog_exit_code="$original_exit_code"
-  fi
-  write_watchdog_json "$out_dir" "$job_id" "$watchdog_exit_reason" "$process_exit_code" "$watchdog_exit_code" "$raw_signature"
+  write_watchdog_json "$out_dir" "$job_id" "$exit_reason" "$process_exit_code" "$runner_exit_code" "$raw_signature"
 
   end_utc="$(iso_utc)"
   local end_epoch
@@ -2065,13 +1485,11 @@ elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq 
   artifact_paths_json="$(build_artifact_paths_json "$out_dir")"
   write_meta_json "${run_dir}/meta.json" "$job_id" "$build_id" "$commit" "$scenario_id" "$seed" \
     "$start_utc" "$end_utc" "$duration_sec" "$exit_reason" "$runner_exit_code" \
-    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host" \
-    "$original_exit_reason" "$original_exit_code" "$goal_id" "$goal_spec" "$required_bank"
+    "$repro_command" "$failure_signature" "$artifact_paths_json" "$runner_host"
 
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
-  update_pipeline_summary "$queue_dir" "$build_id" "$run_state" "$exit_reason" "$job_id"
   local triage_path=""
   if [ "$emit_triage_on_fail" -eq 1 ] && [ "$exit_reason" != "$EXIT_REASON_SUCCESS" ]; then
     local result_zip="${queue_dir}/results/result_${job_id}.zip"
@@ -2124,25 +1542,9 @@ daemon_loop() {
   local emit_triage_on_fail="$6"
   local reports_dir="$7"
   local telemetry_max_bytes="$8"
-  local status_interval="$9"
-  local last_status_epoch=0
-  local now_epoch=0
   while true; do
     if ! run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"; then
-      if [ "${status_interval:-0}" -gt 0 ]; then
-        now_epoch="$(date +%s)"
-        if [ $((now_epoch - last_status_epoch)) -ge "$status_interval" ]; then
-          log "status idle queue=${queue_dir}"
-          last_status_epoch="$now_epoch"
-        fi
-      fi
       sleep 2
-    elif [ "${status_interval:-0}" -gt 0 ]; then
-      now_epoch="$(date +%s)"
-      if [ $((now_epoch - last_status_epoch)) -ge "$status_interval" ]; then
-        log "status job_complete queue=${queue_dir}"
-        last_status_epoch="$now_epoch"
-      fi
     fi
   done
 }
@@ -2246,7 +1648,6 @@ main() {
   local run_self_test=0
   local requeue_mode=0
   local ttl_sec=600
-  local status_interval=0
   local emit_triage_on_fail=1
   local reports_dir="$DEFAULT_REPORTS_DIR"
   local telemetry_max_bytes="$DEFAULT_TELEMETRY_MAX_BYTES"
@@ -2291,10 +1692,6 @@ main() {
         ;;
       --telemetry-max-bytes)
         telemetry_max_bytes="$2"
-        shift 2
-        ;;
-      --status-interval)
-        status_interval="$2"
         shift 2
         ;;
       --requeue-stale-leases)
@@ -2370,7 +1767,7 @@ main() {
   mkdir -p "$workdir"
 
   if [ "$mode" = "daemon" ]; then
-    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" "$status_interval"
+    daemon_loop "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes"
   else
     run_once "$queue_dir" "$workdir" "$heartbeat_interval" "$diag_timeout" "$print_summary" "$emit_triage_on_fail" "$reports_dir" "$telemetry_max_bytes" || true
   fi
