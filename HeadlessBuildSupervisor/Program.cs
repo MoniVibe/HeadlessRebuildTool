@@ -2305,17 +2305,33 @@ internal static class Program
         Array.Sort(files, StringComparer.OrdinalIgnoreCase);
 
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create, Encoding.UTF8);
+        var addedCount = 0;
+        var skippedCount = 0;
         foreach (var file in files)
         {
             var relative = Path.GetRelativePath(sourceDir, file).Replace('\\', '/');
-            var entry = archive.CreateEntry(relative, CompressionLevel.Optimal);
-            entry.LastWriteTime = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
-            using var entryStream = entry.Open();
-            using var fileStream = File.OpenRead(file);
-            fileStream.CopyTo(entryStream);
+            try
+            {
+                using var fileStream = new FileStream(
+                    file,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+
+                var entry = archive.CreateEntry(relative, CompressionLevel.Optimal);
+                entry.LastWriteTime = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
+                using var entryStream = entry.Open();
+                fileStream.CopyTo(entryStream);
+                addedCount++;
+            }
+            catch (IOException ex)
+            {
+                skippedCount++;
+                logger.Warn($"zip_skip_locked path={relative} err={ex.GetType().Name}");
+            }
         }
 
-        logger.Info($"zip_created files={files.Length}");
+        logger.Info($"zip_created files={addedCount} skipped={skippedCount}");
     }
 
     private static void CopyBuildLogs(string buildDir, string logsDir, Logger logger)
