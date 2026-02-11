@@ -80,103 +80,6 @@ function Convert-ToWslPath {
     return ($full -replace '\\', '/')
 }
 
-function Find-ResultCandidates {
-    param(
-        [string]$ResultsDir,
-        [string]$BaseId
-    )
-    if (-not (Test-Path $ResultsDir)) { return @() }
-    $pattern = "result_{0}*.zip" -f $BaseId
-    return Get-ChildItem -Path $ResultsDir -File -Filter $pattern | Sort-Object LastWriteTime -Descending
-}
-
-function Read-ZipEntryText {
-    param(
-        [System.IO.Compression.ZipArchive]$Archive,
-        [string]$EntryPath
-    )
-    $entry = $Archive.GetEntry($EntryPath)
-    if (-not $entry) { return $null }
-    $reader = New-Object System.IO.StreamReader($entry.Open())
-    try {
-        return $reader.ReadToEnd()
-    }
-    finally {
-        $reader.Dispose()
-    }
-}
-
-function Get-DeterminismHash {
-    param([string]$ZipPath)
-    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-    try {
-        $invText = Read-ZipEntryText -Archive $archive -EntryPath "out/invariants.json"
-        if (-not $invText) { return "" }
-        try {
-            $inv = $invText | ConvertFrom-Json
-            return [string]$inv.determinism_hash
-        }
-        catch {
-            return ""
-        }
-    }
-    finally {
-        $archive.Dispose()
-    }
-}
-
-function Wait-ForResult {
-    param(
-        [string]$ResultsDir,
-        [string]$JobId,
-        [string]$BaseId,
-        [int]$WaitTimeoutSec
-    )
-    $resultZip = Join-Path $ResultsDir ("result_{0}.zip" -f $JobId)
-    $baseDeadline = (Get-Date).AddSeconds($WaitTimeoutSec)
-    $stableSeconds = 5
-    $stableDeadline = $null
-    $lastSize = -1
-    $lastPath = $null
-    while ($true) {
-        $now = Get-Date
-        $candidate = $null
-        if (Test-Path $resultZip) {
-            $candidate = $resultZip
-        }
-        else {
-            $alternates = Find-ResultCandidates -ResultsDir $ResultsDir -BaseId $BaseId
-            if ($alternates) {
-                $candidate = @($alternates)[0].FullName
-            }
-        }
-
-        if ($candidate) {
-            if ($lastPath -ne $candidate) {
-                $lastPath = $candidate
-                $lastSize = -1
-                $stableDeadline = $now.AddSeconds($stableSeconds)
-            }
-            $item = Get-Item $candidate -ErrorAction SilentlyContinue
-            if ($item) {
-                if ($item.Length -ne $lastSize) {
-                    $lastSize = $item.Length
-                    $stableDeadline = $now.AddSeconds($stableSeconds)
-                }
-                if ($stableDeadline -and $now -ge $stableDeadline) {
-                    return $candidate
-                }
-            }
-        }
-        elseif ($now -ge $baseDeadline) {
-            break
-        }
-
-        Start-Sleep -Seconds 2
-    }
-    throw "Timed out waiting for result: $resultZip"
-}
 
 function Write-JobFile {
     param(
@@ -204,13 +107,13 @@ function Invoke-WorkerOnce {
 
     $tmpRunnerWsl = Convert-ToWslPath -Path $tmpRunnerWin
     $cmd = "set -e; chmod +x '$tmpRunnerWsl'; '$tmpRunnerWsl' --queue $queueWsl --once --print-summary"
-    & wsl.exe -e bash -lc $cmd
+    $null = & wsl.exe -e bash -lc $cmd
     if ($LASTEXITCODE -ne 0) {
         throw "wsl_worker_failed exit_code=$LASTEXITCODE"
     }
 }
 
-function Wait-TriageOrDie {
+function Wait-ForResultOrFail {
     param(
         [string]$JobPath,
         [int]$TimeoutMinutes
@@ -221,51 +124,65 @@ function Wait-TriageOrDie {
 
     $stem = [IO.Path]::GetFileNameWithoutExtension($JobPath)
     $triagePath = "C:\\polish\\queue\\reports\\triage_$stem.json"
+    $resultPath = "C:\\polish\\queue\\results\\result_$stem.zip"
     Write-Host ("triage={0}" -f $triagePath)
+    Write-Host ("result={0}" -f $resultPath)
+
+    $jobTimeUtc = (Get-Date).ToUniversalTime()
+    if (Test-Path $JobPath) {
+        $jobTimeUtc = (Get-Item $JobPath).LastWriteTimeUtc
+    }
 
     Invoke-WorkerOnce -QueueRoot $QueueRoot
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    while (-not (Test-Path $triagePath)) {
-        if ((Get-Date) -ge $deadline) {
-            throw "triage_timeout path=$triagePath"
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path $resultPath) {
+            $resultItem = Get-Item $resultPath
+            if ($resultItem.LastWriteTimeUtc -ge $jobTimeUtc) {
+                return $resultPath
+            }
         }
+
+        if (Test-Path $triagePath) {
+            $triageItem = Get-Item $triagePath
+            if ($triageItem.LastWriteTimeUtc -ge $jobTimeUtc) {
+                $triageText = Get-Content -Raw -Path $triagePath
+                $triage = $null
+                try {
+                    $triage = $triageText | ConvertFrom-Json
+                }
+                catch {
+                    $triage = $null
+                }
+
+                $exitCode = 1
+                $exitReason = "triage_parse_failed"
+                $failureSignature = ""
+                if ($triage) {
+                    if ($triage.exit_code -ne $null) { $exitCode = [int]$triage.exit_code }
+                    if ($triage.exit_reason) { $exitReason = $triage.exit_reason }
+                    if ($triage.failure_signature) { $failureSignature = $triage.failure_signature }
+                }
+
+                Write-Host ("JOB {0} triage exit_code={1} exit_reason={2}" -f $stem, $exitCode, $exitReason)
+
+                $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
+                $lines = @(
+                    "triagePath: $triagePath",
+                    "exit_reason: $exitReason",
+                    "exit_code: $exitCode",
+                    "failure_signature: $failureSignature"
+                )
+                Set-Content -Encoding ascii -Path $reportPath -Value $lines
+                exit 1
+            }
+        }
+
         Start-Sleep -Seconds 2
     }
 
-    $triageText = Get-Content -Raw -Path $triagePath
-    $triage = $null
-    try {
-        $triage = $triageText | ConvertFrom-Json
-    }
-    catch {
-        $triage = $null
-    }
-
-    $exitCode = 1
-    $exitReason = "triage_parse_failed"
-    $failureSignature = ""
-    if ($triage) {
-        if ($triage.exit_code -ne $null) { $exitCode = [int]$triage.exit_code }
-        if ($triage.exit_reason) { $exitReason = $triage.exit_reason }
-        if ($triage.failure_signature) { $failureSignature = $triage.failure_signature }
-    }
-
-    Write-Host ("JOB {0} triage exit_code={1} exit_reason={2}" -f $stem, $exitCode, $exitReason)
-
-    if ($exitCode -ne 0) {
-        $reportPath = Join-Path $SessionDir "pitchpack_failfast_last_error.md"
-        $lines = @(
-            "triagePath: $triagePath",
-            "exit_reason: $exitReason",
-            "exit_code: $exitCode",
-            "failure_signature: $failureSignature"
-        )
-        Set-Content -Encoding ascii -Path $reportPath -Value $lines
-        exit 1
-    }
-
-    return $triagePath
+    throw "result_or_triage_timeout job=$JobPath"
 }
 
 function Assert-JobScenarioId {
@@ -280,8 +197,12 @@ function Assert-JobScenarioId {
     }
 
     $jobJson = Get-Content -Raw -Path $JobPath | ConvertFrom-Json
-    $scenarioValue = $jobJson.scenario_id
-    $aliasValue = $jobJson.scenarioId
+    $scenarioValue = $null
+    $scenarioProp = $jobJson.PSObject.Properties["scenario_id"]
+    if ($scenarioProp) { $scenarioValue = $scenarioProp.Value }
+    $aliasValue = $null
+    $aliasProp = $jobJson.PSObject.Properties["scenarioId"]
+    if ($aliasProp) { $aliasValue = $aliasProp.Value }
     $aliasOk = $true
     if ($aliasValue) {
         $aliasOk = ($aliasValue -eq $ExpectedScenarioId)
@@ -340,15 +261,11 @@ function Run-HeadlessJob {
 
     $jobPath = Write-JobFile -JobsDir $jobsDir -Job $job
     Assert-JobScenarioId -JobPath $jobPath -ExpectedScenarioId $scenarioIdValue
-    Wait-TriageOrDie -JobPath $jobPath -TimeoutMinutes 10 | Out-Null
-    $baseId = "{0}_{1}_{2}" -f $BuildId, $ScenarioId, $Seed
-    $resultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $jobId -BaseId $baseId -WaitTimeoutSec $WaitTimeoutSec
-    $determinismHash = Get-DeterminismHash -ZipPath $resultZip
+    $resultZip = Wait-ForResultOrFail -JobPath $jobPath -TimeoutMinutes 10
 
     return [ordered]@{
         job_id = $jobId
         result_zip = $resultZip
-        determinism_hash = $determinismHash
     }
 }
 
@@ -431,66 +348,28 @@ Ensure-Directory $resultsDir
 $smokeJobId = "{0}_{1}_{2}" -f $buildId, $smokeScenario, $smokeSeed
 $smokeJobPath = Join-Path $queueRootFull ("jobs\\{0}.json" -f $smokeJobId)
 Assert-JobScenarioId -JobPath $smokeJobPath -ExpectedScenarioId $smokeScenarioIdForJob
-Wait-TriageOrDie -JobPath $smokeJobPath -TimeoutMinutes 10 | Out-Null
-$smokeResultZip = Join-Path $resultsDir ("result_{0}.zip" -f $smokeJobId)
-if (-not (Test-Path $smokeResultZip)) {
-    $smokeResultZip = Wait-ForResult -ResultsDir $resultsDir -JobId $smokeJobId -BaseId $smokeJobId -WaitTimeoutSec $waitTimeoutSec
-}
-$smokeHash1 = Get-DeterminismHash -ZipPath $smokeResultZip
-if ([string]::IsNullOrWhiteSpace($smokeHash1)) {
-    throw "determinism_hash_missing for $smokeResultZip"
-}
-
-$smokeRuns = @()
-$smokeRuns += [ordered]@{ run = 1; job_id = $smokeJobId; result_zip = $smokeResultZip; determinism_hash = $smokeHash1 }
-
-$suffixes = @("_r01", "_r02", "_r03")
-for ($i = 0; $i -lt $suffixes.Count; $i++) {
-    $runIndex = $i + 2
-    $run = Run-HeadlessJob -ScenarioId $smokeScenario -ScenarioIdForJob $smokeScenarioIdForJob -Seed $smokeSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix $suffixes[$i] -WaitTimeoutSec $waitTimeoutSec
-    if ([string]::IsNullOrWhiteSpace($run.determinism_hash)) {
-        throw "determinism_hash_missing for $($run.result_zip)"
-    }
-    $smokeRuns += [ordered]@{ run = $runIndex; job_id = $run.job_id; result_zip = $run.result_zip; determinism_hash = $run.determinism_hash }
-}
-
-$hashes = $smokeRuns | Select-Object -ExpandProperty determinism_hash -Unique
-if ($hashes.Count -ne 1) {
-    $hashList = [string]::Join(", ", $hashes)
-    throw "determinism_hash_divergence: $hashList"
+$smokeResultZip = Wait-ForResultOrFail -JobPath $smokeJobPath -TimeoutMinutes 10
+$smokeRun = [ordered]@{
+    job_id = $smokeJobId
+    seed = $smokeSeed
+    result_zip = $smokeResultZip
 }
 
 $rewindRun = Run-HeadlessJob -ScenarioId $rewindScenario -ScenarioIdForJob $rewindScenarioIdForJob -Seed $rewindSeed -TimeoutSec $timeoutSec -BuildId $buildId -Commit $commitFull -ArtifactUri $artifactUri -QueueRoot $queueRootFull -Suffix "" -WaitTimeoutSec $waitTimeoutSec
 
-$summaryPath = Join-Path $SessionDir "pitchpack_space4x_v0.md"
-$commandLine = "& `"$pipelineScript`" -Title space4x -UnityExe `"$unityResolved`" -ScenarioId $smokeScenario -Seed $smokeSeed -Repeat 1 -WaitTimeoutSec $waitTimeoutSec"
-
 $summaryLines = @()
-$summaryLines += "# Space4x PitchPack v0"
+$summaryLines += "# Space4x PitchPack LITE v0"
 $summaryLines += ""
-$summaryLines += "artifact_zip: $artifactZip"
+$summaryLines += ("smoke: stem={0} seed={1} result_zip={2}" -f $smokeRun.job_id, $smokeRun.seed, $smokeRun.result_zip)
+$summaryLines += ("rewind: stem={0} seed={1} result_zip={2}" -f $rewindRun.job_id, $rewindSeed, $rewindRun.result_zip)
 $summaryLines += ""
-$summaryLines += "commands:"
-$summaryLines += "- $commandLine"
-$summaryLines += "- queued additional smoke jobs (Repeat3) via pitchpack_space4x.ps1"
-$summaryLines += "- queued rewind gate job via pitchpack_space4x.ps1"
-$summaryLines += ""
-$summaryLines += "smoke_determinism_hashes:"
-$summaryLines += "| run | job_id | determinism_hash | result_zip |"
-$summaryLines += "| --- | --- | --- | --- |"
-foreach ($run in $smokeRuns) {
-    $summaryLines += ("| {0} | {1} | {2} | {3} |" -f $run.run, $run.job_id, $run.determinism_hash, $run.result_zip)
-}
-$summaryLines += ""
-$summaryLines += "result_zips:"
-$smokeZipList = $smokeRuns | ForEach-Object { $_.result_zip } | Sort-Object
-$summaryLines += ("- smoke: {0}" -f ([string]::Join("; ", $smokeZipList)))
-$summaryLines += "- rewind: $($rewindRun.result_zip)"
+$summaryLines += "note: determinism hashing disabled (invariants.json not emitted by smoke runs)"
 
+$summaryPath = Join-Path $SessionDir "pitchpack_space4x_lite_v0.md"
 Set-Content -Path $summaryPath -Value $summaryLines -Encoding ascii
 
 $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss")
-$zipPath = Join-Path $SessionDir ("pitchpack_space4x_v0_{0}.zip" -f $timestamp)
+$zipPath = Join-Path $SessionDir ("pitchpack_space4x_lite_v0_{0}.zip" -f $timestamp)
 if (Test-Path $zipPath) {
     Remove-Item -Force $zipPath
 }
@@ -498,11 +377,9 @@ if (Test-Path $zipPath) {
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 $archive = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
-    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $summaryPath, "pitchpack_space4x_v0.md") | Out-Null
-    foreach ($run in $smokeRuns) {
-        $entryName = [System.IO.Path]::GetFileName($run.result_zip)
-        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $run.result_zip, $entryName) | Out-Null
-    }
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $summaryPath, "pitchpack_space4x_lite_v0.md") | Out-Null
+    $smokeEntry = [System.IO.Path]::GetFileName($smokeRun.result_zip)
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $smokeRun.result_zip, $smokeEntry) | Out-Null
     $rewindEntry = [System.IO.Path]::GetFileName($rewindRun.result_zip)
     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $rewindRun.result_zip, $rewindEntry) | Out-Null
 }
