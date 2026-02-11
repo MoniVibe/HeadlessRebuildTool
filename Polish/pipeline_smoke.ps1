@@ -31,7 +31,37 @@ function Sync-PureDots {
     if (-not (Test-Path (Join-Path $source ".git"))) { return }
     if ($env:PUREDOTS_SYNC -eq "0") { return }
 
-    $ref = $env:PUREDOTS_REF
+function Get-ResultWaitTimeoutSeconds {
+    param([int]$DefaultSeconds)
+    $envValue = $env:TRI_RESULT_TIMEOUT_SECONDS
+    $parsed = 0
+    if ([int]::TryParse($envValue, [ref]$parsed) -and $parsed -gt 0) {
+        return $parsed
+    }
+    return $DefaultSeconds
+}
+
+function Find-ResultCandidates {
+    param(
+        [string]$ResultsDir,
+        [string]$BaseId
+    )
+    if (-not (Test-Path $ResultsDir)) { return @() }
+    $pattern = "result_{0}*.zip" -f $BaseId
+    return Get-ChildItem -Path $ResultsDir -File -Filter $pattern | Sort-Object LastWriteTime -Descending
+}
+
+function Read-ZipEntryText {
+    param(
+        [System.IO.Compression.ZipArchive]$Archive,
+        [string]$EntryPath
+    )
+    $entry = $Archive.GetEntry($EntryPath)
+    if (-not $entry) {
+        $entry = $Archive.Entries | Where-Object { $_.FullName -ieq $EntryPath } | Select-Object -First 1
+    }
+    if (-not $entry) { return $null }
+    $reader = New-Object System.IO.StreamReader($entry.Open())
     try {
         & git -c "safe.directory=$source" -C $source fetch --all --tags | Out-Null
         & git -c "safe.directory=$source" -C $source reset --hard | Out-Null
@@ -403,7 +433,7 @@ $commitFull = & git -c "safe.directory=$projectPath" -C $projectPath rev-parse H
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
 }
-$commitShort = & git -c "safe.directory=$projectPath" -C $projectPath rev-parse --short=8 HEAD 2>&1
+$commitShort = & git -C $projectPath rev-parse --short=8 HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
