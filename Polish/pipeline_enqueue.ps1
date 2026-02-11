@@ -28,9 +28,37 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Normalize-ProjectPathInput {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $trim = $Path.Trim()
+    # If a WSL path is provided, convert to Windows path for Unity.
+    $wslMatch = [regex]::Match($trim, '^/mnt/([a-z])/(.*)$')
+    if ($wslMatch.Success) {
+        $drive = $wslMatch.Groups[1].Value.ToUpperInvariant()
+        $rest = $wslMatch.Groups[2].Value -replace '/', '\'
+        return ("{0}:\{1}" -f $drive, $rest)
+    }
+    # If path contains an embedded absolute drive segment, keep the last one.
+    $driveMatches = [regex]::Matches($trim, '[A-Za-z]:[\\/]')
+    if ($driveMatches.Count -gt 0) {
+        $trim = $trim.Substring($driveMatches[$driveMatches.Count - 1].Index)
+    }
+    return $trim
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
-    $full = [System.IO.Path]::GetFullPath($Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $raw = $Path.Trim()
+    if ($raw -match '^/mnt/[a-z]/') {
+        return ($raw -replace '\\', '/')
+    }
+    $driveMatches = [regex]::Matches($raw, '[A-Za-z]:[\\/]')
+    if ($driveMatches.Count -gt 0) {
+        $raw = $raw.Substring($driveMatches[$driveMatches.Count - 1].Index)
+    }
+    $full = [System.IO.Path]::GetFullPath($raw)
     $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
     if ($match.Success) {
         $drive = $match.Groups[1].Value.ToLowerInvariant()
@@ -311,6 +339,7 @@ $projectPath = if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -n
 if (-not [System.IO.Path]::IsPathRooted($projectPath)) {
     $projectPath = Join-Path $triRoot $projectPath
 }
+$projectPath = Normalize-ProjectPathInput $projectPath
 $projectPath = [System.IO.Path]::GetFullPath($projectPath)
 
 if (-not (Test-Path $projectPath) -and -not ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride))) {

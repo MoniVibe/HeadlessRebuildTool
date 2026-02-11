@@ -827,6 +827,66 @@ PY
   tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
 }
 
+shutdown_exit_request_present() {
+  local out_dir="$1"
+  local inv_path="${out_dir}/invariants.json"
+  local progress_path="${out_dir}/progress.json"
+  if [ -z "$PYTHON_BIN" ]; then
+    return 1
+  fi
+  if [ ! -f "$inv_path" ] && [ ! -f "$progress_path" ]; then
+    return 1
+  fi
+  "$PYTHON_BIN" - "$inv_path" "$progress_path" <<'PY'
+import json,sys,os
+inv_path=sys.argv[1]
+progress_path=sys.argv[2]
+
+def load(path):
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path,"r",encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+def has_exit_request(data):
+    if not isinstance(data, dict):
+        return False
+    progress=data.get("progress")
+    if isinstance(progress, dict):
+        last_phase=str(progress.get("last_phase","")).lower()
+        last_checkpoint=str(progress.get("last_checkpoint","")).lower()
+        if last_checkpoint == "exit_request":
+            return True
+        if last_phase == "shutdown" and last_checkpoint in ("exit_request","exit","quit"):
+            return True
+    last_checkpoint=str(data.get("last_checkpoint","")).lower()
+    if last_checkpoint == "exit_request":
+        return True
+    return False
+
+inv=load(inv_path)
+if has_exit_request(inv):
+    raise SystemExit(0)
+
+prog=load(progress_path)
+if has_exit_request(prog):
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  local status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+
+  local pattern='HeadlessExitSystem\] Quit requested'
+  tail -n 200 "${out_dir}/player.log" "${out_dir}/stdout.log" "${out_dir}/stderr.log" 2>/dev/null | grep -qiE "$pattern"
+  return $?
+}
+
 exit_by_signal() {
   local process_exit_code="$1"
   if [ "$process_exit_code" -ge 128 ]; then
@@ -1475,6 +1535,85 @@ print(" ".join([p for p in parts if p]))
 PY
 }
 
+update_pipeline_summary() {
+  local queue_dir="$1"
+  local build_id="$2"
+  local run_state="$3"
+  local exit_reason="$4"
+  local job_id="$5"
+
+  if [ -z "$queue_dir" ] || [ -z "$build_id" ] || [ -z "$run_state" ]; then
+    return 0
+  fi
+
+  local reports_dir="${queue_dir%/}/reports"
+  local latest_path="${reports_dir}/pipeline_smoke_summary_latest.md"
+  local build_path="${reports_dir}/pipeline_smoke_summary_${build_id}.md"
+
+  "$PYTHON_BIN" - "$build_id" "$run_state" "$exit_reason" "$job_id" "$latest_path" "$build_path" <<'PY'
+import os
+import sys
+
+build_id = sys.argv[1]
+run_state = sys.argv[2]
+exit_reason = sys.argv[3]
+job_id = sys.argv[4]
+paths = sys.argv[5:]
+
+def update_file(path: str) -> None:
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except Exception:
+        return
+
+    def get_field(name: str) -> str:
+        prefix = f"* {name}:"
+        for line in lines:
+            if line.startswith(prefix):
+                return line.split(":", 1)[1].strip()
+        return ""
+
+    existing_build_id = get_field("build_id")
+    if existing_build_id and build_id and existing_build_id != build_id:
+        return
+
+    updated_lines = []
+    run_state_written = False
+    for line in lines:
+        if line.startswith("* run_state:"):
+            updated_lines.append(f"* run_state: {run_state}")
+            run_state_written = True
+        else:
+            updated_lines.append(line)
+
+    if not run_state_written:
+        insert_at = None
+        for idx, line in enumerate(updated_lines):
+            if line.strip() == "":
+                insert_at = idx
+                break
+        if insert_at is None:
+            updated_lines.append(f"* run_state: {run_state}")
+        else:
+            updated_lines.insert(insert_at, f"* run_state: {run_state}")
+
+    if updated_lines == lines:
+        return
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
+            handle.write("\r\n".join(updated_lines))
+    except Exception:
+        return
+
+for path in paths:
+    update_file(path)
+PY
+}
+
 requeue_stale_leases() {
   local queue_dir="$1"
   local ttl_sec="$2"
@@ -1855,9 +1994,23 @@ run_job() {
   local original_exit_code=""
   local signature_exit_reason="$exit_reason"
   local signature_exit_code="$runner_exit_code"
-  if [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
-    if required_questions_unknown_present "$out_dir"; then
-      original_exit_reason="$exit_reason"
+if [ "$exit_reason" = "$EXIT_REASON_CRASH" ] && shutdown_exit_request_present "$out_dir"; then
+  original_exit_reason="$exit_reason"
+  original_exit_code="$runner_exit_code"
+  exit_reason="$EXIT_REASON_WARN"
+  runner_exit_code="$EXIT_CODE_SUCCESS"
+  signature_exit_reason="$original_exit_reason"
+  signature_exit_code="$original_exit_code"
+elif [ "$exit_reason" = "$EXIT_REASON_HANG" ] && shutdown_exit_request_present "$out_dir"; then
+  original_exit_reason="$exit_reason"
+  original_exit_code="$runner_exit_code"
+  exit_reason="$EXIT_REASON_SUCCESS"
+  runner_exit_code="$EXIT_CODE_SUCCESS"
+  signature_exit_reason="$original_exit_reason"
+  signature_exit_code="$original_exit_code"
+elif [ "$exit_reason" = "$EXIT_REASON_TEST_FAIL" ] && [ "$runner_exit_code" -eq "$EXIT_CODE_TEST_FAIL" ]; then
+  if required_questions_unknown_present "$out_dir"; then
+    original_exit_reason="$exit_reason"
       original_exit_code="$runner_exit_code"
       exit_reason="$EXIT_REASON_WARN"
       runner_exit_code="$EXIT_CODE_SUCCESS"
@@ -1918,6 +2071,7 @@ run_job() {
   run_ml_analyzer "${run_dir}/meta.json" "$out_dir"
 
   publish_result_zip "$run_dir" "$queue_dir" "$job_id"
+  update_pipeline_summary "$queue_dir" "$build_id" "$run_state" "$exit_reason" "$job_id"
   local triage_path=""
   if [ "$emit_triage_on_fail" -eq 1 ] && [ "$exit_reason" != "$EXIT_REASON_SUCCESS" ]; then
     local result_zip="${queue_dir}/results/result_${job_id}.zip"

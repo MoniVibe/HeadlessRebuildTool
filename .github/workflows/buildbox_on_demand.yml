@@ -181,12 +181,15 @@ jobs:
           & git @gitRepoArgs -C $repoPath show-ref --verify --quiet "refs/remotes/origin/$ref"
           if ($LASTEXITCODE -eq 0) { $refToCheckout = "origin/$ref" }
 
+          if (Test-Path $wt) {
+            if (-not (Test-Path (Join-Path $wt '.git'))) {
+              Remove-Item -Recurse -Force $wt
+            }
+          }
+
           if (-not (Test-Path $wt)) {
             Invoke-Git -GitArgs ($gitRepoArgs + @('-C', $repoPath, 'worktree', 'add', $wt, $refToCheckout)) -Context "worktree add $refToCheckout"
           } else {
-            if (-not (Test-Path (Join-Path $wt '.git'))) {
-              throw "Worktree path exists but is not a git worktree: $wt"
-            }
             $headlessManifest = Join-Path $wt "Packages\\manifest.headless.json"
             $headlessLock = Join-Path $wt "Packages\\packages-lock.headless.json"
             if (Test-Path $headlessManifest) {
@@ -204,6 +207,15 @@ jobs:
           # Ensure local PureDOTS package path resolves under worktrees/<title>
           $puredotsTarget = Join-Path $tri "puredots"
           $puredotsLink = Join-Path $wtRoot "puredots"
+          if (-not (Test-Path $puredotsTarget)) {
+            Write-Warning "PureDOTS repo missing at $puredotsTarget. Cloning."
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+          }
+          if (-not (Test-Path (Join-Path $puredotsTarget ".git"))) {
+            Write-Warning "PureDOTS repo at $puredotsTarget has no .git. Recloning."
+            Remove-Item -Recurse -Force $puredotsTarget
+            & git clone "https://github.com/MoniVibe/PureDOTS.git" $puredotsTarget
+          }
           if (Test-Path $puredotsTarget) {
             if (-not (Test-Path $puredotsLink)) {
               New-Item -ItemType Junction -Path $puredotsLink -Target $puredotsTarget | Out-Null
@@ -211,15 +223,54 @@ jobs:
           }
           if (Test-Path (Join-Path $puredotsTarget ".git")) {
             $puredotsRef = '${{ inputs.puredots_ref }}'
-            & git -C $puredotsTarget fetch --all --prune
+            Write-Host ("puredots_ref_input={0}" -f $puredotsRef)
+            $originExists = & git -C $puredotsTarget remote | Select-String -Pattern '^origin$'
+            if ($null -eq $originExists) {
+              Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'add', 'origin', 'https://github.com/MoniVibe/PureDOTS.git') -Context "puredots remote add"
+            } else {
+              Invoke-Git -GitArgs @('-C', $puredotsTarget, 'remote', 'set-url', 'origin', 'https://github.com/MoniVibe/PureDOTS.git') -Context "puredots remote set-url"
+            }
+            $puredotsIndexLock = Join-Path $puredotsTarget ".git\\index.lock"
+            if (Test-Path $puredotsIndexLock) {
+              Remove-Item $puredotsIndexLock -Force
+            }
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', '--all', '--prune') -Context "puredots fetch"
             $puredotsCheckout = "origin/main"
+            & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/main"
+            if ($LASTEXITCODE -ne 0) { $puredotsCheckout = "origin/HEAD" }
+            $puredotsDefault = $puredotsCheckout
             if (-not [string]::IsNullOrWhiteSpace($puredotsRef)) {
               $puredotsCheckout = $puredotsRef
-              & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
-              if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" }
+              if ($puredotsRef -match '^[0-9a-fA-F]{7,40}$') {
+                Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', $puredotsRef) -Context "puredots fetch sha $puredotsRef"
+                $puredotsCheckout = $puredotsRef
+              } else {
+                & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+                if ($LASTEXITCODE -ne 0) {
+                  Invoke-Git -GitArgs @('-C', $puredotsTarget, 'fetch', 'origin', "$puredotsRef:refs/remotes/origin/$puredotsRef") -Context "puredots fetch ref $puredotsRef"
+                  & git -C $puredotsTarget show-ref --verify --quiet "refs/remotes/origin/$puredotsRef"
+                }
+                if ($LASTEXITCODE -eq 0) { $puredotsCheckout = "origin/$puredotsRef" } else { $puredotsCheckout = $puredotsDefault }
+              }
             }
-            & git -C $puredotsTarget reset --hard $puredotsCheckout
-            & git -C $puredotsTarget clean -fd
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'reset', '--hard', $puredotsCheckout) -Context "puredots reset $puredotsCheckout"
+            Invoke-Git -GitArgs @('-C', $puredotsTarget, 'clean', '-fd') -Context "puredots clean"
+            try {
+              $refLine = & git -C $puredotsTarget show-ref --heads --remotes | Select-String -Pattern "origin/$puredotsRef"
+              Write-Host ("puredots_ref_present={0}" -f ($null -ne $refLine))
+            } catch {
+              Write-Warning "Failed to check PureDOTS ref presence."
+            }
+            try {
+              $puredotsHead = (& git -C $puredotsTarget rev-parse HEAD)
+              Write-Host ("puredots_head={0}" -f $puredotsHead)
+            } catch {
+              Write-Warning "Failed to read PureDOTS HEAD."
+            }
+            $compatPath = Join-Path $puredotsTarget "Packages\\com.moni.puredots\\Runtime\\Runtime\\Individual\\AnatomyCompat.cs"
+            $legacyPath = Join-Path $puredotsTarget "Packages\\com.moni.puredots\\Runtime\\Individual\\AnatomyComponents.cs"
+            Write-Host ("puredots_compat_present={0}" -f (Test-Path $compatPath))
+            Write-Host ("puredots_legacy_present={0}" -f (Test-Path $legacyPath))
           }
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
           $puredotsDupes = @(

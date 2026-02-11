@@ -1245,14 +1245,39 @@ internal static class Program
         }
     }
 
-    private static string NormalizeProjectPath(string path)
+    private static string NormalizeProjectPathInput(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return string.Empty;
         }
 
-        var full = Path.GetFullPath(path);
+        var trimmed = path.Trim();
+        var wslMatch = Regex.Match(trimmed, "^/mnt/([a-zA-Z])/(.*)$");
+        if (wslMatch.Success)
+        {
+            var drive = wslMatch.Groups[1].Value.ToUpperInvariant();
+            var rest = wslMatch.Groups[2].Value.Replace('/', '\\');
+            trimmed = $"{drive}:\\{rest}";
+        }
+
+        var driveMatches = Regex.Matches(trimmed, "[A-Za-z]:[\\\\/]");
+        if (driveMatches.Count > 0)
+        {
+            trimmed = trimmed.Substring(driveMatches[^1].Index);
+        }
+
+        return Path.GetFullPath(trimmed);
+    }
+
+    private static string NormalizeProjectPath(string path)
+    {
+        var full = NormalizeProjectPathInput(path);
+        if (string.IsNullOrWhiteSpace(full))
+        {
+            return string.Empty;
+        }
+
         return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
     }
 
@@ -2439,7 +2464,7 @@ internal static class Program
             }
 
             options.UnityExe = ReadRequired(map, "unity-exe");
-            options.ProjectPath = ReadRequired(map, "project-path");
+            options.ProjectPath = NormalizeProjectPathInput(ReadRequired(map, "project-path"));
             options.BuildId = ReadRequired(map, "build-id");
             options.Commit = ReadRequired(map, "commit");
             options.ArtifactDir = ReadRequired(map, "artifact-dir");

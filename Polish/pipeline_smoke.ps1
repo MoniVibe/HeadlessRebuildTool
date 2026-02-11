@@ -58,9 +58,70 @@ function Ensure-Directory {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
+function Normalize-ProjectPathInput {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $trim = $Path.Trim()
+    # If a WSL path is provided, convert to Windows path for Unity.
+    $wslMatch = [regex]::Match($trim, '^/mnt/([a-z])/(.*)$')
+    if ($wslMatch.Success) {
+        $drive = $wslMatch.Groups[1].Value.ToUpperInvariant()
+        $rest = $wslMatch.Groups[2].Value -replace '/', '\'
+        return ("{0}:\{1}" -f $drive, $rest)
+    }
+    # If path contains an embedded absolute drive segment, keep the last one.
+    $driveMatches = [regex]::Matches($trim, '[A-Za-z]:[\\/]')
+    if ($driveMatches.Count -gt 0) {
+        $trim = $trim.Substring($driveMatches[$driveMatches.Count - 1].Index)
+    }
+    return $trim
+}
+
+function Ensure-GitSafeDirectory {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    try {
+        & git config --global --add safe.directory $full | Out-Null
+    }
+    catch {
+        # Best-effort only; continue if git config fails.
+    }
+}
+
+function Resolve-GitDir {
+    param([string]$RepoPath)
+    if ([string]::IsNullOrWhiteSpace($RepoPath)) { return "" }
+    $gitPath = Join-Path $RepoPath ".git"
+    if (-not (Test-Path $gitPath)) { return "" }
+    $gitItem = Get-Item $gitPath -ErrorAction SilentlyContinue
+    if ($null -eq $gitItem) { return "" }
+    if ($gitItem.Attributes -band [System.IO.FileAttributes]::Directory) {
+        return $gitPath
+    }
+    $line = Get-Content $gitPath -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($line -match '^gitdir:\s*(.+)$') {
+        $dir = $Matches[1].Trim()
+        if (-not [System.IO.Path]::IsPathRooted($dir)) {
+            $dir = Join-Path $RepoPath $dir
+        }
+        return $dir
+    }
+    return ""
+}
+
 function Convert-ToWslPath {
     param([string]$Path)
-    $full = [System.IO.Path]::GetFullPath($Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $raw = $Path.Trim()
+    if ($raw -match '^/mnt/[a-z]/') {
+        return ($raw -replace '\\', '/')
+    }
+    $driveMatches = [regex]::Matches($raw, '[A-Za-z]:[\\/]')
+    if ($driveMatches.Count -gt 0) {
+        $raw = $raw.Substring($driveMatches[$driveMatches.Count - 1].Index)
+    }
+    $full = [System.IO.Path]::GetFullPath($raw)
     $match = [regex]::Match($full, '^([A-Za-z]):\\(.*)$')
     if ($match.Success) {
         $drive = $match.Groups[1].Value.ToLowerInvariant()
@@ -603,6 +664,7 @@ $projectPath = Join-Path $triRoot $titleDefaults.project_path
 if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
     $projectPath = $ProjectPathOverride
 }
+$projectPath = Normalize-ProjectPathInput $projectPath
 $projectPath = [System.IO.Path]::GetFullPath($projectPath)
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
@@ -649,6 +711,12 @@ if ($Repeat -lt 1) {
 }
 
 $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+
+Ensure-GitSafeDirectory $projectPath
+$gitDirPath = Resolve-GitDir $projectPath
+if (-not [string]::IsNullOrWhiteSpace($gitDirPath)) {
+    Ensure-GitSafeDirectory $gitDirPath
+}
 
 $commitFull = & git -C $projectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
