@@ -66,6 +66,7 @@ internal static class Program
 
             logger.Info($"attempt {attempt}/{attempts}");
             runResult = RunUnity(options, stagingDir, unityLog, logger);
+            CaptureEditorLog(logsDir, logger);
 
             var outcomeResult = TryReadOutcomeResult(outcomePath);
             var hasOutcome = !string.IsNullOrWhiteSpace(outcomeResult);
@@ -300,6 +301,75 @@ internal static class Program
         process.WaitForExit();
         logger.Info($"unity_exit pid={process.Id} exit={process.ExitCode}");
         return new UnityRunResult(process.ExitCode, timedOut);
+    }
+
+    private static void CaptureEditorLog(string logsDir, Logger logger)
+    {
+        try
+        {
+            var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+            if (string.IsNullOrWhiteSpace(localAppData))
+            {
+                localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            }
+
+            if (string.IsNullOrWhiteSpace(localAppData))
+            {
+                WriteEditorLogMissing(logsDir, "localappdata_missing", logger);
+                return;
+            }
+
+            var source = Path.Combine(localAppData, "Unity", "Editor", "Editor.log");
+            var dest = Path.Combine(logsDir, "editor.log");
+            if (File.Exists(source))
+            {
+                File.Copy(source, dest, overwrite: true);
+                RemoveEditorLogMissing(logsDir, logger);
+                logger.Info($"editor_log_copied src={source} dst={dest}");
+                return;
+            }
+
+            WriteEditorLogMissing(logsDir, "not_found", logger);
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"editor_log_capture_failed err={ex.Message}");
+            WriteEditorLogMissing(logsDir, $"error_{ex.GetType().Name}", logger);
+        }
+    }
+
+    private static void WriteEditorLogMissing(string logsDir, string reason, Logger logger)
+    {
+        try
+        {
+            Directory.CreateDirectory(logsDir);
+            var missingPath = Path.Combine(logsDir, "editor_log_missing.txt");
+            var content = $"editor_log_missing reason={reason} utc={DateTime.UtcNow:O}{Environment.NewLine}";
+            File.WriteAllText(missingPath, content, Encoding.ASCII);
+            logger.Info($"editor_log_missing reason={reason}");
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"editor_log_missing_write_failed err={ex.Message}");
+        }
+    }
+
+    private static void RemoveEditorLogMissing(string logsDir, Logger logger)
+    {
+        var missingPath = Path.Combine(logsDir, "editor_log_missing.txt");
+        if (!File.Exists(missingPath))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(missingPath);
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"editor_log_missing_delete_failed err={ex.Message}");
+        }
     }
 
     private static void TryKillProcess(Process process)
@@ -590,9 +660,15 @@ internal static class Program
                 return null;
             }
 
+            var demoteLicense = ShouldDemoteLicensePrimaryError();
             foreach (var line in File.ReadLines(logPath))
             {
                 if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                if (demoteLicense && IsLicenseDiagnosticLine(line))
                 {
                     continue;
                 }
@@ -619,6 +695,20 @@ internal static class Program
         }
 
         return Regex.IsMatch(line, "\\b\\w*Exception\\b");
+    }
+
+    private static bool ShouldDemoteLicensePrimaryError()
+    {
+        return string.Equals(
+            Environment.GetEnvironmentVariable("TRI_DIAG_DEMOTE_LICENSE"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLicenseDiagnosticLine(string line)
+    {
+        return ContainsIgnoreCase(line, "Licensing::Module") ||
+               ContainsIgnoreCase(line, "access token");
     }
 
     private static bool ContainsIgnoreCase(string text, string fragment)
