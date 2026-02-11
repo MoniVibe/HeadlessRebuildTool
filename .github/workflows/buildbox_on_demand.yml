@@ -21,6 +21,10 @@ on:
         type: boolean
         required: true
         default: true
+      result_wait_timeout_sec:
+        description: "Max seconds to wait for result zip when wait_for_result=true"
+        required: false
+        default: "600"
       clean_cache:
         description: "Clear Bee/lock caches in the worktree before build"
         type: boolean
@@ -76,6 +80,14 @@ jobs:
           $ref   = '${{ inputs.ref }}'
           $repeat = [int]'${{ inputs.repeat }}'
           $wait   = '${{ inputs.wait_for_result }}' -eq 'true'
+          $resultWaitTimeoutSec = 600
+          $resultWaitTimeoutRaw = '${{ inputs.result_wait_timeout_sec }}'
+          if (-not [string]::IsNullOrWhiteSpace($resultWaitTimeoutRaw)) {
+            $parsedResultWaitTimeout = 0
+            if ([int]::TryParse($resultWaitTimeoutRaw, [ref]$parsedResultWaitTimeout) -and $parsedResultWaitTimeout -gt 0) {
+              $resultWaitTimeoutSec = $parsedResultWaitTimeout
+            }
+          }
           $clean  = '${{ inputs.clean_cache }}' -eq 'true'
           $scenarioRel = '${{ inputs.scenario_rel }}'
           $envJson = '${{ inputs.env_json }}'
@@ -357,7 +369,11 @@ jobs:
             QueueRoot = $queueRoot
             Repeat = $repeat
           }
-          if ($wait) { $args.WaitForResult = $true }
+          if ($wait) {
+            $args.WaitForResult = $true
+            $args.WaitTimeoutSec = $resultWaitTimeoutSec
+            Write-Host ("result_wait_timeout_sec={0}" -f $resultWaitTimeoutSec)
+          }
           if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) { $args.ScenarioRel = $scenarioRel }
           if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
           if (-not [string]::IsNullOrWhiteSpace($envJson)) { $args.EnvJson = $envJson }

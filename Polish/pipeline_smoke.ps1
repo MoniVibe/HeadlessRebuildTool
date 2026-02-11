@@ -17,7 +17,7 @@ param(
     [string]$EnvJson,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
-    [int]$WaitTimeoutSec = 1800
+    [int]$WaitTimeoutSec = 600
 )
 
 Set-StrictMode -Version Latest
