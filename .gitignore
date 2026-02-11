@@ -3,6 +3,7 @@ nightly_artifacts/
 nightly_summary.json
 *.log
 *.tmp
+Polish/runner_config.json
 .venv/
 .DS_Store
 

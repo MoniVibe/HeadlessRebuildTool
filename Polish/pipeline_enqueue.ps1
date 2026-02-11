@@ -247,6 +247,15 @@ function Resolve-TriRoot {
     return $null
 }
 
+function Add-RootCandidate {
+    param(
+        [System.Collections.Generic.List[string]]$List,
+        [string]$Value
+    )
+    if ([string]::IsNullOrWhiteSpace($Value)) { return }
+    $List.Add($Value)
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
 if (-not (Test-Path $defaultsPath)) {
@@ -258,6 +267,21 @@ $titleKey = $Title.ToLowerInvariant()
 $titleDefaults = $defaults.titles.$titleKey
 if (-not $titleDefaults) {
     throw "Unknown title '$Title'. Check pipeline_defaults.json."
+}
+
+$rootCandidates = New-Object System.Collections.Generic.List[string]
+if ($defaults.tri_root_candidates) {
+    foreach ($candidate in $defaults.tri_root_candidates) {
+        Add-RootCandidate -List $rootCandidates -Value $candidate
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($env:TRI_ROOT_CANDIDATES)) {
+    foreach ($candidate in ($env:TRI_ROOT_CANDIDATES -split '[;,]')) {
+        Add-RootCandidate -List $rootCandidates -Value $candidate
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($env:TRI_ROOT)) {
+    Add-RootCandidate -List $rootCandidates -Value $env:TRI_ROOT
 }
 
 $queueRootValue = $QueueRoot
@@ -300,7 +324,25 @@ if (-not (Test-Path $projectPath) -and -not ($PSBoundParameters.ContainsKey("Pro
     if (-not [string]::IsNullOrWhiteSpace($parentRoot) -and (Test-Path $parentRoot)) {
         $fallbackRoots.Add((Resolve-Path $parentRoot).Path)
     }
+    $seenRoots = @{}
+    $combinedRoots = New-Object System.Collections.Generic.List[string]
     foreach ($root in $fallbackRoots) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $key = $root.Trim().TrimEnd('\','/').ToLowerInvariant()
+        if (-not $seenRoots.ContainsKey($key)) {
+            $seenRoots[$key] = $true
+            $combinedRoots.Add($root)
+        }
+    }
+    foreach ($root in $rootCandidates) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $key = $root.Trim().TrimEnd('\','/').ToLowerInvariant()
+        if (-not $seenRoots.ContainsKey($key)) {
+            $seenRoots[$key] = $true
+            $combinedRoots.Add($root.Trim())
+        }
+    }
+    foreach ($root in $combinedRoots) {
         $candidate = $titleDefaults.project_path
         if (-not [System.IO.Path]::IsPathRooted($candidate)) {
             $candidate = Join-Path $root $candidate

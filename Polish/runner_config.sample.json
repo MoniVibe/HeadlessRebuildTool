@@ -1,0 +1,15 @@
+{
+  "tri_root": "C:\\dev\\Tri",
+  "tri_root_candidates": [
+    "C:\\dev\\Tri",
+    "C:\\Dev\\unity_clean"
+  ],
+  "queue_root_overrides": {
+    "space4x": "C:\\polish\\anviloop\\space4x\\queue",
+    "godgame": "C:\\polish\\anviloop\\godgame\\queue"
+  },
+  "project_path_overrides": {
+    "space4x": "C:\\dev\\Tri\\space4x",
+    "godgame": "C:\\dev\\Tri\\godgame"
+  }
+}

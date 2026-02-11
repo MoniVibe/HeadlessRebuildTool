@@ -1,4 +1,12 @@
 {
+  "tri_root_candidates": [
+    "C:\\Dev\\unity_clean",
+    "C:\\Dev\\Tri",
+    "C:\\dev\\Tri",
+    "C:\\dev\\tri",
+    "C:\\Dev\\unity",
+    "C:\\dev\\unity"
+  ],
   "titles": {
     "space4x": {
       "project_path": "space4x",

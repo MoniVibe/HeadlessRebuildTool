@@ -40,16 +40,22 @@ function Write-JsonFile {
 function Read-BuildOutcome {
     param([string]$ZipPath)
     if (-not (Test-Path $ZipPath)) { return $null }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
-        $entry = $archive.GetEntry("logs/build_outcome.json")
-        if (-not $entry) { return $null }
-        $reader = New-Object System.IO.StreamReader($entry.Open())
-        try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        try {
+            $entry = $archive.GetEntry("logs/build_outcome.json")
+            if (-not $entry) { return $null }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+        }
+        finally {
+            $archive.Dispose()
+        }
     }
-    finally {
-        $archive.Dispose()
+    catch {
+        Write-Warning ("build_outcome_read_failed artifact={0} error={1}" -f $ZipPath, $_.Exception.Message)
+        return $null
     }
 }
 
@@ -67,28 +73,34 @@ function Read-ZipEntryText {
 function Get-ArtifactTitle {
     param([string]$ZipPath)
     if (-not (Test-Path $ZipPath)) { return "" }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
-        $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "build_manifest.json"
-        if (-not $manifestText) {
-            $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "logs/build_report.json"
+        Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        try {
+            $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "build_manifest.json"
+            if (-not $manifestText) {
+                $manifestText = Read-ZipEntryText -Archive $archive -EntryPath "logs/build_report.json"
+            }
+            if (-not $manifestText) { return "" }
+            try { $manifest = $manifestText | ConvertFrom-Json } catch { return "" }
+            $candidate = ""
+            if ($manifest.entrypoint) { $candidate = $manifest.entrypoint }
+            elseif ($manifest.summary -and $manifest.summary.output_path) { $candidate = $manifest.summary.output_path }
+            if ([string]::IsNullOrWhiteSpace($candidate)) { return "" }
+            $lower = $candidate.ToLowerInvariant()
+            if ($lower -like "*space4x*") { return "space4x" }
+            if ($lower -like "*godgame*") { return "godgame" }
+            if ($lower -like "*puredots*") { return "puredots" }
+            if ($lower -like "*headless*") { return "headless" }
+            return ""
         }
-        if (-not $manifestText) { return "" }
-        try { $manifest = $manifestText | ConvertFrom-Json } catch { return "" }
-        $candidate = ""
-        if ($manifest.entrypoint) { $candidate = $manifest.entrypoint }
-        elseif ($manifest.summary -and $manifest.summary.output_path) { $candidate = $manifest.summary.output_path }
-        if ([string]::IsNullOrWhiteSpace($candidate)) { return "" }
-        $lower = $candidate.ToLowerInvariant()
-        if ($lower -like "*space4x*") { return "space4x" }
-        if ($lower -like "*godgame*") { return "godgame" }
-        if ($lower -like "*puredots*") { return "puredots" }
-        if ($lower -like "*headless*") { return "headless" }
-        return ""
+        finally {
+            $archive.Dispose()
+        }
     }
-    finally {
-        $archive.Dispose()
+    catch {
+        Write-Warning ("manifest_read_failed artifact={0} error={1}" -f $ZipPath, $_.Exception.Message)
+        return ""
     }
 }
 
@@ -125,6 +137,35 @@ function Test-BuildAlreadyQueued {
     return $false
 }
 
+$runnerConfigPath = Join-Path $PSScriptRoot "runner_config.json"
+$runnerConfig = $null
+$projectPathOverride = $null
+if (Test-Path $runnerConfigPath) {
+    $runnerConfig = Read-JsonFile -Path $runnerConfigPath
+}
+
+$titleKey = $Title.ToLowerInvariant()
+if ($runnerConfig) {
+    if ($runnerConfig.tri_root) {
+        $env:TRI_ROOT = $runnerConfig.tri_root
+    }
+    if ($runnerConfig.tri_root_candidates) {
+        $env:TRI_ROOT_CANDIDATES = ($runnerConfig.tri_root_candidates -join ';')
+    }
+    $configQueueRoot = $null
+    if ($runnerConfig.queue_root_overrides -and $runnerConfig.queue_root_overrides.$titleKey) {
+        $configQueueRoot = $runnerConfig.queue_root_overrides.$titleKey
+    } elseif ($runnerConfig.queue_root) {
+        $configQueueRoot = $runnerConfig.queue_root
+    }
+    if (-not [string]::IsNullOrWhiteSpace($configQueueRoot)) {
+        $QueueRoot = $configQueueRoot
+    }
+    if ($runnerConfig.project_path_overrides -and $runnerConfig.project_path_overrides.$titleKey) {
+        $projectPathOverride = $runnerConfig.project_path_overrides.$titleKey
+    }
+}
+
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $artifactsDir = Join-Path $queueRootFull "artifacts"
 $reportsDir = Join-Path $queueRootFull "reports"
@@ -151,6 +192,9 @@ if (-not (Test-Path $enqueueScript)) {
 }
 
 Write-Host ("watch_daemon_start title={0} poll_sec={1} state={2}" -f $Title, $PollSeconds, $StatePath)
+if ($runnerConfigPath -and (Test-Path $runnerConfigPath)) {
+    Write-Host ("watch_daemon_config tri_root={0} queue_root={1} project_override={2}" -f $env:TRI_ROOT, $queueRootFull, $projectPathOverride)
+}
 
 while ($true) {
     $artifacts = Get-ChildItem -Path $artifactsDir -Filter "artifact_*.zip" -File | Sort-Object LastWriteTime -Descending
@@ -189,6 +233,7 @@ while ($true) {
             QueueRoot = $QueueRoot
             Repeat = $Repeat
         }
+        if (-not [string]::IsNullOrWhiteSpace($projectPathOverride)) { $invokeArgs.ProjectPathOverride = $projectPathOverride }
         if ($PSBoundParameters.ContainsKey("Seed")) { $invokeArgs.Seed = $Seed }
         if ($PSBoundParameters.ContainsKey("ScenarioId")) { $invokeArgs.ScenarioId = $ScenarioId }
         if ($PSBoundParameters.ContainsKey("ScenarioRel")) { $invokeArgs.ScenarioRel = $ScenarioRel }
