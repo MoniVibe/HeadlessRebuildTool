@@ -6,3 +6,4 @@ nightly_summary.json
 **/bin/
 **/obj/
 .DS_Store
+.tri/

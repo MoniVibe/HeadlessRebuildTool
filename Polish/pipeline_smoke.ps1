@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UnityExe,
     [string]$QueueRoot = "C:\\polish\\queue",
+    [string]$ProjectPathOverride,
     [string]$ScenarioId,
     [int]$Seed,
     [int]$TimeoutSec,
@@ -19,6 +20,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Headless runs execute from a scratch copy; manifest restore precedes clean-tree checks.
 
 function Ensure-Directory {
     param([string]$Path)
@@ -58,6 +61,198 @@ function Convert-ToWslPath {
         return "/mnt/$drive/$rest"
     }
     return ($full -replace '\\', '/')
+}
+
+function Copy-DirectoryRobocopy {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+    Ensure-Directory $Destination
+    $args = @($Source, $Destination, "*.*", "/E", "/COPY:DAT", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NJS", "/NP")
+    $null = & robocopy @args
+    if ($LASTEXITCODE -ge 8) {
+        throw "robocopy_failed code=$LASTEXITCODE src=$Source dst=$Destination"
+    }
+}
+
+function Prune-ScratchWorkspaces {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScratchRoot,
+        [int]$KeepCount = 2
+    )
+    if (-not (Test-Path $ScratchRoot)) { return }
+    $dirs = Get-ChildItem -Path $ScratchRoot -Directory | Sort-Object LastWriteTime -Descending
+    if (-not $dirs) { return }
+    $toRemove = if ($KeepCount -gt 0) { $dirs | Select-Object -Skip $KeepCount } else { $dirs }
+    foreach ($dir in $toRemove) {
+        try {
+            Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host ("scratch_pruned path={0}" -f $dir.FullName)
+        }
+        catch {
+            Write-Warning ("scratch_prune_failed path={0} err={1}" -f $dir.FullName, $_.Exception.Message)
+        }
+    }
+}
+
+function Try-UpdateScratchSubmodules {
+    param([string]$ScratchProjectPath)
+    $gitModules = Join-Path $ScratchProjectPath ".gitmodules"
+    if (-not (Test-Path $gitModules)) { return }
+    & git -C $ScratchProjectPath submodule update --init --recursive | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "scratch_submodule_update_failed code=$LASTEXITCODE path=$ScratchProjectPath"
+    }
+}
+
+function Try-GitLfsPull {
+    param([string]$ScratchProjectPath)
+    & git lfs version *> $null
+    if ($LASTEXITCODE -ne 0) { return }
+    & git -C $ScratchProjectPath lfs pull | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "scratch_lfs_pull_failed code=$LASTEXITCODE path=$ScratchProjectPath"
+    }
+}
+
+function Ensure-LocalFileDependencies {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceProjectPath,
+        [Parameter(Mandatory = $true)][string]$ScratchProjectPath,
+        [string]$FallbackSourceProjectPath
+    )
+    $scratchManifest = Join-Path $ScratchProjectPath "Packages\\manifest.json"
+    $sourceManifest = Join-Path $SourceProjectPath "Packages\\manifest.json"
+    if (-not (Test-Path $scratchManifest)) { return }
+    if (-not (Test-Path $sourceManifest)) { return }
+
+    try {
+        $manifest = Get-Content -Raw -Path $scratchManifest | ConvertFrom-Json
+    }
+    catch {
+        Write-Warning ("scratch_manifest_parse_failed path={0} err={1}" -f $scratchManifest, $_.Exception.Message)
+        return
+    }
+    if (-not $manifest.dependencies) { return }
+
+    $scratchManifestDir = Split-Path -Parent $scratchManifest
+    $sourceManifestDir = Split-Path -Parent $sourceManifest
+    $fallbackManifestDir = $null
+    if (-not [string]::IsNullOrWhiteSpace($FallbackSourceProjectPath)) {
+        $fallbackManifest = Join-Path $FallbackSourceProjectPath "Packages\\manifest.json"
+        if (Test-Path $fallbackManifest) {
+            $fallbackManifestDir = Split-Path -Parent $fallbackManifest
+        }
+    }
+
+    foreach ($dep in $manifest.dependencies.PSObject.Properties) {
+        $value = [string]$dep.Value
+        if (-not $value.StartsWith("file:")) { continue }
+        $relPath = $value.Substring(5)
+        if ([string]::IsNullOrWhiteSpace($relPath)) { continue }
+        if ([System.IO.Path]::IsPathRooted($relPath)) { continue }
+
+        $scratchTarget = [System.IO.Path]::GetFullPath((Join-Path $scratchManifestDir $relPath))
+        if (Test-Path $scratchTarget) { continue }
+
+        $sourceTarget = [System.IO.Path]::GetFullPath((Join-Path $sourceManifestDir $relPath))
+        if (-not (Test-Path $sourceTarget) -and $fallbackManifestDir) {
+            $fallbackTarget = [System.IO.Path]::GetFullPath((Join-Path $fallbackManifestDir $relPath))
+            if (Test-Path $fallbackTarget) {
+                $sourceTarget = $fallbackTarget
+            }
+        }
+        if (-not (Test-Path $sourceTarget)) {
+            Write-Warning ("local_dep_missing dep={0} source={1} scratch={2}" -f $dep.Name, $sourceTarget, $scratchTarget)
+            continue
+        }
+
+        Ensure-Directory (Split-Path -Parent $scratchTarget)
+        if (Test-Path $sourceTarget -PathType Container) {
+            Copy-DirectoryRobocopy -Source $sourceTarget -Destination $scratchTarget
+        }
+        else {
+            Copy-Item -Path $sourceTarget -Destination $scratchTarget -Force
+        }
+        Write-Host ("local_dep_copied dep={0} src={1} dst={2}" -f $dep.Name, $sourceTarget, $scratchTarget)
+    }
+}
+
+function Get-GitStatusPorcelain {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return "" }
+    $status = & git -C $Path status --porcelain -uall 2>$null
+    return ($status | Out-String).Trim()
+}
+
+function Assert-CleanWorkingTree {
+    param([string]$Path, [string]$Phase)
+    $status = Get-GitStatusPorcelain -Path $Path
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+        $preview = ($status -split "`r?`n" | Select-Object -First 12) -join "; "
+        throw "WORKTREE_DIRTY phase=$Phase path=$Path changes=$preview"
+    }
+}
+
+function New-ScratchProjectFromGit {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceProjectPath,
+        [Parameter(Mandatory = $true)][string]$ScratchRoot,
+        [Parameter(Mandatory = $true)][string]$WorkspaceName,
+        [Parameter(Mandatory = $true)][string]$CommitFull
+    )
+    Ensure-Directory $ScratchRoot
+    $dst = Join-Path $ScratchRoot $WorkspaceName
+
+    if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+
+    & git clone --local --no-checkout $SourceProjectPath $dst | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "git clone failed ($LASTEXITCODE)" }
+
+    & git -C $dst checkout -f $CommitFull | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "git checkout $CommitFull failed ($LASTEXITCODE)" }
+
+    return $dst
+}
+
+function Copy-ProjectToScratchFallback {
+    param(
+        [string]$SourcePath,
+        [string]$ScratchRoot,
+        [string]$Label
+    )
+    if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+        throw "scratch_copy source path missing"
+    }
+    if ([string]::IsNullOrWhiteSpace($ScratchRoot)) {
+        throw "scratch_copy root missing"
+    }
+
+    Ensure-Directory $ScratchRoot
+    $scratchPath = Join-Path $ScratchRoot $Label
+    if (Test-Path $scratchPath) {
+        Remove-Item -Path $scratchPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Ensure-Directory $scratchPath
+
+    $robocopy = Join-Path $env:SystemRoot "System32\\robocopy.exe"
+    if (-not (Test-Path $robocopy)) {
+        throw "robocopy not found: $robocopy"
+    }
+
+    foreach ($dir in @("Assets", "Packages", "ProjectSettings", "UserSettings")) {
+        $src = Join-Path $SourcePath $dir
+        if (-not (Test-Path $src)) { continue }
+        $dst = Join-Path $scratchPath $dir
+        Ensure-Directory $dst
+        & $robocopy $src $dst /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 1) {
+            Write-Warning ("scratch_copy_warn dir={0} code={1}" -f $dir, $LASTEXITCODE)
+        }
+    }
+
+    return $scratchPath
 }
 
 function Read-ZipEntryText {
@@ -265,10 +460,16 @@ if (-not $titleDefaults) {
     throw "Unknown title '$Title'. Check pipeline_defaults.json."
 }
 
-$projectPath = Join-Path $triRoot $titleDefaults.project_path
+$canonicalProjectPath = Join-Path $triRoot $titleDefaults.project_path
+$projectPath = if ($PSBoundParameters.ContainsKey("ProjectPathOverride") -and -not [string]::IsNullOrWhiteSpace($ProjectPathOverride)) {
+    $ProjectPathOverride
+} else {
+    $canonicalProjectPath
+}
 if (-not (Test-Path $projectPath)) {
     throw "Project path not found: $projectPath"
 }
+$sourceProjectPath = $projectPath
 
 if (-not (Test-Path $UnityExe)) {
     throw "Unity exe not found: $UnityExe"
@@ -292,17 +493,43 @@ if ($Repeat -lt 1) {
     throw "Repeat must be >= 1."
 }
 
-$commitFull = & git -C $projectPath rev-parse HEAD 2>&1
+$commitFull = & git -C $sourceProjectPath rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse HEAD failed: $commitFull"
 }
-$commitShort = & git -C $projectPath rev-parse --short=8 HEAD 2>&1
+$commitShort = & git -C $sourceProjectPath rev-parse --short=8 HEAD 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "git rev-parse --short failed: $commitShort"
 }
 
 $timestamp = ([DateTime]::UtcNow).ToString("yyyyMMdd_HHmmss_fff")
 $buildId = "${timestamp}_$commitShort"
+
+$baselineStatus = Get-GitStatusPorcelain -Path $sourceProjectPath
+if (-not [string]::IsNullOrWhiteSpace($baselineStatus)) {
+    $preview = ($baselineStatus -split "`r?`n" | Select-Object -First 8) -join "; "
+    Write-Warning "pre_run_git_dirty path=$sourceProjectPath changes=$preview"
+}
+
+$scratchRoot = Join-Path $triRoot ".tri\\state_win\\headless_workspaces"
+$scratchLabel = "{0}_{1}" -f $titleKey, $buildId
+$projectPath = $null
+Prune-ScratchWorkspaces -ScratchRoot $scratchRoot -KeepCount 2
+$gitRoot = Join-Path $sourceProjectPath ".git"
+if (Test-Path $gitRoot) {
+    try {
+        $projectPath = New-ScratchProjectFromGit -SourceProjectPath $sourceProjectPath -ScratchRoot $scratchRoot -WorkspaceName $scratchLabel -CommitFull $commitFull
+    }
+    catch {
+        Write-Warning ("scratch_git_failed err={0}" -f $_.Exception.Message)
+        $projectPath = Copy-ProjectToScratchFallback -SourcePath $sourceProjectPath -ScratchRoot $scratchRoot -Label $scratchLabel
+    }
+}
+else {
+    $projectPath = Copy-ProjectToScratchFallback -SourcePath $sourceProjectPath -ScratchRoot $scratchRoot -Label $scratchLabel
+}
+Try-UpdateScratchSubmodules -ScratchProjectPath $projectPath
+Try-GitLfsPull -ScratchProjectPath $projectPath
 
 $queueRootFull = [System.IO.Path]::GetFullPath($QueueRoot)
 $artifactsDir = Join-Path $queueRootFull "artifacts"
@@ -335,6 +562,7 @@ $swapApplied = $false
 & $syncScript -ProjectPath $projectPath
 & $swapScript -ProjectPath $projectPath
 $swapApplied = $true
+Ensure-LocalFileDependencies -SourceProjectPath $sourceProjectPath -ScratchProjectPath $projectPath -FallbackSourceProjectPath $canonicalProjectPath
 try {
     & dotnet @supervisorArgs
 }
@@ -346,6 +574,12 @@ finally {
 $supervisorExit = $LASTEXITCODE
 if ($supervisorExit -ne 0) {
     Write-Warning "HeadlessBuildSupervisor exited with code $supervisorExit"
+}
+try {
+    Assert-CleanWorkingTree -Path $sourceProjectPath -Phase "post_build"
+}
+catch {
+    throw "post_build_worktree_dirty: $($_.Exception.Message)"
 }
 
 $artifactZip = Join-Path $artifactsDir ("artifact_{0}.zip" -f $buildId)
