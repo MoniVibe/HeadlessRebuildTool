@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 import zipfile
-from collections import Counter, deque
+from collections import Counter
 from pathlib import Path
 
 
@@ -22,66 +22,6 @@ def read_json_entry(zf, name):
         return None
 
 
-def last_progress_marker(progress):
-    if progress is None:
-        return None
-    if isinstance(progress, list):
-        if not progress:
-            return None
-        entry = progress[-1]
-    elif isinstance(progress, dict):
-        entry = progress
-    else:
-        return None
-    if not isinstance(entry, dict):
-        return None
-    return {
-        "phase": entry.get("phase"),
-        "checkpoint": entry.get("checkpoint"),
-        "tick": entry.get("tick"),
-    }
-
-
-def telemetry_last_tick(zf):
-    try:
-        handle = zf.open("out/telemetry.ndjson")
-    except KeyError:
-        return None
-
-    lines = deque(maxlen=200)
-    with handle:
-        for raw in handle:
-            line = raw.decode("utf-8", errors="replace").strip()
-            if line:
-                lines.append(line)
-
-    for line in reversed(lines):
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        for key in ("tick", "simulation_tick", "world_tick", "frame", "frame_index"):
-            if key in obj:
-                return obj.get(key)
-    return None
-
-
-def watchdog_summary(watchdog):
-    if not isinstance(watchdog, dict):
-        return {}
-    process_state = {
-        "exit_code": watchdog.get("process_exit_code"),
-        "exit_status": watchdog.get("process_exit_status", watchdog.get("raw_exit_status", watchdog.get("exit_status"))),
-        "signal": watchdog.get("process_signal", watchdog.get("signal")),
-    }
-    return {
-        "diag_reason": watchdog.get("diag_reason"),
-        "process_state": process_state,
-    }
-
-
 def derive_job_id(zip_path, meta):
     if isinstance(meta, dict):
         job_id = meta.get("job_id")
@@ -93,10 +33,10 @@ def derive_job_id(zip_path, meta):
     return name
 
 
-def resolve_operator_report(zf):
+def resolve_report(zf):
     for path in REPORT_PATHS:
         report = read_json_entry(zf, path)
-        if isinstance(report, dict):
+        if report is not None:
             return report, path
     return None, None
 
@@ -149,9 +89,9 @@ def summarize_questions(questions):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Write triage summary for a result zip.")
+    parser = argparse.ArgumentParser(description="Summarize question results for a result zip.")
     parser.add_argument("--result-zip", dest="result_zip", help="Path to result_<job>.zip")
-    parser.add_argument("--outdir", default=str(DEFAULT_REPORTS_DIR), help="Directory for triage output JSON.")
+    parser.add_argument("--outdir", default=str(DEFAULT_REPORTS_DIR), help="Directory for scoreboard output JSON.")
     parser.add_argument("result_zip_pos", nargs="?", help="Path to result_<job>.zip (positional).")
     args = parser.parse_args()
 
@@ -173,32 +113,28 @@ def main():
 
     with zf:
         meta = read_json_entry(zf, "meta.json") or {}
-        progress = read_json_entry(zf, "out/progress.json")
-        watchdog = read_json_entry(zf, "out/watchdog.json")
-        operator_report, operator_report_path = resolve_operator_report(zf)
-        question_summary = summarize_questions(normalize_questions(operator_report))
-
+        report, report_path = resolve_report(zf)
         job_id = derive_job_id(zip_path, meta)
-        summary = {
+        questions = normalize_questions(report)
+        summary = summarize_questions(questions)
+
+        output = {
             "job_id": job_id,
-            "exit_reason": meta.get("exit_reason"),
-            "exit_code": meta.get("exit_code"),
-            "failure_signature": meta.get("failure_signature"),
-            "progress": last_progress_marker(progress),
-            "telemetry_last_tick": telemetry_last_tick(zf),
-            "invariants_present": "out/invariants.json" in zf.namelist(),
-            "operator_report_present": operator_report is not None,
-            "operator_report_path": operator_report_path,
-            "operator_report_scenario": operator_report.get("scenarioId") if operator_report else None,
-            "question_summary": question_summary if operator_report else None,
-            "watchdog": watchdog_summary(watchdog),
+            "scenario_id": report.get("scenarioId") if isinstance(report, dict) else None,
+            "report_path": report_path,
+            "required": summary["required"],
+            "optional": summary["optional"],
+            "required_total": summary["required_total"],
+            "optional_total": summary["optional_total"],
+            "unknown_reasons_required": summary["unknown_reasons_required"],
+            "failed_questions": summary["failed_questions"],
         }
 
     out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"triage_{job_id}.json"
-    out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
-    print(f"Wrote triage summary: {out_path}")
+    out_path = out_dir / f"questions_{job_id}.json"
+    out_path.write_text(json.dumps(output, indent=2, ensure_ascii=True), encoding="utf-8")
+    print(f"Wrote question scoreboard: {out_path}")
     return 0
 
 

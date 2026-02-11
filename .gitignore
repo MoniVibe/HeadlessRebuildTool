@@ -3,4 +3,6 @@ nightly_artifacts/
 nightly_summary.json
 *.log
 *.tmp
+**/bin/
+**/obj/
 .DS_Store

@@ -147,6 +147,20 @@ function Get-ResultInvariants {
     }
 }
 
+function Get-ResultOperatorReport {
+    param([string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $reportText = Read-ZipEntryText -Archive $archive -EntryPath "out/operator_report.json"
+        if (-not $reportText) { return $null }
+        return $reportText | ConvertFrom-Json
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Get-MinMax {
     param([double[]]$Values)
     if (-not $Values -or $Values.Count -eq 0) { return $null }
@@ -237,6 +251,10 @@ function Summarize-Results {
     $failingInvariants = New-Object System.Collections.Generic.HashSet[string]
     $scoreLosses = New-Object System.Collections.Generic.List[double]
     $scoreGrades = New-Object System.Collections.Generic.HashSet[string]
+    $requiredCounts = [ordered]@{ pass = 0; fail = 0; unknown = 0 }
+    $optionalCounts = [ordered]@{ pass = 0; fail = 0; unknown = 0 }
+    $requiredUnknownReasons = @{}
+    $requiredFailures = @{}
 
     $resultsDir = Join-Path $QueueRootPath "results"
     if (-not (Test-Path $resultsDir)) {
@@ -274,6 +292,7 @@ function Summarize-Results {
     foreach ($zip in $zips) {
         $runSummary = Get-ResultRunSummary -ZipPath $zip.FullName
         $polishScore = Get-ResultPolishScore -ZipPath $zip.FullName
+        $operatorReport = Get-ResultOperatorReport -ZipPath $zip.FullName
         $meta = if ($runSummary) { $null } else { Get-ResultMeta -ZipPath $zip.FullName }
         if (-not $runSummary -and -not $meta) { continue }
 
@@ -346,6 +365,40 @@ function Summarize-Results {
                 [void]$scoreGrades.Add([string]$polishScore.grade)
             }
         }
+
+        if ($operatorReport -and $operatorReport.questions) {
+            foreach ($q in $operatorReport.questions) {
+                if (-not $q) { continue }
+                $status = [string]$q.status
+                $isRequired = $false
+                if ($q.PSObject.Properties["required"]) {
+                    $isRequired = [bool]$q.required
+                }
+                $bucket = if ($isRequired) { $requiredCounts } else { $optionalCounts }
+                switch ($status) {
+                    "pass" { $bucket.pass++ }
+                    "fail" { $bucket.fail++ }
+                    "unknown" { $bucket.unknown++ }
+                    default { $bucket.unknown++ }
+                }
+                if ($isRequired -and $status -eq "unknown") {
+                    $reason = [string]$q.unknown_reason
+                    if ([string]::IsNullOrWhiteSpace($reason)) { $reason = "unknown" }
+                    if ($requiredUnknownReasons.ContainsKey($reason)) {
+                        $requiredUnknownReasons[$reason] += 1
+                    }
+                    else {
+                        $requiredUnknownReasons[$reason] = 1
+                    }
+                }
+                if ($isRequired -and $status -eq "fail") {
+                    $qid = [string]$q.id
+                    if (-not [string]::IsNullOrWhiteSpace($qid) -and -not $requiredFailures.ContainsKey($qid)) {
+                        $requiredFailures[$qid] = [string]$q.answer
+                    }
+                }
+            }
+        }
     }
 
     return [pscustomobject][ordered]@{
@@ -358,6 +411,12 @@ function Summarize-Results {
         failing_invariants = @($failingInvariants | Sort-Object)
         polish_score_total_loss = (Get-MinMaxAvg -Values $scoreLosses)
         polish_score_grades = @($scoreGrades | Sort-Object)
+        question_summary = [ordered]@{
+            required = $requiredCounts
+            optional = $optionalCounts
+            required_unknown_reasons = $requiredUnknownReasons
+            required_failed = $requiredFailures
+        }
         error = $null
     }
 }

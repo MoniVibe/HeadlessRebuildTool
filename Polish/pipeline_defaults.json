@@ -4,10 +4,10 @@
       "project_path": "space4x",
       "scenario_id": "space4x",
       "seed": 7,
-      "timeout_sec": 90,
+      "timeout_sec": 600,
       "args": [
         "--scenario",
-        "/mnt/c/dev/Tri/space4x/Assets/Scenarios/space4x_collision_micro.json",
+        "/mnt/c/dev/Tri/space4x/Assets/Scenarios/space4x_smoke.json",
         "--telemetryEnabled",
         "1"
       ]

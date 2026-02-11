@@ -58,13 +58,19 @@ $editorOnlyPackages = @(
     "com.unity.ide.visualstudio",
     "com.unity.ide.rider",
     "com.unity.collab-proxy",
-    "com.coplaydev.coplay"
+    "com.coplaydev.coplay",
+    "com.coplaydev.unity-mcp"
 )
+
+$removedVisualScripting = $false
 
 foreach ($pkg in $editorOnlyPackages) {
     if ($deps.PSObject.Properties.Name -contains $pkg) {
         $deps.PSObject.Properties.Remove($pkg)
         $overrides.Add("remove $pkg")
+        if ($pkg -like "com.unity.visualscripting*") {
+            $removedVisualScripting = $true
+        }
     }
 }
 
@@ -76,6 +82,34 @@ if (Test-Path $lockPath) {
     if (-not (Test-Path $lockHeadlessPath)) {
         Write-Error "Failed to write headless lock: $lockHeadlessPath"
         exit 2
+    }
+
+    try {
+        $lockObj = Get-Content -Path $lockHeadlessPath -Raw | ConvertFrom-Json
+        if ($lockObj -and $lockObj.dependencies) {
+            foreach ($pkg in $editorOnlyPackages) {
+                if ($lockObj.dependencies.PSObject.Properties.Name -contains $pkg) {
+                    $lockObj.dependencies.PSObject.Properties.Remove($pkg)
+                }
+            }
+
+            $lockJson = $lockObj | ConvertTo-Json -Depth 100
+            Set-Content -Path $lockHeadlessPath -Value $lockJson -Encoding ascii
+        }
+    }
+    catch {
+        Write-Warning ("Failed to prune headless lock packages: {0}" -f $_.Exception.Message)
+    }
+}
+
+if ($removedVisualScripting) {
+    $vsGeneratedDir = Join-Path $ProjectPath "Assets\\Unity.VisualScripting.Generated"
+    $vsGeneratedMeta = $vsGeneratedDir + ".meta"
+    if (Test-Path $vsGeneratedDir) {
+        Remove-Item -Path $vsGeneratedDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $vsGeneratedMeta) {
+        Remove-Item -Path $vsGeneratedMeta -Force -ErrorAction SilentlyContinue
     }
 }
 

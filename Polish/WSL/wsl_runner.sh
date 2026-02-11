@@ -741,7 +741,6 @@ add("repro","repro.txt","out/repro.txt")
 add("progress_json","progress.json","out/progress.json")
 add("invariants_json","invariants.json","out/invariants.json")
 add("telemetry","telemetry.ndjson","out/telemetry.ndjson")
-add("perf_telemetry","perf_telemetry.ndjson","out/perf_telemetry.ndjson")
 add("diag_stdout_tail","diag_stdout_tail.txt","out/diag_stdout_tail.txt")
 add("diag_stderr_tail","diag_stderr_tail.txt","out/diag_stderr_tail.txt")
 add("system_snapshot","system_snapshot.txt","out/system_snapshot.txt")
@@ -1326,7 +1325,16 @@ run_job() {
   fi
 
   if [ -z "$error_context" ] && json_array_nonempty "$manifest_path" "scenarios_supported"; then
-    if ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
+    local allow_unknown_scenario=0
+    local -a scenario_default_args=()
+    local -a scenario_job_args=()
+    mapfile -t scenario_default_args < <(read_json_array_field "$manifest_path" "default_args")
+    mapfile -t scenario_job_args < <(read_json_array_field "$lease_path" "args")
+    if args_include_flag "--scenario" "${scenario_default_args[@]}" || args_include_flag "--scenario" "${scenario_job_args[@]}"; then
+      allow_unknown_scenario=1
+    fi
+
+    if [ "$allow_unknown_scenario" -eq 0 ] && ! json_array_contains "$manifest_path" "scenarios_supported" "$scenario_id"; then
       error_context="scenario_not_supported:${scenario_id}"
     fi
   fi
@@ -1354,10 +1362,6 @@ run_job() {
     local telemetry_max_env=""
     if [ "$telemetry_enabled" -eq 1 ] && [ -n "$telemetry_max_bytes" ] && [ "$telemetry_max_bytes" -gt 0 ]; then
       telemetry_max_env="$telemetry_max_bytes"
-    fi
-    local perf_telemetry_env=""
-    if [ -z "${PUREDOTS_PERF_TELEMETRY_PATH:-}" ]; then
-      perf_telemetry_env="${out_dir}/perf_telemetry.ndjson"
     fi
 
     final_args=("${default_args_stripped[@]}" "${job_args_stripped[@]}")
@@ -1396,7 +1400,6 @@ run_job() {
       TRI_PARAM_OVERRIDES="$param_overrides_json" \
       TRI_FEATURE_FLAGS="$feature_flags_json" \
       ${telemetry_max_env:+PUREDOTS_TELEMETRY_MAX_BYTES=$telemetry_max_env} \
-      ${perf_telemetry_env:+PUREDOTS_PERF_TELEMETRY_PATH=$perf_telemetry_env} \
       "$entrypoint_path" "${final_args[@]}" >"$stdout_log" 2>"$stderr_log" &
     local pid=$!
     local pgid

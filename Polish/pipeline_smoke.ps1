@@ -11,7 +11,10 @@ param(
     [string[]]$Args,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
-    [int]$WaitTimeoutSec = 1800
+    [int]$WaitTimeoutSec = 900,
+    [int]$BuildTimeoutMinutes = 90,
+    [int]$RunLockTimeoutSec = 0,
+    [switch]$AllowConcurrent
 )
 
 Set-StrictMode -Version Latest
@@ -21,6 +24,28 @@ function Ensure-Directory {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Acquire-HeadlessRunLock {
+    param([int]$TimeoutSec)
+    $mutexName = "Local\TRI_HEADLESS_UNITY_LOCK"
+    $mutex = New-Object System.Threading.Mutex($false, $mutexName)
+    $acquired = $false
+    try {
+        if ($TimeoutSec -le 0) {
+            $acquired = $mutex.WaitOne(0)
+        } else {
+            $acquired = $mutex.WaitOne($TimeoutSec * 1000)
+        }
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $acquired = $true
+    }
+    if (-not $acquired) {
+        $mutex.Dispose()
+        throw "Headless run lock is busy (another Unity headless run is active)."
+    }
+    return $mutex
 }
 
 function Convert-ToWslPath {
@@ -33,26 +58,6 @@ function Convert-ToWslPath {
         return "/mnt/$drive/$rest"
     }
     return ($full -replace '\\', '/')
-}
-
-function Get-ResultWaitTimeoutSeconds {
-    param([int]$DefaultSeconds)
-    $envValue = $env:TRI_RESULT_TIMEOUT_SECONDS
-    $parsed = 0
-    if ([int]::TryParse($envValue, [ref]$parsed) -and $parsed -gt 0) {
-        return $parsed
-    }
-    return $DefaultSeconds
-}
-
-function Find-ResultCandidates {
-    param(
-        [string]$ResultsDir,
-        [string]$BaseId
-    )
-    if (-not (Test-Path $ResultsDir)) { return @() }
-    $pattern = "result_{0}*.zip" -f $BaseId
-    return Get-ChildItem -Path $ResultsDir -File -Filter $pattern | Sort-Object LastWriteTime -Descending
 }
 
 function Read-ZipEntryText {
@@ -240,6 +245,12 @@ function Get-ArtifactPreflight {
     }
 }
 
+$runLock = $null
+try {
+if (-not $AllowConcurrent) {
+    $runLock = Acquire-HeadlessRunLock -TimeoutSec $RunLockTimeoutSec
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $triRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $defaultsPath = Join-Path $scriptRoot "pipeline_defaults.json"
@@ -316,7 +327,8 @@ $supervisorArgs = @(
     "--project-path", $projectPath,
     "--build-id", $buildId,
     "--commit", $commitFull,
-    "--artifact-dir", $artifactsDir
+    "--artifact-dir", $artifactsDir,
+    "--timeout-minutes", $BuildTimeoutMinutes
 )
 
 $swapApplied = $false
@@ -390,56 +402,13 @@ for ($i = 1; $i -le $Repeat; $i++) {
 
     if ($WaitForResult) {
         $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
-        $resultBaseId = "{0}_{1}_{2}" -f $buildId, $scenarioIdValue, $seedValue
-        $waitTimeoutSec = Get-ResultWaitTimeoutSeconds -DefaultSeconds $WaitTimeoutSec
-        $baseDeadline = (Get-Date).AddSeconds($waitTimeoutSec)
-        $stableSeconds = 5
-        $stableDeadline = $null
-        $lastSize = -1
-        $lastPath = $null
-        while ($true) {
-            $now = Get-Date
-            $candidate = $null
-            if (Test-Path $resultZip) {
-                $candidate = $resultZip
-            }
-            else {
-                $alternates = Find-ResultCandidates -ResultsDir $resultsDir -BaseId $resultBaseId
-                if ($alternates) {
-                    $candidate = @($alternates)[0].FullName
-                }
-            }
-
-            if ($candidate) {
-                if ($lastPath -ne $candidate) {
-                    $lastPath = $candidate
-                    $lastSize = -1
-                    $stableDeadline = $now.AddSeconds($stableSeconds)
-                }
-                $item = Get-Item $candidate -ErrorAction SilentlyContinue
-                if ($item) {
-                    if ($item.Length -ne $lastSize) {
-                        $lastSize = $item.Length
-                        $stableDeadline = $now.AddSeconds($stableSeconds)
-                    }
-                    if ($stableDeadline -and $now -ge $stableDeadline) {
-                        $resultZip = $candidate
-                        break
-                    }
-                }
-            }
-            elseif ($now -ge $baseDeadline) {
-                break
-            }
-
+        $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-Path $resultZip) { break }
             Start-Sleep -Seconds 2
         }
 
         if (-not (Test-Path $resultZip)) {
-            $alternates = Find-ResultCandidates -ResultsDir $resultsDir -BaseId $resultBaseId
-            $alternateNames = if ($alternates) { $alternates | Select-Object -ExpandProperty Name } else { @() }
-            $alternateList = if (@($alternateNames).Count -gt 0) { [string]::Join(", ", @($alternateNames)) } else { "(none)" }
-            Write-Host ("Timed out waiting for {0}; found alternates: {1}" -f $resultZip, $alternateList)
             throw "Timed out waiting for result: $resultZip"
         }
 
@@ -469,5 +438,12 @@ for ($i = 1; $i -le $Repeat; $i++) {
             Write-InvariantDiff -Baseline $baselineInv -Current $currentInv -BaselineLabel ("run{0}" -f $baselineIndex) -CurrentLabel ("run{0}" -f $i)
             exit 3
         }
+    }
+}
+}
+finally {
+    if ($runLock) {
+        try { $runLock.ReleaseMutex() } catch { }
+        $runLock.Dispose()
     }
 }
