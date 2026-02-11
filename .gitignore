@@ -7,3 +7,8 @@ nightly_summary.json
 **/obj/
 .DS_Store
 .tri/
+__pycache__/
+*.pyc
+nightlylist.md
+nightlytasks.md
+Tools/Headless/C*polish*queue*reports*
