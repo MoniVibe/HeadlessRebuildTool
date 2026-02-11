@@ -1,5 +1,8 @@
 # Headless Runbook - Build Channels + Test Bank (TRI)
 
+Note: canonical headless rules live in `puredots/Docs/Headless/headless_runbook.md`.
+For anviloop usage, start at `Tools/Polish/Docs/HEADLESS_DOCS_INDEX.md`.
+
 Purpose: keep headless agents productive without rebuild churn and protect a pinned current build by enforcing:
 1) two build channels (scratch vs current),
 2) a promotion gate (bank green/stable),

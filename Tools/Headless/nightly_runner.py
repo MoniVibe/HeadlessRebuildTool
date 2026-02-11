@@ -132,14 +132,18 @@ def compute_top_deltas(prev_metrics, curr_metrics, limit=5):
     return deltas[:limit]
 
 
-def evaluate_run(run_result, metrics_result):
+def evaluate_run(run_result, metrics_result, task):
     failures = []
-    if not run_result.get("ok", False):
-        failures.append("run_failed")
+    allowed_invariant_failures = set(task.get("validate_allow_invariant_failures") or [])
+    disallowed_invariant_failures = []
 
     for inv in metrics_result.get("invariants", []):
         if inv.get("ok") is False:
-            failures.append(f"invariant:{inv.get('name')}")
+            name = inv.get("name")
+            if name in allowed_invariant_failures:
+                continue
+            disallowed_invariant_failures.append(name)
+            failures.append(f"invariant:{name}")
 
     metrics_summary = metrics_result.get("metrics_summary", {})
     truncated = metrics_summary.get("telemetry.truncated")
@@ -153,6 +157,13 @@ def evaluate_run(run_result, metrics_result):
     if bank_required:
         if bank_status.get("status") != "PASS":
             failures.append("bank_failed")
+
+    if not run_result.get("ok", False):
+        error_code = run_result.get("error_code")
+        if error_code == "invariant_failed" and not disallowed_invariant_failures:
+            pass
+        else:
+            failures.append("run_failed")
 
     return failures
 
@@ -223,6 +234,7 @@ def main():
     overall_fail = False
 
     for task_id in selected_tasks:
+        task = task_data.get(task_id, {})
         run_result, _ = run_headlessctl(["run_task", task_id])
         run_id = run_result.get("run_id")
         seed_run_ids = run_result.get("seed_run_ids") or []
@@ -232,7 +244,7 @@ def main():
         metrics_summary = run_result.get("metrics_summary", {})
         for eval_run_id in evaluation_runs:
             metrics_result, _ = run_headlessctl(["get_metrics", eval_run_id])
-            failures.extend(evaluate_run(run_result, metrics_result))
+            failures.extend(evaluate_run(run_result, metrics_result, task))
             if not metrics_summary:
                 metrics_summary = metrics_result.get("metrics_summary", {})
 

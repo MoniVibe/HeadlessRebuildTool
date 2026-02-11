@@ -132,6 +132,182 @@
         "GODGAME_HEADLESS_SMOKE_MIN_TICKS": "60"
       }
     },
+    "G0.GODGAME_COMBAT_MICRO": {
+      "project": "godgame",
+      "runner": "godgame_loader",
+      "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_collision_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 12,
+      "required_bank": "G0.GODGAME_COLLISION_MICRO",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "GODGAME_HEADLESS_COLLISION_PROOF": "1",
+        "GODGAME_HEADLESS_COLLISION_PROOF_EXIT": "1"
+      }
+    },
+    "G0.GODGAME_PATHING_MICRO": {
+      "project": "godgame",
+      "runner": "godgame_loader",
+      "scenario_path": "godgame/Assets/Scenarios/Godgame/villager_movement_diagnostics.json",
+      "tick_budget": 600,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 13,
+      "required_bank": "G2.VILLAGER_MOVEMENT_DIAGNOSTICS",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "GODGAME_HEADLESS_MOVEMENT_DIAGNOSTICS_EXIT": "1",
+        "GODGAME_HEADLESS_MOVEMENT_WINDOW_TICKS": "120"
+      }
+    },
+    "G1.GODGAME_ECONOMY_LOOP": {
+      "project": "godgame",
+      "runner": "godgame_loader",
+      "scenario_path": "godgame/Assets/Scenarios/Godgame/villager_loop_small.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 40,
+      "required_bank": "G1.VILLAGER_LOOP_SMALL",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "GODGAME_HEADLESS_VILLAGER_PROOF": "1",
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "1",
+        "GODGAME_HEADLESS_EXIT_MIN_TICK": "60",
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT_MIN_TICK": "60"
+      }
+    },
+    "G1.GODGAME_SCALE_SMOKE": {
+      "project": "godgame",
+      "runner": "godgame_loader",
+      "scenario_path": "godgame/Assets/Scenarios/Godgame/godgame_scale_50k.json",
+      "tick_budget": 600,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 41,
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "GODGAME_HEADLESS_VILLAGER_PROOF": "0",
+        "GODGAME_HEADLESS_VILLAGER_PROOF_EXIT": "0",
+        "PUREDOTS_HEADLESS_TIME_PROOF": "0",
+        "PUREDOTS_HEADLESS_REWIND_PROOF": "0",
+        "PUREDOTS_HEADLESS_DISABLE_HISTORY": "1"
+      }
+    },
+    "S1.SPACE4X_SCALE_150K": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/scenario_space_01_scale_150k.json",
+      "tick_budget": 18000,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        12345
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "perf",
+        "scale"
+      ],
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
+        "PUREDOTS_HEADLESS_TIME_PROOF": "0",
+        "PUREDOTS_HEADLESS_REWIND_PROOF": "0",
+        "PUREDOTS_HEADLESS_DISABLE_HISTORY": "1"
+      }
+    },
     "S0.SPACE4X_COLLISION": {
       "project": "space4x",
       "runner": "space4x_loader",
@@ -149,7 +325,7 @@
         "nightly"
       ],
       "nightly_order": 30,
-      "required_bank": "",
+      "required_bank": "S0.SPACE4X_COLLISION_MICRO",
       "metric_keys": [
         "space4x.hull.vessels",
         "space4x.departments.carriers",
@@ -244,6 +420,8 @@
         "space4x.departments.carriers": 1000
       },
       "env": {
+        "SPACE4X_HEADLESS_COLLISION_PROOF": "1",
+        "SPACE4X_HEADLESS_COLLISION_PROOF_EXIT": "1",
         "SPACE4X_HEADLESS_MINING_PROOF": "0",
         "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0",
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
@@ -366,9 +544,341 @@
         "space4x.hull.vessels": 1000,
         "space4x.departments.carriers": 1000
       },
+    "env": {
+      "SPACE4X_HEADLESS_MINING_PROOF": "1",
+      "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1",
+      "SPACE4X_HEADLESS_MINING_PROOF_UNDOCK": "1"
+    }
+    },
+    "S0.SPACE4X_NAV_REACH_TARGET_MICRO": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_turnrate_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        1101
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 21,
+      "required_bank": "S0.SPACE4X_NAV_REACH_TARGET_MICRO",
+      "metric_keys": [
+        "space4x.movement.turn_sample_count",
+        "space4x.movement.turn_rate_failures",
+        "space4x.movement.turn_accel_failures",
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "space4x.movement.turn_sample_count": {
+          "min": 1
+        },
+        "space4x.movement.turn_rate_failures": {
+          "max": 0
+        },
+        "space4x.movement.turn_accel_failures": {
+          "max": 0
+        },
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+      }
+    },
+    "S0.SPACE4X_SENSORS_CONTACTS_MICRO": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_sensors_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        901
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 22,
+      "required_bank": "S0.SPACE4X_SENSORS_CONTACTS_MICRO",
+      "metric_keys": [
+        "space4x.sensor.sample_count",
+        "space4x.sensor.acquire_detected_ratio",
+        "space4x.sensor.drop_detected_ratio",
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "space4x.sensor.sample_count": {
+          "min": 1
+        },
+        "space4x.sensor.acquire_detected_ratio": {
+          "min": 0
+        },
+        "space4x.sensor.drop_detected_ratio": {
+          "min": 0
+        },
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+      }
+    },
+    "S0.SPACE4X_COMBAT_FIRE_MICRO": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_dogfight_headless.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        1337
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 23,
+      "required_bank": "S0.SPACE4X_COMBAT_FIRE_MICRO",
+      "metric_keys": [
+        "space4x.intercept.attempts",
+        "space4x.hull.damaged",
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "space4x.intercept.attempts": {
+          "min": 1
+        },
+        "space4x.hull.damaged": {
+          "min": 0
+        },
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
+      }
+    },
+    "S0.SPACE4X_MINING_PROOF": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": ".tri/scenarios/space4x_mining.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 25,
+      "required_bank": "S1.MINING_ONLY",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "1",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1",
+        "SPACE4X_HEADLESS_MINING_PROOF_UNDOCK": "1"
+      }
+    },
+    "S2.SPACE4X_MINING_COMBAT": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": ".tri/scenarios/space4x_mining_combat.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 26,
+      "required_bank": "S2.MINING_COMBAT",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
       "env": {
         "SPACE4X_HEADLESS_MINING_PROOF": "1",
         "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "1"
+      }
+    },
+    "S3.SPACE4X_REFIT_REPAIR": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_refit.json",
+      "tick_budget": 600,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        42
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 27,
+      "required_bank": "S3.REFIT_REPAIR",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      }
+    },
+    "S4.SPACE4X_RESEARCH_MVP": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_research_mvp.json",
+      "tick_budget": 600,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        341
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 28,
+      "required_bank": "S4.RESEARCH_MVP",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      }
+    },
+    "S1.SPACE4X_FTL_JUMP_MICRO": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_ftl_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        1101
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 45,
+      "required_bank": "S4.SPACE4X_FTL_MICRO",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_FTL_PROOF": "1",
+        "SPACE4X_HEADLESS_FTL_PROOF_EXIT": "1"
+      }
+    },
+    "S1.SPACE4X_COMMS_COHESION": {
+      "project": "space4x",
+      "runner": "space4x_loader",
+      "scenario_path": "space4x/Assets/Scenarios/space4x_comms_micro.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        907
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 46,
+      "required_bank": "S1.SPACE4X_COMMS_COHESION",
+      "metric_keys": [
+        "telemetry.heartbeat",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.heartbeat": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "SPACE4X_HEADLESS_MINING_PROOF": "0",
+        "SPACE4X_HEADLESS_MINING_PROOF_EXIT": "0"
       }
     },
     "P0.TIME_REWIND_MICRO": {
