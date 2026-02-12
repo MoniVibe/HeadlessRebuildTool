@@ -81,13 +81,14 @@ $runs = Invoke-GhJson @(
 
 $run = $null
 if ($runs) {
+    $expectedHeadBranch = if (-not [string]::IsNullOrWhiteSpace($WorkflowRef)) { $WorkflowRef } else { $Ref }
     $recent = $runs | Where-Object {
         $_.event -eq 'workflow_dispatch' -and $_.createdAt
     } | Where-Object {
         try { [DateTimeOffset]::Parse($_.createdAt) -ge $startUtc.AddMinutes(-2) } catch { $false }
     }
-    if (-not [string]::IsNullOrWhiteSpace($Ref)) {
-        $recent = $recent | Where-Object { $_.headBranch -eq $Ref }
+    if (-not [string]::IsNullOrWhiteSpace($expectedHeadBranch)) {
+        $recent = $recent | Where-Object { $_.headBranch -eq $expectedHeadBranch }
     }
     $run = $recent | Sort-Object createdAt -Descending | Select-Object -First 1
     if (-not $run) {
