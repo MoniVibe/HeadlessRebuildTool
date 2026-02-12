@@ -12,7 +12,10 @@ from pathlib import Path
 
 INTEL_ROOT = Path(os.environ.get("ANVILOOP_INTEL_ROOT", "/home/oni/anviloop_intel"))
 LEDGER_PATH = Path(
-    "/home/oni/headless/HeadlessRebuildTool/Polish/Docs/ANVILOOP_RECURRING_ERRORS.md"
+    os.environ.get(
+        "ANVILOOP_INTEL_LEDGER_PATH",
+        "/home/oni/headless/HeadlessRebuildTool/Polish/Docs/ANVILOOP_RECURRING_ERRORS.md",
+    )
 )
 
 
@@ -167,6 +170,88 @@ def extract_bank_signal(text):
             "line": line.strip(),
         }
     return {"found": False, "status": "MISSING", "test_id": None, "line": None}
+
+
+PIPELINE_SMOKE_KV_RE = re.compile(r"^\*\s+(?P<key>[A-Za-z0-9_]+)\s*:\s*(?P<value>.*)\s*$")
+
+
+def parse_pipeline_smoke_summary(text):
+    payload = {}
+    if not text:
+        return payload
+    for line in text.splitlines():
+        match = PIPELINE_SMOKE_KV_RE.match(line.strip())
+        if not match:
+            continue
+        key = match.group("key").strip()
+        value = (match.group("value") or "").strip()
+        payload[key] = value
+    return payload
+
+
+CS_ERROR_RE = re.compile(r"\berror\s+(CS\d+)\b", re.IGNORECASE)
+BURST_ERROR_RE = re.compile(r"\bBurst\s+error\s+(BC\d+)\b", re.IGNORECASE)
+IL2CPP_RE = re.compile(r"\bIL2CPP\b|\bil2cpp\.exe\b", re.IGNORECASE)
+LINKER_RE = re.compile(r"\bUnityLinker\b|\blink(er)?\s+error\b|\bld:\s+error\b", re.IGNORECASE)
+SCRIPT_COMPILATION_RE = re.compile(r"\bScriptCompilation\b|\bCompilationFailedException\b", re.IGNORECASE)
+BEE_RE = re.compile(r"\bBeeStall\b|\bLibrary/Bee\b|\bScriptCompilationBuildProgram\b", re.IGNORECASE)
+
+
+def extract_compilation_signals(text):
+    """Heuristically summarize build/compile-related failures from arbitrary logs/snippets.
+
+    This is intentionally broad: it should classify "compilation in general" without
+    depending on a single subsystem (Burst/C#/IL2CPP/linker).
+    """
+    signals = {
+        "detected": False,
+        "csharp_error_codes": [],
+        "burst_error_codes": [],
+        "has_il2cpp": False,
+        "has_linker": False,
+        "has_script_compilation": False,
+        "has_bee": False,
+        "sample_lines": [],
+    }
+    if not text:
+        return signals
+
+    csharp = []
+    burst = []
+    samples = []
+    for line in split_lines(text, max_lines=600):
+        if CS_ERROR_RE.search(line):
+            code = CS_ERROR_RE.search(line).group(1)
+            csharp.append(code)
+            if len(samples) < 15:
+                samples.append(line.strip())
+            continue
+        if BURST_ERROR_RE.search(line):
+            code = BURST_ERROR_RE.search(line).group(1)
+            burst.append(code)
+            if len(samples) < 15:
+                samples.append(line.strip())
+            continue
+        if ("error" in line.lower() or "exception" in line.lower()) and len(samples) < 15:
+            # Generic "first useful errors" capture for non-coded failures.
+            samples.append(line.strip())
+
+    signals["csharp_error_codes"] = sorted(set(csharp))[:10]
+    signals["burst_error_codes"] = sorted(set(burst))[:10]
+    signals["has_il2cpp"] = bool(IL2CPP_RE.search(text))
+    signals["has_linker"] = bool(LINKER_RE.search(text))
+    signals["has_script_compilation"] = bool(SCRIPT_COMPILATION_RE.search(text))
+    signals["has_bee"] = bool(BEE_RE.search(text))
+    signals["sample_lines"] = samples[:15]
+
+    signals["detected"] = bool(
+        signals["csharp_error_codes"]
+        or signals["burst_error_codes"]
+        or signals["has_il2cpp"]
+        or signals["has_linker"]
+        or signals["has_script_compilation"]
+    )
+    return signals
 
 
 def read_zip_json(zf, member):
@@ -516,6 +601,136 @@ def parse_ledger_entries(ledger_text):
             }
         )
     return parsed
+
+
+def read_text_file(path, max_bytes=262144):
+    try:
+        data = Path(path).read_bytes()
+    except FileNotFoundError:
+        return ""
+    except Exception:
+        return ""
+    if max_bytes and len(data) > max_bytes:
+        data = data[-max_bytes:]
+    try:
+        return data.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def find_first_existing(paths):
+    for path in paths:
+        if Path(path).exists():
+            return Path(path)
+    return None
+
+
+def pick_build_headline(smoke, compiler_signals, fallback_text):
+    first = (smoke.get("build_first_error") or "").strip()
+    if first:
+        return first
+    for line in split_lines(fallback_text or "", max_lines=120):
+        lowered = line.lower()
+        if "error" in lowered or "exception" in lowered or "fatal" in lowered:
+            return line.strip()
+    if compiler_signals and compiler_signals.get("sample_lines"):
+        return compiler_signals["sample_lines"][-1]
+    return (smoke.get("failure") or smoke.get("status") or "UNKNOWN").strip() or "UNKNOWN"
+
+
+def build_record_from_diag_dir(diag_dir):
+    diag_dir = Path(diag_dir)
+    smoke_path = diag_dir / "pipeline_smoke_summary_latest.md"
+    smoke_text = read_text_file(smoke_path)
+    smoke = parse_pipeline_smoke_summary(smoke_text)
+
+    compiler_errors = read_text_file(diag_dir / "compiler_errors.txt")
+    build_error_summary = read_text_file(diag_dir / "build_error_summary.txt")
+    missing_scripts = read_text_file(diag_dir / "missing_scripts.txt")
+    pipeline_smoke_log = read_text_file(diag_dir / "pipeline_smoke.log")
+
+    artifact_snippet = ""
+    artifact_zip = None
+    results_dir = diag_dir / "results"
+    if results_dir.exists():
+        for candidate in sorted(results_dir.glob("artifact_*.zip")):
+            artifact_zip = candidate
+            break
+    if artifact_zip:
+        try:
+            with zipfile.ZipFile(artifact_zip, "r") as zf:
+                artifact_snippet = read_zip_tail_text(zf, "logs/primary_error_snippet.txt", max_bytes=65536)
+                if not artifact_snippet:
+                    artifact_snippet = read_zip_tail_text(zf, "logs/unity_build_tail.txt", max_bytes=65536)
+        except Exception:
+            artifact_snippet = ""
+
+    corpus = "\n".join(
+        [
+            smoke_text.strip(),
+            build_error_summary.strip(),
+            compiler_errors.strip(),
+            missing_scripts.strip(),
+            artifact_snippet.strip(),
+            pipeline_smoke_log.strip(),
+        ]
+    ).strip()
+    compiler_signals = extract_compilation_signals(corpus)
+
+    run_id = None
+    match = re.search(r"_(\d{6,})$", diag_dir.name)
+    if match:
+        run_id = match.group(1)
+
+    title = smoke.get("title") or smoke.get("Title") or None
+    build_id = smoke.get("build_id") or None
+    status = smoke.get("status") or ""
+
+    headline = pick_build_headline(smoke, compiler_signals, build_error_summary or artifact_snippet or pipeline_smoke_log)
+    embed_text = " | ".join(
+        [
+            "BUILD",
+            title or "",
+            status,
+            smoke.get("failure") or "",
+            headline,
+            " ".join(compiler_signals.get("csharp_error_codes") or []),
+            " ".join(compiler_signals.get("burst_error_codes") or []),
+        ]
+    ).strip()
+
+    record_id = f"diag_{run_id}" if run_id else f"diag_{diag_dir.name}"
+
+    record = {
+        "record_id": record_id,
+        "created_utc": utc_now(),
+        "diag_dir": str(diag_dir),
+        "meta": {
+            "job_id": run_id,
+            "build_id": build_id,
+            "title": title,
+            "status": status,
+            "failure": smoke.get("failure") or None,
+            "build_first_error": smoke.get("build_first_error") or None,
+        },
+        "headline": headline,
+        "raw_signature_string": "",
+        "stdout_tail": split_lines(pipeline_smoke_log, max_lines=60)[-20:],
+        "stderr_tail": split_lines(build_error_summary or compiler_errors or artifact_snippet, max_lines=60)[-20:],
+        "proof_lines": [],
+        "template_ids": [],
+        "template_texts": [],
+        "metrics": {},
+        "validity": {},
+        "questions": None,
+        "bank": None,
+        "signals": {
+            "compilation": compiler_signals,
+            "missing_scripts_text_present": bool(missing_scripts and "no missing script" not in missing_scripts.lower()),
+        },
+        "embed_text": embed_text,
+    }
+    return record
 
 
 def ingest_ledger():
@@ -922,6 +1137,10 @@ def build_explain(record):
         "suggested_prevention": suggested_prevention,
     }
 
+    signals = record.get("signals")
+    if isinstance(signals, dict) and signals:
+        explain["signals"] = signals
+
     validity = record.get("validity")
     if isinstance(validity, dict):
         explain["validity"] = validity
@@ -979,6 +1198,37 @@ def ingest_result_zip(result_zip):
     return explain_path
 
 
+def ingest_diag_dir(diag_dir):
+    ensure_layout()
+    processed = load_processed_state()
+
+    diag_dir = Path(diag_dir)
+    smoke_path = diag_dir / "pipeline_smoke_summary_latest.md"
+    key_basis = smoke_path if smoke_path.exists() else diag_dir
+    key = "diag|" + file_key(key_basis)
+    if key in processed:
+        return None
+
+    record = build_record_from_diag_dir(diag_dir)
+    append_jsonl(INTEL_ROOT / "store" / "records.jsonl", record)
+
+    model = load_embedding_model()
+    update_runs_index(record, model)
+    explain_path = build_explain(record)
+
+    processed[key] = {"processed_utc": utc_now(), "diag_dir": str(diag_dir)}
+    save_processed_state(processed)
+    return explain_path
+
+
+def ingest_diag_dir_cli(args):
+    explain_path = ingest_diag_dir(args.diag_dir)
+    if explain_path:
+        print(f"explain: {explain_path}")
+    else:
+        print("already_processed")
+
+
 def ingest_result_zip_cli(args):
     explain_path = ingest_result_zip(args.result_zip)
     if explain_path:
@@ -992,6 +1242,7 @@ def daemon(args):
     last_ledger_mtime = None
     ledger_refresh_deadline = time.time()
     results_dir = Path(args.results_dir)
+    diag_root = Path(args.diag_root) if getattr(args, "diag_root", None) else None
 
     while True:
         try:
@@ -1013,6 +1264,14 @@ def daemon(args):
                 ingest_result_zip(result_zip)
             except Exception:
                 continue
+
+        if diag_root and diag_root.exists():
+            # Default layout on Windows: <diag_root>/<run_id>/buildbox_diag_<title>_<run_id>/...
+            for diag_dir in sorted(diag_root.glob("*/buildbox_diag_*")):
+                try:
+                    ingest_diag_dir(diag_dir)
+                except Exception:
+                    continue
 
         time.sleep(args.poll_sec)
 
@@ -1104,9 +1363,13 @@ def main():
     ingest_zip = sub.add_parser("ingest-result-zip", help="Ingest a result zip")
     ingest_zip.add_argument("--result-zip", required=True)
 
+    ingest_diag = sub.add_parser("ingest-diag-dir", help="Ingest a buildbox diagnostics directory")
+    ingest_diag.add_argument("--diag-dir", required=True)
+
     daemon_cmd = sub.add_parser("daemon", help="Watch results directory")
     daemon_cmd.add_argument("--results-dir", required=True)
     daemon_cmd.add_argument("--poll-sec", type=int, default=2)
+    daemon_cmd.add_argument("--diag-root", required=False, help="Optional: also watch a buildbox diag root (e.g. /mnt/c/polish/queue/reports/_diag_downloads)")
 
     choose = sub.add_parser("choose-goal", help="Choose goal (MVP)")
     choose.add_argument("--plan", required=True)
@@ -1122,6 +1385,9 @@ def main():
         return
     if args.command == "ingest-result-zip":
         ingest_result_zip_cli(args)
+        return
+    if args.command == "ingest-diag-dir":
+        ingest_diag_dir_cli(args)
         return
     if args.command == "daemon":
         daemon(args)

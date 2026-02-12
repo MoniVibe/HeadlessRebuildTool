@@ -22,11 +22,25 @@ One-shot usage:
 ```
 python3 Polish/Intel/anviloop_intel.py ingest-ledger
 python3 Polish/Intel/anviloop_intel.py ingest-result-zip --result-zip /mnt/c/polish/queue/results/result_*.zip
+python3 Polish/Intel/anviloop_intel.py ingest-diag-dir --diag-dir /mnt/c/polish/queue/reports/_diag_downloads/<run_id>/buildbox_diag_<title>_<run_id>
 ```
 
 Daemon watch mode:
 ```
 python3 Polish/Intel/anviloop_intel.py daemon --results-dir /mnt/c/polish/queue/results --poll-sec 2
+```
+
+Daemon watch mode (results + buildbox diags):
+```
+python3 Polish/Intel/anviloop_intel.py daemon \
+  --results-dir /mnt/c/polish/queue/results \
+  --diag-root /mnt/c/polish/queue/reports/_diag_downloads \
+  --poll-sec 2
+```
+
+Ledger path override:
+```
+export ANVILOOP_INTEL_LEDGER_PATH=/home/oni/headless/HeadlessRebuildTool/Polish/Docs/ANVILOOP_RECURRING_ERRORS.md
 ```
 
 Explain latest (writes to C: reports):
