@@ -48,6 +48,8 @@ Explain latest (writes to C: reports):
 python3 Polish/Intel/anviloop_intel.py ingest-result-zip --result-zip /mnt/c/polish/queue/results/result_*.zip
 ```
 
+Note: `ingest-diag-dir` writes explain files as `explain_diag_<run_id>.json` to avoid clobbering `explain_<job_id>.json` from result zips.
+
 Choose-goal stub + reward logging:
 ```
 python3 Polish/Intel/anviloop_intel.py choose-goal --plan /mnt/c/polish/queue/reports/nightly_plan.json --out /mnt/c/polish/queue/reports/choose_goal.json

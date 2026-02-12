@@ -195,6 +195,15 @@ IL2CPP_RE = re.compile(r"\bIL2CPP\b|\bil2cpp\.exe\b", re.IGNORECASE)
 LINKER_RE = re.compile(r"\bUnityLinker\b|\blink(er)?\s+error\b|\bld:\s+error\b", re.IGNORECASE)
 SCRIPT_COMPILATION_RE = re.compile(r"\bScriptCompilation\b|\bCompilationFailedException\b", re.IGNORECASE)
 BEE_RE = re.compile(r"\bBeeStall\b|\bLibrary/Bee\b|\bScriptCompilationBuildProgram\b", re.IGNORECASE)
+HANG_RE = re.compile(
+    r"\bHANG_TIMEOUT\b|\bhung\b|\bhang\b|\bstall\b|\bdeadlock\b|\bno progress\b",
+    re.IGNORECASE,
+)
+ONDEMAND_TIMEOUT_RE = re.compile(
+    r"\bOnDemand\b.*\btimeout\b|\btimed out connecting\b|\bWorker timed out\b",
+    re.IGNORECASE,
+)
+THREADPOOL_STARVATION_RE = re.compile(r"\bthread pool starvation\b", re.IGNORECASE)
 
 
 def extract_compilation_signals(text):
@@ -216,32 +225,35 @@ def extract_compilation_signals(text):
     if not text:
         return signals
 
-    csharp = []
-    burst = []
-    samples = []
-    for line in split_lines(text, max_lines=600):
-        if CS_ERROR_RE.search(line):
-            code = CS_ERROR_RE.search(line).group(1)
-            csharp.append(code)
-            if len(samples) < 15:
-                samples.append(line.strip())
-            continue
-        if BURST_ERROR_RE.search(line):
-            code = BURST_ERROR_RE.search(line).group(1)
-            burst.append(code)
-            if len(samples) < 15:
-                samples.append(line.strip())
-            continue
-        if ("error" in line.lower() or "exception" in line.lower()) and len(samples) < 15:
-            # Generic "first useful errors" capture for non-coded failures.
-            samples.append(line.strip())
-
+    # Codes: scan full text (head + tail), not just tail lines.
+    csharp = CS_ERROR_RE.findall(text) or []
+    burst = BURST_ERROR_RE.findall(text) or []
     signals["csharp_error_codes"] = sorted(set(csharp))[:10]
     signals["burst_error_codes"] = sorted(set(burst))[:10]
     signals["has_il2cpp"] = bool(IL2CPP_RE.search(text))
     signals["has_linker"] = bool(LINKER_RE.search(text))
     signals["has_script_compilation"] = bool(SCRIPT_COMPILATION_RE.search(text))
     signals["has_bee"] = bool(BEE_RE.search(text))
+
+    # Samples: prefer lines that include actionable compilation markers; avoid generic noise.
+    samples = []
+    for raw in text.splitlines():
+        line = (raw or "").strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if "burst error bc" in lowered or "error cs" in lowered:
+            samples.append(line)
+        elif "compilationfailedexception" in lowered or "scriptcompilation" in lowered:
+            samples.append(line)
+        elif "unitylinker" in lowered or "linker error" in lowered:
+            samples.append(line)
+        elif "il2cpp" in lowered:
+            samples.append(line)
+        elif "beestall" in lowered:
+            samples.append(line)
+        if len(samples) >= 15:
+            break
     signals["sample_lines"] = samples[:15]
 
     signals["detected"] = bool(
@@ -250,6 +262,48 @@ def extract_compilation_signals(text):
         or signals["has_il2cpp"]
         or signals["has_linker"]
         or signals["has_script_compilation"]
+    )
+    return signals
+
+
+def extract_stall_signals(text):
+    signals = {
+        "detected": False,
+        "has_hang_timeout": False,
+        "has_beestall": False,
+        "has_on_demand_timeout": False,
+        "has_threadpool_starvation": False,
+        "sample_lines": [],
+    }
+    if not text:
+        return signals
+
+    signals["has_hang_timeout"] = bool(HANG_RE.search(text))
+    signals["has_beestall"] = bool(re.search(r"\bBeeStall\b", text, re.IGNORECASE))
+    signals["has_on_demand_timeout"] = bool(ONDEMAND_TIMEOUT_RE.search(text))
+    signals["has_threadpool_starvation"] = bool(THREADPOOL_STARVATION_RE.search(text))
+
+    samples = []
+    for raw in text.splitlines():
+        line = (raw or "").strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if "hang_timeout" in lowered or "beestall" in lowered:
+            samples.append(line)
+        elif "thread pool starvation" in lowered:
+            samples.append(line)
+        elif "timed out" in lowered and ("worker" in lowered or "ondemand" in lowered):
+            samples.append(line)
+        if len(samples) >= 15:
+            break
+    signals["sample_lines"] = samples[:15]
+
+    signals["detected"] = bool(
+        signals["has_hang_timeout"]
+        or signals["has_beestall"]
+        or signals["has_on_demand_timeout"]
+        or signals["has_threadpool_starvation"]
     )
     return signals
 
@@ -625,6 +679,56 @@ def find_first_existing(paths):
     return None
 
 
+BUILD_ID_RE = re.compile(r"^(?:artifact|result)_(?P<build_id>\d{8}_\d{6}_\d+_[0-9a-f]{8})", re.IGNORECASE)
+
+
+def extract_build_id_from_filename(name):
+    match = BUILD_ID_RE.match(name or "")
+    if not match:
+        return None
+    return match.group("build_id")
+
+
+def pick_results_entries_for_build_id(results_dir, build_id):
+    """Support both extracted diagnostics (directories) and raw zips.
+
+    buildbox downloads often contain extracted `results/artifact_<build_id>/...` directories
+    rather than `*.zip` files.
+    """
+    if not results_dir or not Path(results_dir).exists() or not build_id:
+        return None, None, []
+    results_dir = Path(results_dir)
+    artifact_entry = None
+    result_entry = None
+    all_build_ids = []
+
+    for candidate in sorted(results_dir.iterdir()):
+        bid = extract_build_id_from_filename(candidate.name)
+        if bid:
+            all_build_ids.append(bid)
+        if bid != build_id:
+            continue
+        if candidate.name.startswith("artifact_") and artifact_entry is None:
+            artifact_entry = candidate
+        if candidate.name.startswith("result_") and result_entry is None:
+            result_entry = candidate
+
+    # If directories weren't present, fall back to zips (older layouts).
+    if artifact_entry is None or result_entry is None:
+        for candidate in sorted(results_dir.glob("*.zip")):
+            bid = extract_build_id_from_filename(candidate.name)
+            if bid and bid not in all_build_ids:
+                all_build_ids.append(bid)
+            if bid != build_id:
+                continue
+            if candidate.name.startswith("artifact_") and artifact_entry is None:
+                artifact_entry = candidate
+            if candidate.name.startswith("result_") and result_entry is None:
+                result_entry = candidate
+
+    return artifact_entry, result_entry, all_build_ids
+
+
 def pick_build_headline(smoke, compiler_signals, fallback_text):
     first = (smoke.get("build_first_error") or "").strip()
     if first:
@@ -649,21 +753,111 @@ def build_record_from_diag_dir(diag_dir):
     missing_scripts = read_text_file(diag_dir / "missing_scripts.txt")
     pipeline_smoke_log = read_text_file(diag_dir / "pipeline_smoke.log")
 
+    build_id = smoke.get("build_id") or None
+    smoke_commit = smoke.get("commit") or None
+    smoke_scenario_id = smoke.get("scenario_id") or None
+
     artifact_snippet = ""
-    artifact_zip = None
     results_dir = diag_dir / "results"
-    if results_dir.exists():
-        for candidate in sorted(results_dir.glob("artifact_*.zip")):
-            artifact_zip = candidate
-            break
-    if artifact_zip:
+    artifact_entry, result_entry, found_build_ids = pick_results_entries_for_build_id(
+        results_dir, build_id
+    )
+
+    if artifact_entry:
+        if artifact_entry.is_dir():
+            artifact_snippet = read_text_file(
+                artifact_entry / "logs" / "primary_error_snippet.txt",
+                max_bytes=65536,
+            )
+            if not artifact_snippet:
+                artifact_snippet = read_text_file(
+                    artifact_entry / "logs" / "unity_build_tail.txt",
+                    max_bytes=65536,
+                )
+        else:
+            try:
+                with zipfile.ZipFile(artifact_entry, "r") as zf:
+                    artifact_snippet = read_zip_tail_text(
+                        zf, "logs/primary_error_snippet.txt", max_bytes=65536
+                    )
+                    if not artifact_snippet:
+                        artifact_snippet = read_zip_tail_text(
+                            zf, "logs/unity_build_tail.txt", max_bytes=65536
+                        )
+            except Exception:
+                artifact_snippet = ""
+
+    # If a matching result zip exists for this build_id, pull additional evidence/telemetry signals.
+    run_summary = {}
+    watchdog = {}
+    meta = {}
+    telemetry_truncated = None
+    telemetry_events = None
+    telemetry_bytes = None
+    if result_entry:
         try:
-            with zipfile.ZipFile(artifact_zip, "r") as zf:
-                artifact_snippet = read_zip_tail_text(zf, "logs/primary_error_snippet.txt", max_bytes=65536)
-                if not artifact_snippet:
-                    artifact_snippet = read_zip_tail_text(zf, "logs/unity_build_tail.txt", max_bytes=65536)
+            if result_entry.is_dir():
+                meta = read_json(result_entry / "meta.json") or {}
+                watchdog = read_json(result_entry / "out" / "watchdog.json") or {}
+                run_summary = read_json(result_entry / "out" / "run_summary.json") or {}
+
+                telemetry_path = result_entry / "out" / "telemetry.ndjson"
+                telemetry_metrics = {}
+                if telemetry_path.exists():
+                    try:
+                        tail = read_text_file(telemetry_path, max_bytes=262144)
+                        for line in [ln.strip() for ln in tail.splitlines() if ln.strip()][-200:]:
+                            try:
+                                payload = json.loads(line)
+                            except Exception:
+                                continue
+                            if not isinstance(payload, dict):
+                                continue
+                            name = payload.get("metric") or payload.get("key")
+                            if not name:
+                                continue
+                            value = payload.get("value")
+                            if value is None:
+                                continue
+                            telemetry_metrics[name] = value
+                    except Exception:
+                        telemetry_metrics = {}
+                telemetry_truncated = telemetry_metrics.get("telemetry.truncated")
+            else:
+                with zipfile.ZipFile(result_entry, "r") as zf:
+                    meta = read_zip_json(zf, "meta.json") or {}
+                    watchdog = read_zip_json(zf, "out/watchdog.json") or {}
+                    run_summary = read_zip_json(zf, "out/run_summary.json") or {}
+                    telemetry_metrics = parse_telemetry_tail_metrics(zf)
+                    telemetry_truncated = telemetry_metrics.get("telemetry.truncated")
         except Exception:
-            artifact_snippet = ""
+            meta = {}
+            watchdog = {}
+            run_summary = {}
+            telemetry_truncated = None
+
+        telemetry_summary = run_summary.get("telemetry_summary") if isinstance(run_summary, dict) else None
+        telemetry_events = (
+            telemetry_summary.get("event_total") if isinstance(telemetry_summary, dict) else None
+        )
+        telemetry_bytes = run_summary.get("telemetry_bytes") if isinstance(run_summary, dict) else None
+
+        if telemetry_truncated is None and isinstance(run_summary, dict):
+            telemetry = run_summary.get("telemetry")
+            if isinstance(telemetry, dict):
+                telemetry_truncated = telemetry.get("truncated")
+            if telemetry_truncated is None:
+                telemetry_truncated = run_summary.get("telemetry_truncated")
+
+    # Detect obvious metadata mismatches when both smoke summary and result meta exist.
+    meta_mismatch = []
+    if result_entry and isinstance(meta, dict) and meta:
+        if build_id and meta.get("build_id") and str(meta.get("build_id")) != str(build_id):
+            meta_mismatch.append("build_id")
+        if smoke_commit and meta.get("commit") and str(meta.get("commit")) != str(smoke_commit):
+            meta_mismatch.append("commit")
+        if smoke_scenario_id and meta.get("scenario_id") and str(meta.get("scenario_id")) != str(smoke_scenario_id):
+            meta_mismatch.append("scenario_id")
 
     corpus = "\n".join(
         [
@@ -673,9 +867,11 @@ def build_record_from_diag_dir(diag_dir):
             missing_scripts.strip(),
             artifact_snippet.strip(),
             pipeline_smoke_log.strip(),
+            read_text_file(diag_dir / "logs" / "watchdog_heartbeat.log", max_bytes=262144).strip(),
         ]
     ).strip()
     compiler_signals = extract_compilation_signals(corpus)
+    stall_signals = extract_stall_signals(corpus)
 
     run_id = None
     match = re.search(r"_(\d{6,})$", diag_dir.name)
@@ -683,7 +879,6 @@ def build_record_from_diag_dir(diag_dir):
         run_id = match.group(1)
 
     title = smoke.get("title") or smoke.get("Title") or None
-    build_id = smoke.get("build_id") or None
     status = smoke.get("status") or ""
 
     headline = pick_build_headline(smoke, compiler_signals, build_error_summary or artifact_snippet or pipeline_smoke_log)
@@ -696,10 +891,61 @@ def build_record_from_diag_dir(diag_dir):
             headline,
             " ".join(compiler_signals.get("csharp_error_codes") or []),
             " ".join(compiler_signals.get("burst_error_codes") or []),
+            "BeeStall" if stall_signals.get("has_beestall") else "",
+            "HANG_TIMEOUT" if stall_signals.get("has_hang_timeout") else "",
         ]
     ).strip()
 
     record_id = f"diag_{run_id}" if run_id else f"diag_{diag_dir.name}"
+
+    invalid_reasons = []
+    warning_reasons = []
+    if not smoke:
+        invalid_reasons.append("smoke_summary_missing")
+    if build_id and not artifact_entry and results_dir.exists():
+        invalid_reasons.append("artifact_zip_missing_for_build_id")
+    if found_build_ids and build_id:
+        other = [bid for bid in found_build_ids if bid != build_id]
+        if other:
+            warning_reasons.append("stale_mixed_results_present")
+    if status.upper() == "SUCCESS" and not result_entry and results_dir.exists():
+        invalid_reasons.append("result_zip_missing_for_success")
+    if result_entry:
+        if not meta:
+            invalid_reasons.append("meta_missing_in_result_zip")
+        if not watchdog:
+            invalid_reasons.append("watchdog_missing_in_result_zip")
+        if not run_summary:
+            invalid_reasons.append("run_summary_missing_in_result_zip")
+        if telemetry_events in (None, 0):
+            warning_reasons.append("telemetry_event_total_missing_or_zero")
+        if normalize_bool(telemetry_truncated):
+            warning_reasons.append("telemetry_truncated")
+        if meta_mismatch:
+            warning_reasons.append("meta_mismatch:" + ",".join(sorted(set(meta_mismatch))))
+
+    validity = {
+        "status": "INVALID"
+        if invalid_reasons
+        else "OK_WITH_WARNINGS"
+        if warning_reasons
+        else "VALID",
+        "invalid_reasons": invalid_reasons,
+        "warning_reasons": warning_reasons,
+        "evidence": {
+            "has_smoke_summary": bool(smoke_text.strip()),
+            "has_build_error_summary": bool(build_error_summary.strip()),
+            "has_compiler_errors": bool(compiler_errors.strip()),
+            "has_missing_scripts_report": bool(missing_scripts.strip()),
+            "artifact_zip_for_build_id": str(artifact_entry) if artifact_entry else None,
+            "result_zip_for_build_id": str(result_entry) if result_entry else None,
+            "results_build_ids": sorted(set(found_build_ids))[:10],
+            "meta_mismatch": meta_mismatch,
+            "telemetry_events": telemetry_events,
+            "telemetry_bytes": telemetry_bytes,
+            "telemetry_truncated": telemetry_truncated,
+        },
+    }
 
     record = {
         "record_id": record_id,
@@ -721,12 +967,28 @@ def build_record_from_diag_dir(diag_dir):
         "template_ids": [],
         "template_texts": [],
         "metrics": {},
-        "validity": {},
+        "validity": validity,
         "questions": None,
         "bank": None,
         "signals": {
             "compilation": compiler_signals,
-            "missing_scripts_text_present": bool(missing_scripts and "no missing script" not in missing_scripts.lower()),
+            "stall": stall_signals,
+            "telemetry": {
+                "truncated": telemetry_truncated,
+                "event_total": telemetry_events,
+                "bytes": telemetry_bytes,
+            }
+            if result_entry
+            else {"present": False},
+            "evidence": {
+                "stale_mixed_results_present": "stale_mixed_results_present"
+                in warning_reasons,
+                "artifact_zip_for_build_id_present": bool(artifact_entry),
+                "result_zip_for_build_id_present": bool(result_entry),
+            },
+            "missing_scripts_text_present": bool(
+                missing_scripts and "no missing script" not in missing_scripts.lower()
+            ),
         },
         "embed_text": embed_text,
     }
@@ -1170,11 +1432,18 @@ def build_explain(record):
 
     reports_dir = Path("/mnt/c/polish/queue/reports/intel")
     reports_dir.mkdir(parents=True, exist_ok=True)
-    job_id = record.get("meta", {}).get("job_id") or record.get("record_id")
-    explain_path = reports_dir / f"explain_{job_id}.json"
+
+    # Avoid collisions between run-result explains and diag explains (both can share the same job_id).
+    file_id = None
+    if record.get("diag_dir"):
+        file_id = record.get("record_id")
+    if not file_id:
+        file_id = record.get("meta", {}).get("job_id") or record.get("record_id")
+
+    explain_path = reports_dir / f"explain_{file_id}.json"
     write_json(explain_path, explain)
     if isinstance(questions, dict):
-        questions_path = reports_dir / f"questions_{job_id}.json"
+        questions_path = reports_dir / f"questions_{file_id}.json"
         write_json(questions_path, questions)
     return explain_path
 
