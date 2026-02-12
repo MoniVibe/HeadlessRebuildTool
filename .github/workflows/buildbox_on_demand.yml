@@ -374,7 +374,7 @@ jobs:
             Add-Content -Path $summary -Value "* workflow_state: completed"
             Copy-Item -Path $summary -Destination $summaryCopy -Force
             $summaryText = Get-Content $summaryCopy -Raw
-            if ($summaryText -match '(?m)^\\* status: FAIL') {
+            if ($summaryText -match '(?m)^\* status: FAIL') {
               throw "pipeline_smoke reported FAIL (see $summaryCopy)"
             }
           } else {
