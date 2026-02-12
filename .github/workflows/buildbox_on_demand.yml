@@ -187,7 +187,7 @@ jobs:
               try {
                 Ensure-OriginHttps -RepoPath $supervisorDest -HttpsUrl $toolsRepoUrl
                 & git -c "safe.directory=$supervisorDest" -C $supervisorDest fetch origin --prune
-                & git -c "safe.directory=$supervisorDest" -C $supervisorDest reset --hard origin/main
+                & git -c "safe.directory=$supervisorDest" -C $supervisorDest reset --hard $toolsCheckout
               } catch {
               }
             } elseif (Test-Path $supervisorSrc) {
@@ -303,8 +303,8 @@ jobs:
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'reset', '--hard', $puredotsCheckout) -Context "puredots reset $puredotsCheckout"
             Invoke-Git -GitArgs @('-C', $puredotsTarget, 'clean', '-fd') -Context "puredots clean"
             try {
-              $refLine = & git -C $puredotsTarget show-ref --heads --remotes | Select-String -Pattern "origin/$puredotsRef"
-              Write-Host ("puredots_ref_present={0}" -f ($null -ne $refLine))
+              & git -C $puredotsTarget show-ref --verify --quiet ("refs/remotes/origin/" + $puredotsRef)
+              Write-Host ("puredots_ref_present={0}" -f ($LASTEXITCODE -eq 0))
             } catch {
               Write-Warning "Failed to check PureDOTS ref presence."
             }
