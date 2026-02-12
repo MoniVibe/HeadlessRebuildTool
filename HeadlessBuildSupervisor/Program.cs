@@ -190,6 +190,40 @@ internal static class Program
         return success ? 0 : 1;
     }
 
+    private static string PrepareStagingDir(Options options, List<string> bootstrapLog)
+    {
+        var stagingDir = options.StagingDir;
+        if (string.IsNullOrWhiteSpace(stagingDir))
+        {
+            stagingDir = Path.Combine(options.ArtifactDir, $"staging_{options.BuildId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
+        }
+
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= StagingCreateRetries; attempt++)
+        {
+            try
+            {
+                Directory.CreateDirectory(stagingDir);
+                var probePath = Path.Combine(stagingDir, StagingProbeFileName);
+                File.WriteAllText(probePath, DateTime.UtcNow.ToString("O"));
+                File.Delete(probePath);
+                bootstrapLog.Add($"staging_ready path={stagingDir} attempt={attempt}");
+                return stagingDir;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                bootstrapLog.Add($"staging_prepare_failed path={stagingDir} attempt={attempt} error={ex.GetType().Name}: {ex.Message}");
+                if (attempt < StagingCreateRetries)
+                {
+                    Thread.Sleep(StagingCreateDelayMs);
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Failed to prepare staging directory: {stagingDir}", lastError);
+    }
+
     private static bool ZipHasEntries(string zipPath, IReadOnlyCollection<string> requiredEntries, Logger logger)
     {
         try
