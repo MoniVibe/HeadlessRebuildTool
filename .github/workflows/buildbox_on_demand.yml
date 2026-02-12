@@ -182,23 +182,20 @@ jobs:
 
           $supervisorSrc = Join-Path $toolsRepo "HeadlessBuildSupervisor"
           $supervisorDest = Join-Path $tri "Tools\\HeadlessBuildSupervisor"
-          if (Test-Path $supervisorDest) {
-            if (Test-Path (Join-Path $supervisorDest ".git")) {
-              try {
-                Ensure-OriginHttps -RepoPath $supervisorDest -HttpsUrl $toolsRepoUrl
-                & git -c "safe.directory=$supervisorDest" -C $supervisorDest fetch origin --prune
-                & git -c "safe.directory=$supervisorDest" -C $supervisorDest reset --hard $toolsCheckout
-              } catch {
-              }
-            } elseif (Test-Path $supervisorSrc) {
-              $srcPath = (Resolve-Path $supervisorSrc).Path
-              $destPath = (Resolve-Path $supervisorDest).Path
-              if ($srcPath -ne $destPath) {
-                Copy-Item -Path (Join-Path $supervisorSrc "*") -Destination $supervisorDest -Recurse -Force
-              } else {
-                Write-Host "supervisor_sync=skip_same_path"
-              }
+          if (Test-Path $supervisorSrc) {
+            if (-not (Test-Path $supervisorDest)) {
+              New-Item -ItemType Directory -Path $supervisorDest -Force | Out-Null
             }
+            $srcPath = (Resolve-Path $supervisorSrc).Path
+            $destPath = (Resolve-Path $supervisorDest).Path
+            if ($srcPath -ne $destPath) {
+              Copy-Item -Path (Join-Path $supervisorSrc "*") -Destination $supervisorDest -Recurse -Force
+              Write-Host ("supervisor_sync=copied source={0} dest={1}" -f $srcPath, $destPath)
+            } else {
+              Write-Host "supervisor_sync=skip_same_path"
+            }
+          } else {
+            Write-Warning "supervisor_sync=missing_source"
           }
 
           # Worktree for the requested ref (keeps caches stable between runs)
