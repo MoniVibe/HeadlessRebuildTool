@@ -38,6 +38,16 @@ function Ensure-PureDotsLink {
     if (-not (Test-Path $packageJson)) {
         throw "PureDOTS package.json missing at $packageJson"
     }
+    $embeddedPackageTarget = Join-Path $target "Packages\\com.moni.puredots"
+    if (-not (Test-Path $embeddedPackageTarget)) {
+        throw "PureDOTS embedded package missing at $embeddedPackageTarget"
+    }
+    $worktreePackagesPath = Join-Path $WorktreePath "Packages"
+    Ensure-Directory -Path $worktreePackagesPath
+    $worktreePackageLink = Join-Path $worktreePackagesPath "com.moni.puredots"
+    if (-not (Test-Path $worktreePackageLink)) {
+        New-Item -ItemType Junction -Path $worktreePackageLink -Target $embeddedPackageTarget | Out-Null
+    }
     return $packageJson
 }
 

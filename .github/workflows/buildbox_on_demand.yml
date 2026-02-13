@@ -331,6 +331,30 @@ jobs:
             Write-Host ("puredots_compat_present={0}" -f (Test-Path $compatPath))
             Write-Host ("puredots_legacy_present={0}" -f (Test-Path $legacyPath))
           }
+
+          # Ensure an embedded-style package junction exists under each worktree.
+          $wtPackagesPath = Join-Path $wt "Packages"
+          if (-not (Test-Path $wtPackagesPath)) {
+            New-Item -ItemType Directory -Path $wtPackagesPath -Force | Out-Null
+          }
+          $embeddedPkgTarget = Join-Path $puredotsTarget "Packages\\com.moni.puredots"
+          $embeddedPkgLink = Join-Path $wtPackagesPath "com.moni.puredots"
+          if ((Test-Path $embeddedPkgTarget) -and (-not (Test-Path $embeddedPkgLink))) {
+            New-Item -ItemType Junction -Path $embeddedPkgLink -Target $embeddedPkgTarget | Out-Null
+          }
+          $pkgJunctionPresent = $false
+          if (Test-Path $embeddedPkgLink) {
+            try {
+              $pkgLinkItem = Get-Item -LiteralPath $embeddedPkgLink -Force
+              $pkgJunctionPresent = (($pkgLinkItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+            } catch {
+              $pkgJunctionPresent = $false
+            }
+          }
+          $shipMicroScenarioPath = Join-Path $embeddedPkgLink "Runtime\\Runtime\\Scenarios\\Samples\\scenario_ship_micro_01.json"
+          Write-Host ("puredots_pkg_junction_present={0}" -f $pkgJunctionPresent)
+          Write-Host ("puredots_ship_micro_scenario_present={0}" -f (Test-Path $shipMicroScenarioPath))
+
           # Remove legacy/generated stub duplicates that conflict with Runtime\Stubs
           $puredotsDupes = @(
             "Packages\\com.moni.puredots\\Runtime\\Runtime\\AI\\ConceptStubBehaviourTree.cs",
