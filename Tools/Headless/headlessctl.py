@@ -1025,15 +1025,23 @@ def run_task_internal(task_id, seed, pack_name):
     ensure_dir(run_dir)
 
     scenario_abs = resolve_scenario_path(tri_root, scenario_path) if scenario_path else None
-    if scenario_abs and not os.path.exists(scenario_abs):
-        return build_error_result("scenario_missing", f"scenario not found: {scenario_abs}", run_id), 2
+    scenario_existing = scenario_abs if scenario_abs and os.path.exists(scenario_abs) else None
+    scenario_launch = scenario_existing
+    if scenario_abs and not scenario_existing:
+        if runner == "scenario_runner" and scenario_path:
+            eprint(f"HEADLESSCTL: scenario_path missing prelaunch, passing through to Unity: {scenario_path}")
+            scenario_launch = scenario_path
+        else:
+            return build_error_result("scenario_missing", f"scenario not found: {scenario_abs}", run_id), 2
 
     seed_requested = seed if seed is not None else None
     if seed_requested is None:
         default_seeds = task.get("default_seeds") or []
         if default_seeds:
             seed_requested = int(default_seeds[0])
-    scenario_used, seed_effective = override_seed_if_supported(scenario_abs, run_dir, seed_requested, runner)
+    scenario_used, seed_effective = override_seed_if_supported(scenario_existing, run_dir, seed_requested, runner)
+    if scenario_used is None:
+        scenario_used = scenario_launch
 
     telemetry_path = os.path.join(run_dir, "telemetry.ndjson")
     stdout_path = os.path.join(run_dir, "stdout.log")
@@ -1045,9 +1053,9 @@ def run_task_internal(task_id, seed, pack_name):
         env[str(key)] = str(value)
     env["PUREDOTS_TELEMETRY_PATH"] = telemetry_path
     if project == "space4x":
-        if scenario_abs:
-            env["SPACE4X_SCENARIO_SOURCE_PATH"] = scenario_abs
-            env["SPACE4X_SCENARIO_PATH"] = scenario_abs
+        if scenario_existing:
+            env["SPACE4X_SCENARIO_SOURCE_PATH"] = scenario_existing
+            env["SPACE4X_SCENARIO_PATH"] = scenario_existing
         elif scenario_used:
             env["SPACE4X_SCENARIO_PATH"] = scenario_used
 
