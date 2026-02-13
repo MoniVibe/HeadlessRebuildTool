@@ -679,8 +679,39 @@ def collect_seed_metrics(seed_results, metric_keys, variance_band):
 
 def resolve_scenario_path(tri_root, scenario_path):
     if os.path.isabs(scenario_path):
-        return scenario_path
-    return os.path.join(tri_root, scenario_path)
+        candidate = scenario_path
+    else:
+        candidate = os.path.join(tri_root, scenario_path)
+
+    if os.path.exists(candidate):
+        return candidate
+
+    normalized = scenario_path.replace("\\", "/")
+    package_prefix = "Packages/com.moni.puredots/"
+    if not normalized.startswith(package_prefix):
+        return candidate
+
+    package_cache_root = os.path.join(tri_root, "Library", "PackageCache")
+    if not os.path.isdir(package_cache_root):
+        return candidate
+
+    package_dirs = sorted(
+        name for name in os.listdir(package_cache_root)
+        if name.startswith("com.moni.puredots@")
+        and os.path.isdir(os.path.join(package_cache_root, name))
+    )
+    if not package_dirs:
+        return candidate
+
+    package_dir_rel = os.path.join("Library", "PackageCache", package_dirs[0]).replace("\\", "/")
+    fallback_rel = normalized.replace("Packages/com.moni.puredots", package_dir_rel, 1)
+    fallback_abs = os.path.join(tri_root, fallback_rel.replace("/", os.sep))
+    if os.path.exists(fallback_abs):
+        eprint(f"HEADLESSCTL: scenario_path original={scenario_path}")
+        eprint(f"HEADLESSCTL: scenario_path fallback={fallback_abs}")
+        return fallback_abs
+
+    return candidate
 
 def copy_scenario_templates(src_path, run_dir):
     if not src_path:
