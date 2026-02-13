@@ -1094,7 +1094,7 @@
     "ship_micro_01": {
       "project": "godgame",
       "runner": "scenario_runner",
-      "scenario_path": "Packages/com.moni.puredots/Runtime/Runtime/Scenarios/Samples/scenario_ship_micro_01.json",
+      "scenario_path": "scenario_ship_micro_01",
       "tick_budget": 600,
       "timeout_s": 600,
       "seed_policy": "none",
