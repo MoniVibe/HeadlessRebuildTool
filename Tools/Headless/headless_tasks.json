@@ -1124,10 +1124,10 @@
       ],
       "thresholds": {
         "ship.micro.events.count": {
-          "min": 0
+          "min": 1
         },
         "ship.micro.seat.readiness": {
-          "min": 0
+          "min": 0.0001
         },
         "ship.micro.order.state": {
           "min": 0
