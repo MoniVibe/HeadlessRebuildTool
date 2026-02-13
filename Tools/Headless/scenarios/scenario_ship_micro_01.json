@@ -1,0 +1,8 @@
+{
+  "scenarioId": "scenario.space4x.ship_micro.01",
+  "seed": 4101,
+  "runTicks": 600,
+  "entityCounts": [],
+  "inputCommands": [],
+  "docs": "Ship-as-village micro slice. Seeding is centralized in ShipVillageScenarioBootstrapSystem: 1 ship root, 8 seats, 48 crew with deterministic seat assignment and bridge comms transcript every 50 ticks."
+}

@@ -1092,9 +1092,9 @@
       }
     },
     "ship_micro_01": {
-      "project": "godgame",
+      "project": "space4x",
       "runner": "scenario_runner",
-      "scenario_path": "scenario_ship_micro_01",
+      "scenario_path": "Tools/Headless/scenarios/scenario_ship_micro_01.json",
       "tick_budget": 600,
       "timeout_s": 600,
       "seed_policy": "none",
