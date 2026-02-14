@@ -1141,6 +1141,58 @@
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
     },
+    "space4x_battle_slice_01": {
+      "project": "space4x",
+      "runner": "scenario_runner",
+      "scenario_path": "Assets/Scenarios/space4x_battle_slice_01.json",
+      "tick_budget": 300,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        43101
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly",
+        "informational"
+      ],
+      "nightly_order": 43,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
+      "allow_fail": true,
+      "required_bank": "",
+      "metric_keys": [
+        "space4x.battle.determinism.digest",
+        "space4x.combat.shots.fired_total",
+        "space4x.combat.shots.hit_total",
+        "telemetry.truncated"
+      ],
+      "validate_metric_keys": [
+        "space4x.battle.determinism.digest",
+        "space4x.combat.shots.fired_total",
+        "space4x.combat.shots.hit_total"
+      ],
+      "thresholds": {
+        "space4x.battle.determinism.digest": {
+          "min": 1
+        },
+        "space4x.combat.shots.fired_total": {
+          "min": 1
+        },
+        "space4x.combat.shots.hit_total": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
     "space4x_refit_micro": {
       "project": "space4x",
       "runner": "scenario_runner",
