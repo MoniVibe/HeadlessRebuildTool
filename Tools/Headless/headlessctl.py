@@ -679,8 +679,39 @@ def collect_seed_metrics(seed_results, metric_keys, variance_band):
 
 def resolve_scenario_path(tri_root, scenario_path):
     if os.path.isabs(scenario_path):
-        return scenario_path
-    return os.path.join(tri_root, scenario_path)
+        candidate = scenario_path
+    else:
+        candidate = os.path.join(tri_root, scenario_path)
+
+    if os.path.exists(candidate):
+        return candidate
+
+    normalized = scenario_path.replace("\\", "/")
+    package_prefix = "Packages/com.moni.puredots/"
+    if not normalized.startswith(package_prefix):
+        return candidate
+
+    package_cache_root = os.path.join(tri_root, "Library", "PackageCache")
+    if not os.path.isdir(package_cache_root):
+        return candidate
+
+    package_dirs = sorted(
+        name for name in os.listdir(package_cache_root)
+        if name.startswith("com.moni.puredots@")
+        and os.path.isdir(os.path.join(package_cache_root, name))
+    )
+    if not package_dirs:
+        return candidate
+
+    package_dir_rel = os.path.join("Library", "PackageCache", package_dirs[0]).replace("\\", "/")
+    fallback_rel = normalized.replace("Packages/com.moni.puredots", package_dir_rel, 1)
+    fallback_abs = os.path.join(tri_root, fallback_rel.replace("/", os.sep))
+    if os.path.exists(fallback_abs):
+        eprint(f"HEADLESSCTL: scenario_path original={scenario_path}")
+        eprint(f"HEADLESSCTL: scenario_path fallback={fallback_abs}")
+        return fallback_abs
+
+    return candidate
 
 def copy_scenario_templates(src_path, run_dir):
     if not src_path:
@@ -994,15 +1025,23 @@ def run_task_internal(task_id, seed, pack_name):
     ensure_dir(run_dir)
 
     scenario_abs = resolve_scenario_path(tri_root, scenario_path) if scenario_path else None
-    if scenario_abs and not os.path.exists(scenario_abs):
-        return build_error_result("scenario_missing", f"scenario not found: {scenario_abs}", run_id), 2
+    scenario_existing = scenario_abs if scenario_abs and os.path.exists(scenario_abs) else None
+    scenario_launch = scenario_existing
+    if scenario_abs and not scenario_existing:
+        if runner == "scenario_runner" and scenario_path:
+            eprint(f"HEADLESSCTL: scenario_path missing prelaunch, passing through to Unity: {scenario_path}")
+            scenario_launch = scenario_path
+        else:
+            return build_error_result("scenario_missing", f"scenario not found: {scenario_abs}", run_id), 2
 
     seed_requested = seed if seed is not None else None
     if seed_requested is None:
         default_seeds = task.get("default_seeds") or []
         if default_seeds:
             seed_requested = int(default_seeds[0])
-    scenario_used, seed_effective = override_seed_if_supported(scenario_abs, run_dir, seed_requested, runner)
+    scenario_used, seed_effective = override_seed_if_supported(scenario_existing, run_dir, seed_requested, runner)
+    if scenario_used is None:
+        scenario_used = scenario_launch
 
     telemetry_path = os.path.join(run_dir, "telemetry.ndjson")
     stdout_path = os.path.join(run_dir, "stdout.log")
@@ -1014,9 +1053,9 @@ def run_task_internal(task_id, seed, pack_name):
         env[str(key)] = str(value)
     env["PUREDOTS_TELEMETRY_PATH"] = telemetry_path
     if project == "space4x":
-        if scenario_abs:
-            env["SPACE4X_SCENARIO_SOURCE_PATH"] = scenario_abs
-            env["SPACE4X_SCENARIO_PATH"] = scenario_abs
+        if scenario_existing:
+            env["SPACE4X_SCENARIO_SOURCE_PATH"] = scenario_existing
+            env["SPACE4X_SCENARIO_PATH"] = scenario_existing
         elif scenario_used:
             env["SPACE4X_SCENARIO_PATH"] = scenario_used
 

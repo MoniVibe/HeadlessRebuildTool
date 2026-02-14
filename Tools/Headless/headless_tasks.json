@@ -1090,6 +1090,56 @@
       "env": {
         "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
       }
+    },
+    "ship_micro_01": {
+      "project": "space4x",
+      "runner": "scenario_runner",
+      "scenario_path": "Tools/Headless/scenarios/scenario_ship_micro_01.json",
+      "tick_budget": 600,
+      "timeout_s": 600,
+      "seed_policy": "none",
+      "default_seeds": [
+        4101
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly"
+      ],
+      "nightly_order": 42,
+      "allow_exit_codes": [
+        0,
+        10
+      ],
+      "required_bank": "",
+      "metric_keys": [
+        "ship.micro.events.count",
+        "ship.micro.seat.readiness",
+        "ship.micro.order.state",
+        "telemetry.truncated"
+      ],
+      "validate_metric_keys": [
+        "ship.micro.events.count",
+        "ship.micro.seat.readiness",
+        "ship.micro.order.state"
+      ],
+      "thresholds": {
+        "ship.micro.events.count": {
+          "min": 1
+        },
+        "ship.micro.seat.readiness": {
+          "min": 0.0001
+        },
+        "ship.micro.order.state": {
+          "min": 0
+        },
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
     }
   }
 }
