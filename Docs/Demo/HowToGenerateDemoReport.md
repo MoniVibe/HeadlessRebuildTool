@@ -2,24 +2,33 @@
 
 `demo_report.py` packages headless run artifacts into a single human-readable report.
 
-## Inputs It Expects
+## Expected input folder
 
-- A results directory that contains either:
-- `.zip` run artifacts
-- Extracted run folders (for example folders containing `result.json`, `headless_answers.json`, `operator_report.json`)
+Point `--results_dir` at a folder that contains one or more of:
 
-The scanner is recursive, so it can handle mixed layouts in one root folder.
+- result zip files (for example `result_*.zip`)
+- extracted run folders containing `meta.json`, `result.json`, `out/run_summary.json`, `out/operator_report.json`, and/or `out/headless_answers.json`
 
-## Windows Example
+The scanner is recursive, so nested run folders are supported.
+
+## Commands
+
+Windows (PowerShell):
 
 ```powershell
 python .\Tools\Headless\demo_report.py --results_dir C:\polish\queue\results
 ```
 
-Optional HTML output:
+WSL/Linux:
+
+```bash
+python3 ./Tools/Headless/demo_report.py --results_dir /mnt/c/polish/queue/results
+```
+
+Generate both markdown and HTML:
 
 ```powershell
-python .\Tools\Headless\demo_report.py --results_dir C:\polish\queue\results --html
+python .\Tools\Headless\demo_report.py --results_dir C:\polish\queue\results --write_html
 ```
 
 Custom output paths:
@@ -27,38 +36,29 @@ Custom output paths:
 ```powershell
 python .\Tools\Headless\demo_report.py `
   --results_dir C:\polish\queue\results `
-  --output_md C:\polish\reports\demo_report.md `
-  --html `
-  --output_html C:\polish\reports\demo_report.html
+  --out_md C:\polish\reports\demo_report.md `
+  --write_html `
+  --out_html C:\polish\reports\demo_report.html
 ```
 
-## WSL Example
+## Output
 
-```bash
-python3 ./Tools/Headless/demo_report.py --results_dir /mnt/c/polish/queue/results
-```
+By default, files are written under `results_dir`:
 
-Optional HTML output:
-
-```bash
-python3 ./Tools/Headless/demo_report.py --results_dir /mnt/c/polish/queue/results --html
-```
-
-## Output Files
-
-- `demo_report.md` (default in `--results_dir`)
-- `demo_report.html` (only when `--html` is set)
+- `demo_report.md`
+- `demo_report.html` (only when `--write_html` is set)
 
 The report includes:
 
-- run index (timestamp, task/scenario, required question status)
-- per-run question outcomes (`PASS`/`FAIL`/`UNKNOWN`)
-- `unknown_reason` when present
-- key metrics such as determinism digests, profilebias deltas, and module quality/provenance values
-- artifact paths (`zip`, `headless_answers.json`, `result.json`, `operator_report.json`)
+- each discovered run (timestamp + scenario/task)
+- question verdicts from `headless_answers.json` (or `operator_report.json` fallback)
+- key metrics summaries:
+  - determinism digests
+  - profilebias deltas
+  - module pipeline quality metrics
+- artifact paths for traceability
 
-## How To Share
+## Sharing
 
-- Share `demo_report.md` directly in PR comments, chat, or handoff notes.
-- If recipients prefer rendered format, also share `demo_report.html`.
-- Include the exact `--results_dir` used so others can reproduce the same report.
+Share `demo_report.md` directly in PRs, chat, or docs.
+If a browser-friendly version is needed, share `demo_report.html` generated with `--write_html`.
