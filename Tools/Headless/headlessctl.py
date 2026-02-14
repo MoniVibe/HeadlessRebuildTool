@@ -151,6 +151,40 @@ def load_json(path):
         return json.load(handle)
 
 
+def get_tasks_registry_paths(tool_root):
+    base_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
+    override_path = os.path.join(tool_root, "Tools", "Headless", "task_overrides.json")
+    return base_path, override_path
+
+
+def load_tasks_document(tool_root, required=True, log_overrides=True):
+    tasks_path, overrides_path = get_tasks_registry_paths(tool_root)
+    if not os.path.exists(tasks_path):
+        if required:
+            raise FileNotFoundError(tasks_path)
+        return {"tasks": {}}, tasks_path
+
+    tasks_doc = load_json(tasks_path)
+    base_tasks = tasks_doc.get("tasks", {})
+    if not isinstance(base_tasks, dict):
+        base_tasks = {}
+
+    if os.path.exists(overrides_path):
+        overrides_doc = load_json(overrides_path)
+        override_tasks = overrides_doc.get("tasks", {})
+        if not isinstance(override_tasks, dict):
+            raise ValueError(f"task_overrides invalid tasks object: {overrides_path}")
+        merged_tasks = dict(base_tasks)
+        merged_tasks.update(override_tasks)
+        tasks_doc = dict(tasks_doc)
+        tasks_doc["tasks"] = merged_tasks
+        if log_overrides and override_tasks:
+            override_ids = ",".join(sorted(override_tasks.keys()))
+            eprint(f"HEADLESSCTL: task_overrides active={overrides_path} tasks={override_ids}")
+
+    return tasks_doc, tasks_path
+
+
 def parse_utc(value):
     if not value:
         return None
@@ -972,16 +1006,18 @@ def run_task_internal(task_id, seed, pack_name):
     if not is_tri_root(tri_root):
         return build_error_result("tri_root_invalid", f"TRI_ROOT invalid: {tri_root}"), 2
     state_dir = resolve_state_dir(tri_root)
-    tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
+    tasks_path, _ = get_tasks_registry_paths(tool_root)
     packs_path = os.path.join(tool_root, "Tools", "Headless", "headless_packs.json")
 
-    if not os.path.exists(tasks_path):
+    try:
+        tasks_doc, _ = load_tasks_document(tool_root, required=True)
+    except FileNotFoundError:
         return build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2
 
     if not os.path.exists(packs_path):
         return build_error_result("packs_missing", f"packs registry not found: {packs_path}"), 2
 
-    tasks = load_json(tasks_path).get("tasks", {})
+    tasks = tasks_doc.get("tasks", {})
     packs = load_json(packs_path).get("packs", {})
 
     if task_id not in tasks:
@@ -1337,11 +1373,13 @@ def run_task(task_id, seed, seeds, pack_name):
         result = build_error_result("build_locked", f"build.lock present: {lock_path}")
         result["lock_path"] = lock_path
         emit_result(result, 2)
-    tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
-    if not os.path.exists(tasks_path):
+    tasks_path, _ = get_tasks_registry_paths(tool_root)
+    try:
+        tasks_doc, _ = load_tasks_document(tool_root, required=True)
+    except FileNotFoundError:
         emit_result(build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2)
 
-    tasks = load_json(tasks_path).get("tasks", {})
+    tasks = tasks_doc.get("tasks", {})
     if task_id not in tasks:
         emit_result(build_error_result("task_not_found", f"task not found: {task_id}"), 2)
     task = tasks[task_id]
@@ -1403,8 +1441,8 @@ def diff_metrics_internal(run_id_a, run_id_b):
     tool_root = resolve_tool_root()
     tri_root = resolve_tri_root()
     state_dir = resolve_state_dir(tri_root)
-    tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
-    tasks = load_json(tasks_path).get("tasks", {}) if os.path.exists(tasks_path) else {}
+    tasks_doc, _ = load_tasks_document(tool_root, required=False)
+    tasks = tasks_doc.get("tasks", {})
 
     def load_run(run_id):
         run_dir = os.path.join(state_dir, "runs", run_id)
@@ -1499,15 +1537,16 @@ def diff_metrics(run_id_a, run_id_b):
 
 def contract_check():
     tool_root = resolve_tool_root()
-    tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
+    tasks_path, _ = get_tasks_registry_paths(tool_root)
     packs_path = os.path.join(tool_root, "Tools", "Headless", "headless_packs.json")
 
-    if not os.path.exists(tasks_path):
+    try:
+        tasks_doc, _ = load_tasks_document(tool_root, required=True)
+    except FileNotFoundError:
         emit_result(build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2)
     if not os.path.exists(packs_path):
         emit_result(build_error_result("packs_missing", f"packs registry not found: {packs_path}"), 2)
 
-    tasks_doc = load_json(tasks_path)
     packs_doc = load_json(packs_path)
     tasks = tasks_doc.get("tasks", {})
     packs = packs_doc.get("packs", {})
@@ -1686,11 +1725,13 @@ def validate():
         result = build_error_result("build_locked", f"build.lock present: {lock_path}")
         result["lock_path"] = lock_path
         emit_result(result, 2)
-    tasks_path = os.path.join(tool_root, "Tools", "Headless", "headless_tasks.json")
-    if not os.path.exists(tasks_path):
+    tasks_path, _ = get_tasks_registry_paths(tool_root)
+    try:
+        tasks_doc, _ = load_tasks_document(tool_root, required=True)
+    except FileNotFoundError:
         emit_result(build_error_result("tasks_missing", f"tasks registry not found: {tasks_path}"), 2)
 
-    tasks = load_json(tasks_path).get("tasks", {})
+    tasks = tasks_doc.get("tasks", {})
     validate_tasks = [
         ("scenario_runner", "P0.TIME_REWIND_MICRO"),
         ("godgame_loader", "G0.GODGAME_SMOKE"),
