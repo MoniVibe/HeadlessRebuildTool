@@ -1,4 +1,116 @@
 {
   "schema_version": 1,
-  "tasks": {}
+  "tasks": {
+    "space4x_capital_20_vs_20_supergreen": {
+      "project": "space4x",
+      "runner": "scenario_runner",
+      "scenario_path": "Assets/Scenarios/space4x_capital_20_vs_20_supergreen.json",
+      "tick_budget": 2700,
+      "timeout_s": 900,
+      "seed_policy": "none",
+      "default_seeds": [
+        42020
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly",
+        "informational"
+      ],
+      "allow_exit_codes": [
+        0,
+        10
+      ],
+      "allow_fail": true,
+      "required_bank": "",
+      "metric_keys": [
+        "space4x.intercept.attempts",
+        "space4x.hull.damaged",
+        "space4x.hull.critical",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "space4x_capital_100_vs_100_proper": {
+      "project": "space4x",
+      "runner": "scenario_runner",
+      "scenario_path": "Assets/Scenarios/space4x_capital_100_vs_100_proper.json",
+      "tick_budget": 7200,
+      "timeout_s": 1800,
+      "seed_policy": "none",
+      "default_seeds": [
+        42100
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly",
+        "informational"
+      ],
+      "allow_exit_codes": [
+        0,
+        10
+      ],
+      "allow_fail": true,
+      "required_bank": "",
+      "metric_keys": [
+        "space4x.intercept.attempts",
+        "space4x.hull.damaged",
+        "space4x.hull.critical",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    },
+    "space4x_battle_slice_01_profilebias": {
+      "project": "space4x",
+      "runner": "scenario_runner",
+      "scenario_path": "Assets/Scenarios/space4x_battle_slice_01_profilebias.json",
+      "tick_budget": 1500,
+      "timeout_s": 900,
+      "seed_policy": "none",
+      "default_seeds": [
+        43107
+      ],
+      "default_pack": "nightly-default",
+      "tags": [
+        "nightly",
+        "informational"
+      ],
+      "allow_exit_codes": [
+        0,
+        10
+      ],
+      "allow_fail": true,
+      "required_bank": "",
+      "metric_keys": [
+        "space4x.intercept.attempts",
+        "space4x.hull.damaged",
+        "space4x.hull.critical",
+        "telemetry.truncated"
+      ],
+      "thresholds": {
+        "telemetry.truncated": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "env": {
+        "PUREDOTS_TELEMETRY_CADENCE_TICKS": "1"
+      }
+    }
+  }
 }
