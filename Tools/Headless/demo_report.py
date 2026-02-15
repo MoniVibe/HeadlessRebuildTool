@@ -41,6 +41,17 @@ class RunRecord:
     questions: List[QuestionEntry] = field(default_factory=list)
     metrics: Dict[str, float] = field(default_factory=dict)
     determinism_hash: str = ""
+    failure_codes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class RecurringFailureRow:
+    code: str
+    category: str
+    count: int = 0
+    scenarios: set[str] = field(default_factory=set)
+    latest_timestamp: str = "unknown"
+    latest_run_id: str = "unknown"
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,6 +75,22 @@ def safe_load_json_zip(zip_handle: zipfile.ZipFile, member: str) -> Optional[Dic
     try:
         with zip_handle.open(member, "r") as handle:
             return json.loads(handle.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
+def safe_load_text_file(path: str) -> Optional[str]:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except Exception:
+        return None
+
+
+def safe_load_text_zip(zip_handle: zipfile.ZipFile, member: str) -> Optional[str]:
+    try:
+        with zip_handle.open(member, "r") as handle:
+            return handle.read().decode("utf-8", errors="replace")
     except Exception:
         return None
 
@@ -129,6 +156,165 @@ def merge_question_metrics(target: Dict[str, float], payload: Optional[Dict[str,
         if not isinstance(metrics, dict):
             continue
         merge_numeric_metrics(target, metrics)
+
+
+def normalize_failure_code(code: Any) -> str:
+    text = str(code or "").strip()
+    if not text:
+        return ""
+    return text
+
+
+def extract_invariant_codes_from_text(text: str) -> List[str]:
+    if not text:
+        return []
+    matches = re.findall(r"Invariant/[A-Za-z0-9_.-]+", text)
+    ordered: List[str] = []
+    for match in matches:
+        add_failure_code(ordered, match)
+    return ordered
+
+
+def add_failure_code(target: List[str], code: Any) -> None:
+    normalized = normalize_failure_code(code)
+    if not normalized:
+        return
+    if normalized not in target:
+        target.append(normalized)
+
+
+def invariant_failed(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if item.get("ok") is False:
+        return True
+    if item.get("passed") is False:
+        return True
+    status = str(item.get("status") or "").strip().lower()
+    return status in {"fail", "failed", "error"}
+
+
+def invariant_identifier(item: Dict[str, Any]) -> str:
+    for key in ("id", "name", "key", "code"):
+        value = item.get(key)
+        if value:
+            return str(value)
+    return "Invariant/Unknown"
+
+
+def parse_failing_invariants(payload: Optional[Dict[str, Any]]) -> List[str]:
+    if not payload or not isinstance(payload, dict):
+        return []
+
+    candidates: Any = None
+    for key in (
+        "failing_invariants",
+        "failed_invariants",
+        "invariant_failures",
+        "failures",
+        "failed",
+        "failing",
+    ):
+        if key in payload:
+            candidates = payload.get(key)
+            break
+
+    if candidates is None and isinstance(payload.get("invariants"), list):
+        candidates = [item for item in payload.get("invariants", []) if invariant_failed(item)]
+
+    if candidates is None:
+        return []
+    if isinstance(candidates, dict):
+        candidates = [candidates]
+    if not isinstance(candidates, list):
+        return []
+
+    collected: List[str] = []
+    for item in candidates:
+        if isinstance(item, str):
+            add_failure_code(collected, item)
+            continue
+        if isinstance(item, dict):
+            add_failure_code(collected, invariant_identifier(item))
+    return collected
+
+
+def parse_invariant_jsonl_codes(text: Optional[str]) -> List[str]:
+    if not text:
+        return []
+    collected: List[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(item, dict) and invariant_failed(item):
+            add_failure_code(collected, invariant_identifier(item))
+    return collected
+
+
+def detect_watchdog_codes(
+    run_status: str,
+    watchdog: Optional[Dict[str, Any]],
+    result_payload: Optional[Dict[str, Any]],
+) -> List[str]:
+    values: List[str] = []
+    lowered = (run_status or "").lower()
+    if "bank_failed" in lowered:
+        add_failure_code(values, "bank_failed")
+    if "test_fail" in lowered:
+        add_failure_code(values, "TEST_FAIL")
+    if "watchdog" in lowered or "timeout" in lowered or "hang" in lowered:
+        add_failure_code(values, "watchdog_timeout")
+
+    for payload in (watchdog, result_payload):
+        if not isinstance(payload, dict):
+            continue
+        for key in ("exit_reason", "diag_reason", "raw_signature_string", "error_code"):
+            value = str(payload.get(key) or "")
+            lower_value = value.lower()
+            if "bank_failed" in lower_value:
+                add_failure_code(values, "bank_failed")
+            if "test_fail" in lower_value:
+                add_failure_code(values, "TEST_FAIL")
+            if "watchdog" in lower_value or "timeout" in lower_value or "hang" in lower_value:
+                add_failure_code(values, "watchdog_timeout")
+            for invariant_code in extract_invariant_codes_from_text(value):
+                add_failure_code(values, invariant_code)
+
+    return values
+
+
+def detect_operator_codes(operator: Optional[Dict[str, Any]]) -> List[str]:
+    if not operator or not isinstance(operator, dict):
+        return []
+
+    codes: List[str] = []
+    questions = operator.get("questions")
+    if isinstance(questions, list):
+        for item in questions:
+            if not isinstance(item, dict):
+                continue
+            question_id = str(item.get("id") or "")
+            status = normalize_status(item.get("status"))
+            unknown_reason = str(item.get("unknownReason") or item.get("unknown_reason") or "")
+            if status == QUESTION_FAIL:
+                if "Invariant/" in question_id:
+                    add_failure_code(codes, question_id)
+                if unknown_reason:
+                    for invariant_code in extract_invariant_codes_from_text(unknown_reason):
+                        add_failure_code(codes, invariant_code)
+                    reason_lower = unknown_reason.lower()
+                    if "bank_failed" in reason_lower:
+                        add_failure_code(codes, "bank_failed")
+                    if "test_fail" in reason_lower:
+                        add_failure_code(codes, "TEST_FAIL")
+                    if "watchdog" in reason_lower or "timeout" in reason_lower or "hang" in reason_lower:
+                        add_failure_code(codes, "watchdog_timeout")
+    return codes
 
 
 def parse_dt(value: Any) -> Optional[datetime.datetime]:
@@ -204,14 +390,27 @@ def find_file(root: str, candidates: Iterable[str]) -> Optional[str]:
     return None
 
 
-def extract_zip_json(zip_handle: zipfile.ZipFile, basename: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+def extract_zip_member(zip_handle: zipfile.ZipFile, basename: str) -> Optional[str]:
     members = [member for member in zip_handle.namelist() if member.lower().endswith(basename.lower())]
     if not members:
-        return None, None
+        return None
 
     members.sort(key=lambda member: (member.count("/"), len(member), member.lower()))
-    selected = members[0]
+    return members[0]
+
+
+def extract_zip_json(zip_handle: zipfile.ZipFile, basename: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    selected = extract_zip_member(zip_handle, basename)
+    if not selected:
+        return None, None
     return selected, safe_load_json_zip(zip_handle, selected)
+
+
+def extract_zip_text(zip_handle: zipfile.ZipFile, basename: str) -> Tuple[Optional[str], Optional[str]]:
+    selected = extract_zip_member(zip_handle, basename)
+    if not selected:
+        return None, None
+    return selected, safe_load_text_zip(zip_handle, selected)
 
 
 def resolve_run_status(
@@ -235,8 +434,11 @@ def build_run_from_folder(root: str) -> Optional[RunRecord]:
     run_summary_path = find_file(root, ("run_summary.json", os.path.join("out", "run_summary.json")))
     answers_path = find_file(root, ("headless_answers.json", os.path.join("out", "headless_answers.json")))
     operator_path = find_file(root, ("operator_report.json", os.path.join("out", "operator_report.json")))
+    invariants_json_path = find_file(root, ("invariants.json", os.path.join("out", "invariants.json")))
+    invariants_jsonl_path = find_file(root, ("invariants.jsonl", os.path.join("out", "invariants.jsonl")))
+    watchdog_path = find_file(root, ("watchdog.json", os.path.join("out", "watchdog.json")))
 
-    if not any((meta_path, result_path, run_summary_path, answers_path, operator_path)):
+    if not any((meta_path, result_path, run_summary_path, answers_path, operator_path, invariants_json_path, invariants_jsonl_path, watchdog_path)):
         return None
 
     meta = safe_load_json_file(meta_path) if meta_path else None
@@ -244,6 +446,9 @@ def build_run_from_folder(root: str) -> Optional[RunRecord]:
     run_summary = safe_load_json_file(run_summary_path) if run_summary_path else None
     answers = safe_load_json_file(answers_path) if answers_path else None
     operator = safe_load_json_file(operator_path) if operator_path else None
+    invariants_json = safe_load_json_file(invariants_json_path) if invariants_json_path else None
+    invariants_jsonl_text = safe_load_text_file(invariants_jsonl_path) if invariants_jsonl_path else None
+    watchdog = safe_load_json_file(watchdog_path) if watchdog_path else None
 
     run_id = first_non_empty(
         (
@@ -289,6 +494,17 @@ def build_run_from_folder(root: str) -> Optional[RunRecord]:
         artifact_paths["operator_report.json"] = operator_path
     if answers_path:
         artifact_paths["headless_answers.json"] = answers_path
+    failure_codes: List[str] = []
+    for code in parse_failing_invariants(run_summary):
+        add_failure_code(failure_codes, code)
+    for code in parse_failing_invariants(invariants_json):
+        add_failure_code(failure_codes, code)
+    for code in parse_invariant_jsonl_codes(invariants_jsonl_text):
+        add_failure_code(failure_codes, code)
+    for code in detect_operator_codes(operator):
+        add_failure_code(failure_codes, code)
+    for code in detect_watchdog_codes(run_status, watchdog, result_payload):
+        add_failure_code(failure_codes, code)
 
     return RunRecord(
         run_id=run_id,
@@ -301,6 +517,7 @@ def build_run_from_folder(root: str) -> Optional[RunRecord]:
         questions=questions,
         metrics=metrics,
         determinism_hash=str(run_summary.get("determinism_hash") or "") if run_summary else "",
+        failure_codes=failure_codes,
     )
 
 
@@ -312,10 +529,13 @@ def build_run_from_zip(zip_path: str) -> Optional[RunRecord]:
             run_summary_member, run_summary = extract_zip_json(zip_handle, "run_summary.json")
             answers_member, answers = extract_zip_json(zip_handle, "headless_answers.json")
             operator_member, operator = extract_zip_json(zip_handle, "operator_report.json")
+            invariants_member, invariants_json = extract_zip_json(zip_handle, "invariants.json")
+            invariants_jsonl_member, invariants_jsonl_text = extract_zip_text(zip_handle, "invariants.jsonl")
+            watchdog_member, watchdog = extract_zip_json(zip_handle, "watchdog.json")
     except Exception:
         return None
 
-    if not any((meta, result_payload, run_summary, answers, operator)):
+    if not any((meta, result_payload, run_summary, answers, operator, invariants_json, invariants_jsonl_text, watchdog)):
         return None
 
     run_id = first_non_empty(
@@ -362,6 +582,17 @@ def build_run_from_zip(zip_path: str) -> Optional[RunRecord]:
         artifact_paths["operator_report.json"] = f"{zip_path}::{operator_member}"
     if answers_member:
         artifact_paths["headless_answers.json"] = f"{zip_path}::{answers_member}"
+    failure_codes: List[str] = []
+    for code in parse_failing_invariants(run_summary):
+        add_failure_code(failure_codes, code)
+    for code in parse_failing_invariants(invariants_json):
+        add_failure_code(failure_codes, code)
+    for code in parse_invariant_jsonl_codes(invariants_jsonl_text):
+        add_failure_code(failure_codes, code)
+    for code in detect_operator_codes(operator):
+        add_failure_code(failure_codes, code)
+    for code in detect_watchdog_codes(run_status, watchdog, result_payload):
+        add_failure_code(failure_codes, code)
 
     return RunRecord(
         run_id=run_id,
@@ -374,6 +605,7 @@ def build_run_from_zip(zip_path: str) -> Optional[RunRecord]:
         questions=questions,
         metrics=metrics,
         determinism_hash=str(run_summary.get("determinism_hash") or "") if run_summary else "",
+        failure_codes=failure_codes,
     )
 
 
@@ -503,6 +735,89 @@ def collect_module_pipeline_summary(metrics: Dict[str, float]) -> List[Tuple[str
     return rows
 
 
+def categorize_failure(code: str) -> str:
+    lower = code.lower()
+    if any(token in lower for token in ("watchdog", "timeout", "hang", "test_fail", "bank_failed")):
+        return "Watchdog"
+    if any(token in lower for token in ("movement", "turnrate", "turnaccel", "stuck", "turn")):
+        return "Movement"
+    if "mining" in lower:
+        return "Mining"
+    if any(token in lower for token in ("telemetry", "oracle", "metric")):
+        return "Telemetry"
+    return "Other"
+
+
+def scenario_list_text(values: set[str]) -> str:
+    if not values:
+        return "none"
+    ordered = sorted(values, key=lambda item: item.lower())
+    if len(ordered) > 4:
+        return ", ".join(ordered[:4]) + f" (+{len(ordered) - 4} more)"
+    return ", ".join(ordered)
+
+
+def compare_timestamps(left: str, right: str) -> bool:
+    """Return true if left is newer than right."""
+    left_dt = parse_dt(left)
+    right_dt = parse_dt(right)
+    if left_dt and right_dt:
+        return left_dt > right_dt
+    if left_dt and not right_dt:
+        return True
+    if right_dt and not left_dt:
+        return False
+    return str(left) > str(right)
+
+
+def build_recurring_failures(runs: List[RunRecord]) -> List[RecurringFailureRow]:
+    rows: Dict[str, RecurringFailureRow] = {}
+    for run in runs:
+        for code in run.failure_codes:
+            normalized = normalize_failure_code(code)
+            if not normalized:
+                continue
+            if normalized not in rows:
+                rows[normalized] = RecurringFailureRow(
+                    code=normalized,
+                    category=categorize_failure(normalized),
+                )
+
+            entry = rows[normalized]
+            entry.count += 1
+            if run.scenario_or_task:
+                entry.scenarios.add(run.scenario_or_task)
+            if compare_timestamps(run.timestamp, entry.latest_timestamp):
+                entry.latest_timestamp = run.timestamp
+                entry.latest_run_id = run.run_id
+
+    ordered = list(rows.values())
+    ordered.sort(key=lambda item: (-item.count, item.code.lower()))
+    return ordered
+
+
+def render_recurring_failures_section(runs: List[RunRecord]) -> List[str]:
+    rows = build_recurring_failures(runs)
+    lines: List[str] = [
+        "## Recurring Failures Summary",
+        "",
+        "| InvariantCode | Category | Count | AffectedScenarios | LatestRun |",
+        "|---|---|---:|---|---|",
+    ]
+
+    if not rows:
+        lines.append("| none | Other | 0 | none | none |")
+        return lines
+
+    for row in rows:
+        latest = f"{row.latest_timestamp} ({row.latest_run_id})"
+        lines.append(
+            f"| `{row.code}` | {row.category} | {row.count} | "
+            f"{scenario_list_text(row.scenarios)} | {latest} |"
+        )
+    return lines
+
+
 def render_markdown(runs: List[RunRecord], results_dir: str) -> str:
     now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     lines: List[str] = [
@@ -512,6 +827,9 @@ def render_markdown(runs: List[RunRecord], results_dir: str) -> str:
         f"- Results dir: `{results_dir}`",
         f"- Runs found: `{len(runs)}`",
     ]
+
+    lines.append("")
+    lines.extend(render_recurring_failures_section(runs))
 
     for index, run in enumerate(runs, start=1):
         lines.append("")

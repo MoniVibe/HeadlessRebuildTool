@@ -50,6 +50,11 @@ By default, files are written under `results_dir`:
 
 The report includes:
 
+- recurring failures summary near the top:
+  - invariant-style codes from `invariants.json` / `invariants.jsonl` and `operator_report.json`
+  - watchdog-style failures (`watchdog_timeout`, `TEST_FAIL`, `bank_failed`)
+  - per-code count, affected scenarios/tasks, latest run, and coarse category (Movement/Mining/Telemetry/Watchdog/Other)
+
 - each discovered run (timestamp + scenario/task)
 - question verdicts from `headless_answers.json` (or `operator_report.json` fallback)
 - key metrics summaries:
@@ -57,6 +62,18 @@ The report includes:
   - profilebias deltas
   - module pipeline quality metrics
 - artifact paths for traceability
+
+Example section:
+
+```markdown
+## Recurring Failures Summary
+
+| InvariantCode | Category | Count | AffectedScenarios | LatestRun |
+|---|---|---:|---|---|
+| `Invariant/MovementStuck` | Movement | 3 | scenario_ship_micro_01, scenario_space4x_battle | 2026-02-14T21:18:41Z (run_22012345678) |
+| `watchdog_timeout` | Watchdog | 2 | scenario_space4x_battle | 2026-02-14T21:18:41Z (run_22012345678) |
+| `bank_failed` | Watchdog | 1 | scenario_ai_tierpipe_micro | 2026-02-13T11:08:09Z (run_22010223344) |
+```
 
 ## Sharing
 
