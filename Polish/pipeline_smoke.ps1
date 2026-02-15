@@ -685,11 +685,13 @@ if (-not (Test-Path $UnityExe)) {
 }
 
 $syncScript = Resolve-FirstExisting -Candidates @(
+    (Join-Path $triRoot "Tools\\HeadlessRebuildTool\\sync_headless_manifest.ps1"),
     (Join-Path $triRoot "Tools\\sync_headless_manifest.ps1"),
     (Join-Path $triRoot "sync_headless_manifest.ps1")
 ) -Description "headless manifest sync script"
 
 $swapScript = Resolve-FirstExisting -Candidates @(
+    (Join-Path $triRoot "Tools\\HeadlessRebuildTool\\Tools\\use_headless_manifest_windows.ps1"),
     (Join-Path $triRoot "Tools\\Tools\\use_headless_manifest_windows.ps1"),
     (Join-Path $triRoot "Tools\\use_headless_manifest_windows.ps1"),
     (Join-Path $triRoot "use_headless_manifest_windows.ps1")
