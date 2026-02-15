@@ -254,6 +254,16 @@ function Find-ResultCandidates {
     return Get-ChildItem -Path $ResultsDir -File -Filter $pattern | Sort-Object LastWriteTime -Descending
 }
 
+function Get-NewestResultZip {
+    param(
+        [string]$ResultsDir
+    )
+    if (-not (Test-Path $ResultsDir)) { return $null }
+    return Get-ChildItem -Path $ResultsDir -File -Filter "result_*.zip" |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
 function Read-ZipEntryText {
     param(
         [System.IO.Compression.ZipArchive]$Archive,
@@ -913,12 +923,14 @@ for ($i = 1; $i -le $Repeat; $i++) {
     if ($WaitForResult) {
         $resultZip = Join-Path $resultsDir ("result_{0}.zip" -f $jobId)
         $resultBaseId = "{0}_{1}_{2}" -f $buildId, $scenarioIdValue, $seedValue
-        $waitTimeoutSec = Get-ResultWaitTimeoutSeconds -DefaultSeconds $WaitTimeoutSec
+        $waitTimeoutSec = Get-ResultWaitTimeoutSeconds -DefaultSeconds ([Math]::Max($WaitTimeoutSec, $timeoutValue + 600))
         $baseDeadline = (Get-Date).AddSeconds($waitTimeoutSec)
         $stableSeconds = 5
         $stableDeadline = $null
         $lastSize = -1
         $lastPath = $null
+        $waitStarted = Get-Date
+        $lastHeartbeat = $waitStarted.AddSeconds(-31)
         while ($true) {
             $now = Get-Date
             $candidate = $null
@@ -954,6 +966,20 @@ for ($i = 1; $i -le $Repeat; $i++) {
                 break
             }
 
+            if (($now - $lastHeartbeat).TotalSeconds -ge 30) {
+                $elapsedSec = [int]($now - $waitStarted).TotalSeconds
+                $remainingSec = [int][Math]::Max(0, ($baseDeadline - $now).TotalSeconds)
+                $candidateName = if ($candidate) { Split-Path $candidate -Leaf } else { "none" }
+                $newest = Get-NewestResultZip -ResultsDir $resultsDir
+                $newestText = "none"
+                if ($newest) {
+                    $ageSec = [int]($now - $newest.LastWriteTime).TotalSeconds
+                    $newestText = ("{0} age_s={1} size={2}" -f $newest.Name, $ageSec, $newest.Length)
+                }
+                Write-Host ("wait_for_result heartbeat elapsed_s={0} remaining_s={1} candidate={2} lastSize={3} newest={4}" -f $elapsedSec, $remainingSec, $candidateName, $lastSize, $newestText)
+                $lastHeartbeat = $now
+            }
+
             Start-Sleep -Seconds 2
         }
 
@@ -961,6 +987,24 @@ for ($i = 1; $i -le $Repeat; $i++) {
             $alternates = Find-ResultCandidates -ResultsDir $resultsDir -BaseId $resultBaseId
             $alternateNames = if ($alternates) { $alternates | Select-Object -ExpandProperty Name } else { @() }
             $alternateList = if (@($alternateNames).Count -gt 0) { [string]::Join(", ", @($alternateNames)) } else { "(none)" }
+            $recent = if (Test-Path $resultsDir) {
+                Get-ChildItem -Path $resultsDir -File -Filter "result_*.zip" |
+                    Sort-Object LastWriteTime -Descending |
+                    Select-Object -First 5
+            }
+            else {
+                @()
+            }
+            if (@($recent).Count -gt 0) {
+                Write-Host "Newest result zips:"
+                foreach ($zip in $recent) {
+                    $ageSec = [int]((Get-Date) - $zip.LastWriteTime).TotalSeconds
+                    Write-Host ("  {0} last_write={1:o} size={2} age_s={3}" -f $zip.Name, $zip.LastWriteTime, $zip.Length, $ageSec)
+                }
+            }
+            else {
+                Write-Host "Newest result zips: (none)"
+            }
             Write-Host ("Timed out waiting for {0}; found alternates: {1}" -f $resultZip, $alternateList)
             $summaryFailure = "result_timeout"
             $summaryRunState = "failed"
