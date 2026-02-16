@@ -419,7 +419,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
           if (-not [string]::IsNullOrWhiteSpace($envJson)) { $args.EnvJson = $envJson }
           if ($pureGreenPlayMode -and $title -eq 'space4x' -and [string]::IsNullOrWhiteSpace($env:TRI_PLAYMODE_TEST_FILTER)) {
-            $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XPureGreenPlayModeGateTests'
+            $env:TRI_PLAYMODE_TEST_FILTER = 'Space4XSmokeTests'
             Write-Host ("playmode_test_filter={0}" -f $env:TRI_PLAYMODE_TEST_FILTER)
           }
 
