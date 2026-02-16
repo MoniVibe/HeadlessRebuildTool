@@ -571,6 +571,10 @@ function Invoke-PlayModeGate {
         "-testResults", $testResults,
         "-logFile", $logPath
     )
+    $testFilter = [string]$env:TRI_PLAYMODE_TEST_FILTER
+    if (-not [string]::IsNullOrWhiteSpace($testFilter)) {
+        $args += @("-testFilter", $testFilter)
+    }
     $failure = $null
     $firstError = $null
     $exitCode = -1
@@ -658,6 +662,7 @@ function Invoke-PlayModeGate {
         reason = $failure
         log_path = $logPath
         test_results = $testResults
+        test_filter = $testFilter
         first_error = $firstError
     }
 }
@@ -1133,6 +1138,9 @@ if ($pureGreenEnabled) {
 
 if ($pureGreenPlayModeEnabled) {
     $gate = Invoke-PlayModeGate -UnityExe $UnityExe -ProjectPath $projectPath -ReportsDir $reportsDir -BuildId $buildId
+    if ($gate.test_filter) {
+        $summaryExtraLines.Add("* pure_green_playmode_filter: $($gate.test_filter)") | Out-Null
+    }
     if (-not $gate.success) {
         if ($gate.first_error) {
             $summaryExtraLines.Add("* pure_green_playmode_error: $($gate.first_error)") | Out-Null
