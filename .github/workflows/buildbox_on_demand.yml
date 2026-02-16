@@ -431,7 +431,7 @@ jobs:
             Add-Content -Path $summary -Value "* workflow_state: completed"
             Copy-Item -Path $summary -Destination $summaryCopy -Force
             $summaryText = Get-Content $summaryCopy -Raw
-            if ($summaryText -match '(?m)^\\* status: FAIL') {
+            if ($summaryText -match '(?m)^\* status: FAIL') {
               throw "pipeline_smoke reported FAIL (see $summaryCopy)"
             }
           } else {
@@ -478,11 +478,11 @@ jobs:
           $pptrFileIdReport = $null
           if (Test-Path $summary) {
             $summaryText = Get-Content $summary -Raw
-            if ($summaryText -match '(?m)^\\* build_id:\\s*(\\S+)') { $buildId = $matches[1] }
-            if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+HeadlessMissingScripts\\.log)') { $missingScriptsPath = $matches[1] }
-            if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+PPtrCastScan\\.log)') { $pptrScanPath = $matches[1] }
-            if ($summaryText -match '(?m)^\\* pptr_scan_report:\\s*([A-Za-z]:\\\\[^\\r\\n]+)') { $pptrFileIdReport = $matches[1] }
-            if ($summaryText -match '(?m)([A-Za-z]:\\\\[^\\r\\n]+\\.log)') { $buildReportPath = $matches[1] }
+            if ($summaryText -match '(?m)^\* build_id:\s*(\S+)') { $buildId = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\[^\r\n]+HeadlessMissingScripts\.log)') { $missingScriptsPath = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\[^\r\n]+PPtrCastScan\.log)') { $pptrScanPath = $matches[1] }
+            if ($summaryText -match '(?m)^\* pptr_scan_report:\s*([A-Za-z]:\\[^\r\n]+)') { $pptrFileIdReport = $matches[1] }
+            if ($summaryText -match '(?m)([A-Za-z]:\\[^\r\n]+\.log)') { $buildReportPath = $matches[1] }
           }
           if ($buildReportPath -and (Test-Path $buildReportPath)) {
             $buildOutDir = Join-Path $diagRoot "build"
@@ -527,7 +527,7 @@ jobs:
 
           $zipPaths = New-Object System.Collections.Generic.List[string]
           if (Test-Path $pipelineLog) {
-            $artifactLines = Select-String -Path $pipelineLog -Pattern 'artifact=([A-Za-z]:\\\\[^\\s]+\\.zip)' -AllMatches
+            $artifactLines = Select-String -Path $pipelineLog -Pattern 'artifact=([A-Za-z]:\\[^\s]+\.zip)' -AllMatches
             foreach ($line in $artifactLines) {
               foreach ($m in $line.Matches) {
                 $zipPaths.Add($m.Groups[1].Value)
