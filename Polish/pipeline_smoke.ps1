@@ -571,12 +571,41 @@ function Invoke-PlayModeGate {
         "-testResults", $testResults,
         "-logFile", $logPath
     )
-    & $UnityExe @args
-    $exitCode = $LASTEXITCODE
-
     $failure = $null
     $firstError = $null
-    if ($exitCode -ne 0) {
+    $exitCode = -1
+
+    # Unity.exe is a GUI process on Windows; invoking with '&' can return
+    # before the process exits. Start-Process + WaitForExit ensures we gate on
+    # the actual completion of the PlayMode run.
+    $timeoutSec = 1200
+    $timeoutEnv = $env:TRI_PLAYMODE_TIMEOUT_SECONDS
+    $parsedTimeout = 0
+    if ([int]::TryParse($timeoutEnv, [ref]$parsedTimeout) -and $parsedTimeout -gt 0) {
+        $timeoutSec = $parsedTimeout
+    }
+
+    $process = $null
+    try {
+        $process = Start-Process -FilePath $UnityExe -ArgumentList $args -PassThru -WindowStyle Hidden
+        $exited = $process.WaitForExit($timeoutSec * 1000)
+        if (-not $exited) {
+            $failure = "timeout"
+            $firstError = "PlayMode run timed out after $timeoutSec seconds."
+            try { $process.Kill($true) } catch {}
+        } else {
+            $exitCode = $process.ExitCode
+        }
+    } catch {
+        $failure = "launch_failed"
+        $firstError = $_.Exception.Message
+    } finally {
+        if ($process -and -not $process.HasExited) {
+            try { $process.Kill($true) } catch {}
+        }
+    }
+
+    if (-not $failure -and $exitCode -ne 0) {
         $failure = "exit_code_$exitCode"
     }
 
