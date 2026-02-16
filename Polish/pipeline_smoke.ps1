@@ -15,6 +15,7 @@ param(
     [string[]]$Args,
     [hashtable]$Env,
     [string]$EnvJson,
+    [switch]$PureGreen,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 600
@@ -215,6 +216,15 @@ function Get-ScenarioRelFromArgs {
         }
     }
     return ""
+}
+
+function Resolve-BoolEnv {
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    $value = [string]($env:$Name)
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    $value = $value.Trim().ToLowerInvariant()
+    return ($value -in @("1", "true", "yes", "y", "on"))
 }
 
 function Strip-ScenarioArgs {
@@ -459,6 +469,89 @@ function Get-FirstErrorLine {
         }
     }
     return ""
+}
+
+function Get-MatchLines {
+    param(
+        [string]$Text,
+        [string[]]$Patterns,
+        [int]$Max = 5
+    )
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @() }
+    if (-not $Patterns -or $Patterns.Count -eq 0) { return @() }
+    $hits = New-Object System.Collections.Generic.List[string]
+    $lines = $Text -split "`r?`n"
+    foreach ($line in $lines) {
+        foreach ($pattern in $Patterns) {
+            if ($line -match $pattern) {
+                $trimmed = $line.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+                    $hits.Add($trimmed) | Out-Null
+                }
+                break
+            }
+        }
+        if ($hits.Count -ge $Max) { break }
+    }
+    return ,$hits.ToArray()
+}
+
+function Get-ArtifactErrorMatches {
+    param(
+        [string]$ZipPath,
+        [string[]]$Patterns
+    )
+    if (-not (Test-Path $ZipPath)) { return @() }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    $matches = New-Object System.Collections.Generic.List[string]
+    try {
+        $entries = @(
+            "logs/unity_build_tail.txt",
+            "build/Space4X_HeadlessBuildReport.log",
+            "logs/primary_error_snippet.txt"
+        )
+        foreach ($entry in $entries) {
+            $text = Read-ZipEntryText -Archive $archive -EntryPath $entry
+            if (-not $text) { continue }
+            $lines = Get-MatchLines -Text $text -Patterns $Patterns -Max 3
+            foreach ($line in $lines) { $matches.Add($line) | Out-Null }
+            if ($matches.Count -ge 5) { break }
+        }
+        return ,$matches.ToArray()
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-ResultErrorMatches {
+    param(
+        [string]$ZipPath,
+        [string[]]$Patterns
+    )
+    if (-not (Test-Path $ZipPath)) { return @() }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    $matches = New-Object System.Collections.Generic.List[string]
+    try {
+        $entries = @(
+            "out/stderr.log",
+            "out/player.log",
+            "out/diag_stderr_tail.txt"
+        )
+        foreach ($entry in $entries) {
+            $text = Read-ZipEntryText -Archive $archive -EntryPath $entry
+            if (-not $text) { continue }
+            $lines = Get-MatchLines -Text $text -Patterns $Patterns -Max 3
+            foreach ($line in $lines) { $matches.Add($line) | Out-Null }
+            if ($matches.Count -ge 5) { break }
+        }
+        return ,$matches.ToArray()
+    }
+    finally {
+        $archive.Dispose()
+    }
 }
 
 function Get-ArtifactSummary {
@@ -723,6 +816,39 @@ if ($Repeat -lt 1) {
 }
 
 $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+if ($envMap.ContainsKey("PURE_GREEN")) {
+    $env:PURE_GREEN = [string]$envMap["PURE_GREEN"]
+}
+$pureGreenEnabled = $false
+if ($PureGreen.IsPresent) {
+    $pureGreenEnabled = $true
+} elseif (Resolve-BoolEnv -Name "PURE_GREEN") {
+    $pureGreenEnabled = $true
+}
+$pureGreenBuildPatterns = @(
+    'error CS\d+',
+    'PPtr cast failed',
+    'Missing package manifest',
+    'ScriptCompilationFailed',
+    'AssemblyUpdater failed',
+    'The type or namespace name .* does not exist',
+    'could not be found \(are you missing an assembly reference',
+    'NullReferenceException',
+    'MissingReferenceException'
+)
+$pureGreenRuntimePatterns = @(
+    'error CS\d+',
+    '\bException\b',
+    'NullReferenceException',
+    'MissingReferenceException',
+    'IndexOutOfRangeException',
+    'ArgumentException',
+    'InvalidOperationException',
+    'PPtr cast failed',
+    'ScriptCompilationFailed',
+    'Stack overflow',
+    'Segmentation fault'
+)
 
 Ensure-GitSafeDirectory $projectPath
 $gitDirPath = Resolve-GitDir $projectPath
@@ -763,6 +889,9 @@ $summaryWritten = $false
 $summaryPipelineState = ""
 $summaryBuildState = "unknown"
 $summaryRunState = "unknown"
+if ($pureGreenEnabled) {
+    $summaryExtraLines.Add("* pure_green: true") | Out-Null
+}
 
 function Finalize-PipelineSummary {
     param(
@@ -867,6 +996,19 @@ if (-not $preflight.ok) {
 }
 else {
     $summaryBuildState = "built"
+}
+
+if ($pureGreenEnabled) {
+    $buildErrors = Get-ArtifactErrorMatches -ZipPath $artifactZip -Patterns $pureGreenBuildPatterns
+    if ($buildErrors -and $buildErrors.Count -gt 0) {
+        $first = $buildErrors[0]
+        $summaryExtraLines.Add("* pure_green_build_error: $first") | Out-Null
+        $summaryFailure = "pure_green_build_error"
+        $summaryBuildState = "failed"
+        $summaryRunState = "skipped"
+        Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
+        exit 4
+    }
 }
 
 $artifactUri = Convert-ToWslPath $artifactZip
@@ -1018,6 +1160,17 @@ for ($i = 1; $i -le $Repeat; $i++) {
         $summary = Format-ResultSummary -Index $i -Total $Repeat -Details $details
         Write-Host $summary
         $summaryResultZips.Add($resultZip) | Out-Null
+        if ($pureGreenEnabled) {
+            $runtimeErrors = Get-ResultErrorMatches -ZipPath $resultZip -Patterns $pureGreenRuntimePatterns
+            if ($runtimeErrors -and $runtimeErrors.Count -gt 0) {
+                $first = $runtimeErrors[0]
+                $summaryExtraLines.Add("* pure_green_runtime_error: $first") | Out-Null
+                $summaryFailure = "pure_green_runtime_error"
+                $summaryRunState = "failed"
+                Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
+                exit 5
+            }
+        }
         if ($details.exit_reason -in @("SUCCESS", "OK_WITH_WARNINGS")) {
             $summaryRunState = "ran"
         } else {
