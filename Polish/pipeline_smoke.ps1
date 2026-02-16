@@ -569,8 +569,7 @@ function Invoke-PlayModeGate {
         "-projectPath", $ProjectPath,
         "-runTests", "-testPlatform", "PlayMode",
         "-testResults", $testResults,
-        "-logFile", $logPath,
-        "-quit"
+        "-logFile", $logPath
     )
     & $UnityExe @args
     $exitCode = $LASTEXITCODE
@@ -581,13 +580,34 @@ function Invoke-PlayModeGate {
         $failure = "exit_code_$exitCode"
     }
 
+    if (-not $failure -and -not (Test-Path $testResults)) {
+        $failure = "results_missing"
+        $firstError = "PlayMode results file was not produced."
+    }
+
     if (-not $failure -and (Test-Path $testResults)) {
         try {
             [xml]$xml = Get-Content -Path $testResults -Raw
-            $failed = $xml.SelectNodes("//test-case[@result='Failed' or @result='Error']")
-            if ($failed -and $failed.Count -gt 0) {
-                $failure = "tests_failed"
-                $firstError = $failed[0].GetAttribute("name")
+
+            $runNode = $xml.SelectSingleNode("/test-run")
+            if ($null -eq $runNode) {
+                $failure = "results_parse_failed"
+                $firstError = "Missing /test-run node."
+            } else {
+                $total = 0
+                [void][int]::TryParse(($runNode.Attributes["total"]?.Value), [ref]$total)
+                if ($total -le 0) {
+                    $failure = "no_tests_executed"
+                    $firstError = "PlayMode run completed with zero executed tests."
+                }
+            }
+
+            if (-not $failure) {
+                $failed = $xml.SelectNodes("//test-case[@result='Failed' or @result='Error']")
+                if ($failed -and $failed.Count -gt 0) {
+                    $failure = "tests_failed"
+                    $firstError = $failed[0].GetAttribute("name")
+                }
             }
         } catch {
             $failure = "results_parse_failed"

@@ -30,6 +30,16 @@ on:
         type: boolean
         required: true
         default: false
+      pure_green:
+        description: "Enable strict pure-green build/runtime error scan"
+        type: boolean
+        required: true
+        default: false
+      pure_green_playmode:
+        description: "Run PlayMode test gate (editor-runtime parity check)"
+        type: boolean
+        required: true
+        default: false
       queue_root:
         description: "Optional override queue root (blank = default C:\\polish\\anviloop\\<title>\\queue)"
         required: false
@@ -89,6 +99,8 @@ jobs:
             }
           }
           $clean  = '${{ inputs.clean_cache }}' -eq 'true'
+          $pureGreen = '${{ inputs.pure_green }}' -eq 'true'
+          $pureGreenPlayMode = '${{ inputs.pure_green_playmode }}' -eq 'true'
           $scenarioRel = '${{ inputs.scenario_rel }}'
           $envJson = '${{ inputs.env_json }}'
           $toolsRef = '${{ inputs.tools_ref }}'
@@ -397,6 +409,11 @@ jobs:
             $args.WaitForResult = $true
             $args.WaitTimeoutSec = $resultWaitTimeoutSec
             Write-Host ("result_wait_timeout_sec={0}" -f $resultWaitTimeoutSec)
+          }
+          if ($pureGreen) { $args.PureGreen = $true }
+          if ($pureGreenPlayMode) {
+            $args.PureGreenPlayMode = $true
+            if (-not $pureGreen) { $args.PureGreen = $true }
           }
           if (-not [string]::IsNullOrWhiteSpace($scenarioRel)) { $args.ScenarioRel = $scenarioRel }
           if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
