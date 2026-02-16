@@ -16,6 +16,7 @@ param(
     [hashtable]$Env,
     [string]$EnvJson,
     [switch]$PureGreen,
+    [switch]$PureGreenPlayMode,
     [switch]$WaitForResult,
     [int]$Repeat = 1,
     [int]$WaitTimeoutSec = 600
@@ -554,6 +555,64 @@ function Get-ResultErrorMatches {
     }
 }
 
+function Invoke-PlayModeGate {
+    param(
+        [string]$UnityExe,
+        [string]$ProjectPath,
+        [string]$ReportsDir,
+        [string]$BuildId
+    )
+    $logPath = Join-Path $ReportsDir ("pure_green_playmode_{0}.log" -f $BuildId)
+    $testResults = Join-Path $ReportsDir ("pure_green_playmode_{0}.xml" -f $BuildId)
+    $args = @(
+        "-batchmode", "-nographics",
+        "-projectPath", $ProjectPath,
+        "-runTests", "-testPlatform", "PlayMode",
+        "-testResults", $testResults,
+        "-logFile", $logPath,
+        "-quit"
+    )
+    & $UnityExe @args
+    $exitCode = $LASTEXITCODE
+
+    $failure = $null
+    $firstError = $null
+    if ($exitCode -ne 0) {
+        $failure = "exit_code_$exitCode"
+    }
+
+    if (-not $failure -and (Test-Path $testResults)) {
+        try {
+            [xml]$xml = Get-Content -Path $testResults -Raw
+            $failed = $xml.SelectNodes("//test-case[@result='Failed' or @result='Error']")
+            if ($failed -and $failed.Count -gt 0) {
+                $failure = "tests_failed"
+                $firstError = $failed[0].GetAttribute("name")
+            }
+        } catch {
+            $failure = "results_parse_failed"
+            $firstError = $_.Exception.Message
+        }
+    }
+
+    if (-not $failure -and (Test-Path $logPath)) {
+        $match = Select-String -Path $logPath -Pattern "Exception|error\\s+CS\\d+|AssertionException|\\bFAIL(?:ED)?\\b" -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($match) {
+            $failure = "log_error"
+            $firstError = $match.Line.Trim()
+        }
+    }
+
+    return [ordered]@{
+        success = (-not $failure)
+        exit_code = $exitCode
+        reason = $failure
+        log_path = $logPath
+        test_results = $testResults
+        first_error = $firstError
+    }
+}
+
 function Get-ArtifactSummary {
     param([string]$ZipPath)
     if (-not (Test-Path $ZipPath)) { return $null }
@@ -819,11 +878,20 @@ $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
 if ($envMap.ContainsKey("PURE_GREEN")) {
     $env:PURE_GREEN = [string]$envMap["PURE_GREEN"]
 }
+if ($envMap.ContainsKey("PURE_GREEN_PLAYMODE")) {
+    $env:PURE_GREEN_PLAYMODE = [string]$envMap["PURE_GREEN_PLAYMODE"]
+}
 $pureGreenEnabled = $false
 if ($PureGreen.IsPresent) {
     $pureGreenEnabled = $true
 } elseif (Resolve-BoolEnv -Name "PURE_GREEN") {
     $pureGreenEnabled = $true
+}
+$pureGreenPlayModeEnabled = $false
+if ($PureGreenPlayMode.IsPresent) {
+    $pureGreenPlayModeEnabled = $true
+} elseif (Resolve-BoolEnv -Name "PURE_GREEN_PLAYMODE") {
+    $pureGreenPlayModeEnabled = $true
 }
 $pureGreenBuildPatterns = @(
     'error CS\d+',
@@ -891,6 +959,9 @@ $summaryBuildState = "unknown"
 $summaryRunState = "unknown"
 if ($pureGreenEnabled) {
     $summaryExtraLines.Add("* pure_green: true") | Out-Null
+}
+if ($pureGreenPlayModeEnabled) {
+    $summaryExtraLines.Add("* pure_green_playmode: true") | Out-Null
 }
 
 function Finalize-PipelineSummary {
@@ -1008,6 +1079,26 @@ if ($pureGreenEnabled) {
         $summaryRunState = "skipped"
         Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
         exit 4
+    }
+}
+
+if ($pureGreenPlayModeEnabled) {
+    $gate = Invoke-PlayModeGate -UnityExe $UnityExe -ProjectPath $projectPath -ReportsDir $reportsDir -BuildId $buildId
+    if (-not $gate.success) {
+        if ($gate.first_error) {
+            $summaryExtraLines.Add("* pure_green_playmode_error: $($gate.first_error)") | Out-Null
+        }
+        if ($gate.log_path) {
+            $summaryExtraLines.Add("* pure_green_playmode_log: $($gate.log_path)") | Out-Null
+        }
+        if ($gate.test_results) {
+            $summaryExtraLines.Add("* pure_green_playmode_results: $($gate.test_results)") | Out-Null
+        }
+        $summaryFailure = if ($gate.reason) { "pure_green_playmode_$($gate.reason)" } else { "pure_green_playmode_failed" }
+        $summaryBuildState = "failed"
+        $summaryRunState = "skipped"
+        Finalize-PipelineSummary -Status "FAIL" -Failure $summaryFailure
+        exit 6
     }
 }
 
