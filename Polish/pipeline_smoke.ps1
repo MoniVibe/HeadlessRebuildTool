@@ -221,7 +221,7 @@ function Get-ScenarioRelFromArgs {
 function Resolve-BoolEnv {
     param([string]$Name)
     if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
-    $value = [string]($env:$Name)
+    $value = [string]$env[$Name]
     if ([string]::IsNullOrWhiteSpace($value)) { return $false }
     $value = $value.Trim().ToLowerInvariant()
     return ($value -in @("1", "true", "yes", "y", "on"))
