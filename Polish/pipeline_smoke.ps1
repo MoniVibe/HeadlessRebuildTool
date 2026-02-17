@@ -942,6 +942,20 @@ if ($Repeat -lt 1) {
 }
 
 $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+if ($envMap.Count -gt 0) {
+    $appliedEnvKeys = New-Object System.Collections.Generic.List[string]
+    foreach ($keyObj in $envMap.Keys) {
+        $key = [string]$keyObj
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        $valueObj = $envMap[$keyObj]
+        $value = if ($null -eq $valueObj) { "" } else { [string]$valueObj }
+        Set-Item -Path ("Env:{0}" -f $key) -Value $value
+        $appliedEnvKeys.Add($key) | Out-Null
+    }
+    if ($appliedEnvKeys.Count -gt 0) {
+        Write-Host ("env_overrides_applied_keys={0}" -f ([string]::Join(",", $appliedEnvKeys)))
+    }
+}
 if ($envMap.ContainsKey("PURE_GREEN")) {
     $env:PURE_GREEN = [string]$envMap["PURE_GREEN"]
 }
