@@ -419,8 +419,14 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
           if (-not [string]::IsNullOrWhiteSpace($envJson)) { $args.EnvJson = $envJson }
           if ($pureGreenPlayMode -and $title -eq 'space4x') {
-            # Force deterministic parity gate selection on buildbox; ignore ambient runner env leakage.
-            $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderedSmokeParityTests'
+            # Prefer parity gate when present; otherwise fall back to catalog smoke on older refs.
+            $parityFixture = Join-Path $wt 'Assets\\Scripts\\Space4x\\Tests\\PlayMode\\Space4XRenderedSmokeParityTests.cs'
+            if (Test-Path $parityFixture) {
+              $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderedSmokeParityTests'
+            } else {
+              $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderCatalogSmokeTest'
+              Write-Warning ("Parity fixture missing at {0}; falling back to {1}" -f $parityFixture, $env:TRI_PLAYMODE_TEST_FILTER)
+            }
             Write-Host ("playmode_test_filter={0}" -f $env:TRI_PLAYMODE_TEST_FILTER)
           }
 
