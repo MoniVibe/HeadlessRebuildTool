@@ -565,7 +565,7 @@ function Invoke-PlayModeGate {
     $logPath = Join-Path $ReportsDir ("pure_green_playmode_{0}.log" -f $BuildId)
     $testResults = Join-Path $ReportsDir ("pure_green_playmode_{0}.xml" -f $BuildId)
     $args = @(
-        "-batchmode", "-nographics",
+        "-batchmode", "-nographics", "-quit",
         "-projectPath", $ProjectPath,
         "-runTests", "-testPlatform", "PlayMode",
         "-testResults", $testResults,
