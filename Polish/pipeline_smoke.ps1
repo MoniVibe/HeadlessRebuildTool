@@ -578,6 +578,7 @@ function Invoke-PlayModeGate {
     $failure = $null
     $firstError = $null
     $exitCode = -1
+    $timedOut = $false
 
     # Unity.exe is a GUI process on Windows; invoking with '&' can return
     # before the process exits. Start-Process + WaitForExit ensures we gate on
@@ -594,9 +595,16 @@ function Invoke-PlayModeGate {
         $process = Start-Process -FilePath $UnityExe -ArgumentList $args -PassThru -WindowStyle Hidden
         $exited = $process.WaitForExit($timeoutSec * 1000)
         if (-not $exited) {
-            $failure = "timeout"
-            $firstError = "PlayMode run timed out after $timeoutSec seconds."
+            $timedOut = $true
             try { $process.Kill($true) } catch {}
+            if (Test-Path $testResults) {
+                # Unity occasionally hangs on shutdown in CI after writing test results.
+                # Continue and evaluate the produced XML instead of hard-failing on timeout.
+                $exitCode = 0
+            } else {
+                $failure = "timeout"
+                $firstError = "PlayMode run timed out after $timeoutSec seconds."
+            }
         } else {
             $exitCode = $process.ExitCode
         }
@@ -646,6 +654,10 @@ function Invoke-PlayModeGate {
             $failure = "results_parse_failed"
             $firstError = $_.Exception.Message
         }
+    }
+
+    if (-not $failure -and $timedOut) {
+        $firstError = "Unity timed out after writing PlayMode results; XML evaluation used."
     }
 
     if (-not $failure -and (Test-Path $logPath)) {
@@ -930,6 +942,20 @@ if ($Repeat -lt 1) {
 }
 
 $envMap = ConvertTo-EnvMap -Env $Env -EnvJson $EnvJson
+if ($envMap.Count -gt 0) {
+    $appliedEnvKeys = New-Object System.Collections.Generic.List[string]
+    foreach ($keyObj in $envMap.Keys) {
+        $key = [string]$keyObj
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        $valueObj = $envMap[$keyObj]
+        $value = if ($null -eq $valueObj) { "" } else { [string]$valueObj }
+        Set-Item -Path ("Env:{0}" -f $key) -Value $value
+        $appliedEnvKeys.Add($key) | Out-Null
+    }
+    if ($appliedEnvKeys.Count -gt 0) {
+        Write-Host ("env_overrides_applied_keys={0}" -f ([string]::Join(",", $appliedEnvKeys)))
+    }
+}
 if ($envMap.ContainsKey("PURE_GREEN")) {
     $env:PURE_GREEN = [string]$envMap["PURE_GREEN"]
 }
