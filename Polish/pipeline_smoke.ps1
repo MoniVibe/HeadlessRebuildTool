@@ -649,7 +649,8 @@ function Invoke-PlayModeGate {
     }
 
     if (-not $failure -and (Test-Path $logPath)) {
-        $match = Select-String -Path $logPath -Pattern "Exception|error\\s+CS\\d+|AssertionException|\\bFAIL(?:ED)?\\b" -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 1
+        $errorPattern = "^(\\s*(?:\\w+\\.)*\\w+Exception:\\s|\\s*Unhandled Exception:\\s)|Exception while updating|error\\s+CS\\d+|AssertionException\\b|^\\s*\\bFAIL(?:ED)?\\b"
+        $match = Select-String -Path $logPath -Pattern $errorPattern -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($match) {
             $failure = "log_error"
             $firstError = $match.Line.Trim()
