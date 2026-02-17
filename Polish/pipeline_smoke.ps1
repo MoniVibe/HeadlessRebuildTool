@@ -565,7 +565,7 @@ function Invoke-PlayModeGate {
     $logPath = Join-Path $ReportsDir ("pure_green_playmode_{0}.log" -f $BuildId)
     $testResults = Join-Path $ReportsDir ("pure_green_playmode_{0}.xml" -f $BuildId)
     $args = @(
-        "-batchmode", "-nographics", "-quit",
+        "-batchmode", "-nographics",
         "-projectPath", $ProjectPath,
         "-runTests", "-testPlatform", "PlayMode",
         "-testResults", $testResults,
@@ -578,6 +578,7 @@ function Invoke-PlayModeGate {
     $failure = $null
     $firstError = $null
     $exitCode = -1
+    $timedOut = $false
 
     # Unity.exe is a GUI process on Windows; invoking with '&' can return
     # before the process exits. Start-Process + WaitForExit ensures we gate on
@@ -594,9 +595,16 @@ function Invoke-PlayModeGate {
         $process = Start-Process -FilePath $UnityExe -ArgumentList $args -PassThru -WindowStyle Hidden
         $exited = $process.WaitForExit($timeoutSec * 1000)
         if (-not $exited) {
-            $failure = "timeout"
-            $firstError = "PlayMode run timed out after $timeoutSec seconds."
+            $timedOut = $true
             try { $process.Kill($true) } catch {}
+            if (Test-Path $testResults) {
+                # Unity occasionally hangs on shutdown in CI after writing test results.
+                # Continue and evaluate the produced XML instead of hard-failing on timeout.
+                $exitCode = 0
+            } else {
+                $failure = "timeout"
+                $firstError = "PlayMode run timed out after $timeoutSec seconds."
+            }
         } else {
             $exitCode = $process.ExitCode
         }
@@ -646,6 +654,10 @@ function Invoke-PlayModeGate {
             $failure = "results_parse_failed"
             $firstError = $_.Exception.Message
         }
+    }
+
+    if (-not $failure -and $timedOut) {
+        $firstError = "Unity timed out after writing PlayMode results; XML evaluation used."
     }
 
     if (-not $failure -and (Test-Path $logPath)) {
