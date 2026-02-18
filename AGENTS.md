@@ -22,4 +22,4 @@ Each skill run should write:
 
 ## Validation
 - `pwsh -NoProfile -File .agents/skills/_shared/scripts/lint_skills.ps1`
-- `pwsh -NoProfile -Command "Invoke-Pester -Script .agents/skills/_shared/tests -EnableExit"`
+- `pwsh -NoProfile -Command "Import-Module Pester -MinimumVersion 5.0.0 -Force; Invoke-Pester -Path .agents/skills/_shared/tests -CI"`

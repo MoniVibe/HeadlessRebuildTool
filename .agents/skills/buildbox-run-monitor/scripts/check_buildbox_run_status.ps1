@@ -25,8 +25,10 @@ function Ensure-Directory {
 }
 
 function Resolve-RepoRoot {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    return (Resolve-Path (Join-Path $scriptDir "..\..\..\..")).Path
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $resolved = Resolve-Path (Join-Path $scriptDir "..\..\..\..")
+    if ($resolved -is [string]) { return $resolved }
+    return @($resolved)[0].Path
 }
 
 function Get-RunByRef {
@@ -42,7 +44,7 @@ function Get-RunByRef {
     if (-not [string]::IsNullOrWhiteSpace($RefValue)) {
         $filtered = @($runs | Where-Object { $_.headBranch -eq $RefValue })
     }
-    return @($filtered | Sort-Object createdAt -Descending | Select-Object -First 1)[0]
+    return ($filtered | Sort-Object createdAt -Descending | Select-Object -First 1)
 }
 
 Require-Gh
@@ -71,7 +73,7 @@ if ($artifactData -and $artifactData.artifacts) {
 }
 
 $diagPrefix = if ($Title) { "buildbox_diag_$Title" } else { "buildbox_diag" }
-$diagArtifact = @($artifacts | Where-Object { $_.name -like "$diagPrefix*" } | Sort-Object created_at -Descending | Select-Object -First 1)[0]
+$diagArtifact = ($artifacts | Where-Object { $_.name -like "$diagPrefix*" } | Sort-Object created_at -Descending | Select-Object -First 1)
 
 $nextSkill = "buildbox-run-monitor"
 $nextReason = "run still active"

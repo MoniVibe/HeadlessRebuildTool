@@ -29,7 +29,9 @@ jobs:
       - name: Run shared script tests
         shell: pwsh
         run: |
-          if (-not (Get-Module -ListAvailable -Name Pester)) {
-            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          $pester = Get-Module -ListAvailable -Name Pester | Sort-Object Version -Descending | Select-Object -First 1
+          if (-not $pester -or $pester.Version.Major -lt 5) {
+            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
           }
-          Invoke-Pester -Script .agents/skills/_shared/tests -EnableExit
+          Import-Module Pester -MinimumVersion 5.0.0 -Force
+          Invoke-Pester -Path .agents/skills/_shared/tests -CI -Output Detailed

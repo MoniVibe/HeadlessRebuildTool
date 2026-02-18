@@ -1,37 +1,33 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$scriptsDir = (Resolve-Path (Join-Path $PSScriptRoot "..\scripts")).Path
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..\..")).Path
-$resolveScript = Join-Path $scriptsDir "resolve_context.ps1"
-$receiptScript = Join-Path $scriptsDir "write_skill_receipt.ps1"
-$lintScript = Join-Path $scriptsDir "lint_skills.ps1"
-
 Describe "resolve_context.ps1" {
+    BeforeAll {
+        $script:resolveScript = (Resolve-Path ".agents/skills/_shared/scripts/resolve_context.ps1").Path
+    }
+
     It "returns required context fields as JSON" {
-        $json = & $resolveScript -Title space4x -AsJson
+        $json = & $script:resolveScript -Title space4x -AsJson
         $ctx = $json | ConvertFrom-Json
-        $ctx.repo_root | Should Not BeNullOrEmpty
-        $ctx.host.os | Should Not BeNullOrEmpty
-        $ctx.host.pwsh_version | Should Not BeNullOrEmpty
+        $ctx.repo_root | Should -Not -BeNullOrEmpty
+        $ctx.host.os | Should -Not -BeNullOrEmpty
+        $ctx.host.pwsh_version | Should -Not -BeNullOrEmpty
     }
 
     It "throws when QueueRoot is required and missing" {
-        $threw = $false
-        try {
-            & $resolveScript -RequireQueueRoot *> $null
-        }
-        catch {
-            $threw = $true
-        }
-        $threw | Should Be $true
+        { & $script:resolveScript -RequireQueueRoot *> $null } | Should -Throw
     }
 }
 
 Describe "write_skill_receipt.ps1" {
+    BeforeAll {
+        $script:receiptScript = (Resolve-Path ".agents/skills/_shared/scripts/write_skill_receipt.ps1").Path
+        $script:repoRoot = (Resolve-Path ".").Path
+    }
+
     It "writes per-run and latest receipt files with valid manifest JSON" {
         $slug = "pester-receipt-smoke"
-        & $receiptScript `
+        & $script:receiptScript `
             -SkillSlug $slug `
             -Status pass `
             -Reason "pester smoke" `
@@ -41,24 +37,28 @@ Describe "write_skill_receipt.ps1" {
             -PathsProducedJson '[".agents/skills/artifacts/pester-receipt-smoke/latest_manifest.json",".agents/skills/artifacts/pester-receipt-smoke/latest_log.md"]' `
             -LinksJson '{"run_url":"https://example.invalid/run/1"}' | Out-Null
 
-        $artifactDir = Join-Path $repoRoot ".agents\skills\artifacts\$slug"
+        $artifactDir = Join-Path $script:repoRoot ".agents\skills\artifacts\$slug"
         $latestManifest = Join-Path $artifactDir "latest_manifest.json"
         $latestLog = Join-Path $artifactDir "latest_log.md"
 
-        (Test-Path $latestManifest) | Should Be $true
-        (Test-Path $latestLog) | Should Be $true
-        (Get-ChildItem -Path $artifactDir -File -Filter "run_manifest_*.json").Count | Should BeGreaterThan 0
-        (Get-ChildItem -Path $artifactDir -File -Filter "run_log_*.md").Count | Should BeGreaterThan 0
+        (Test-Path $latestManifest) | Should -BeTrue
+        (Test-Path $latestLog) | Should -BeTrue
+        (Get-ChildItem -Path $artifactDir -File -Filter "run_manifest_*.json").Count | Should -BeGreaterThan 0
+        (Get-ChildItem -Path $artifactDir -File -Filter "run_log_*.md").Count | Should -BeGreaterThan 0
 
         $manifest = Get-Content -Raw $latestManifest | ConvertFrom-Json
-        $manifest.skill | Should Be $slug
-        $manifest.timing.started_at | Should Not BeNullOrEmpty
-        $manifest.timing.ended_at | Should Not BeNullOrEmpty
-        $manifest.receipt_paths.latest_manifest | Should Not BeNullOrEmpty
+        $manifest.skill | Should -Be $slug
+        $manifest.timing.started_at | Should -Not -BeNullOrEmpty
+        $manifest.timing.ended_at | Should -Not -BeNullOrEmpty
+        $manifest.receipt_paths.latest_manifest | Should -Not -BeNullOrEmpty
     }
 }
 
 Describe "lint_skills.ps1" {
+    BeforeAll {
+        $script:lintScript = (Resolve-Path ".agents/skills/_shared/scripts/lint_skills.ps1").Path
+    }
+
     It "returns non-zero on invalid skill fixture" {
         $fixtureRoot = Join-Path $env:TEMP ("skills-lint-fixture-" + [Guid]::NewGuid().ToString("N"))
         $badSkillDir = Join-Path $fixtureRoot "bad-skill"
@@ -70,12 +70,8 @@ Describe "lint_skills.ps1" {
 
         try {
             $pwsh = (Get-Command pwsh).Source
-            $proc = Start-Process -FilePath $pwsh -ArgumentList @(
-                "-NoProfile",
-                "-File", $lintScript,
-                "-SkillsRoot", $fixtureRoot
-            ) -NoNewWindow -PassThru -Wait
-            $proc.ExitCode | Should Not Be 0
+            & $pwsh -NoProfile -File $script:lintScript -SkillsRoot $fixtureRoot *> $null
+            $LASTEXITCODE | Should -Not -Be 0
         }
         finally {
             if (Test-Path $fixtureRoot) {

@@ -24,8 +24,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Resolve-RepoRoot {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    return (Resolve-Path (Join-Path $scriptDir "..\..\..\..")).Path
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $resolved = Resolve-Path (Join-Path $scriptDir "..\..\..\..")
+    if ($resolved -is [string]) { return $resolved }
+    return @($resolved)[0].Path
 }
 
 $repoRoot = Resolve-RepoRoot
