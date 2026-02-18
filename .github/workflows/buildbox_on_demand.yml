@@ -40,6 +40,10 @@ on:
         type: boolean
         required: true
         default: false
+      playmode_test_filter:
+        description: "Optional PlayMode test filter override (blank uses default parity gate)"
+        required: false
+        default: ""
       queue_root:
         description: "Optional override queue root (blank = default C:\\polish\\anviloop\\<title>\\queue)"
         required: false
@@ -101,6 +105,7 @@ jobs:
           $clean  = '${{ inputs.clean_cache }}' -eq 'true'
           $pureGreen = '${{ inputs.pure_green }}' -eq 'true'
           $pureGreenPlayMode = '${{ inputs.pure_green_playmode }}' -eq 'true'
+          $playModeTestFilterInput = '${{ inputs.playmode_test_filter }}'
           $scenarioRel = '${{ inputs.scenario_rel }}'
           $envJson = '${{ inputs.env_json }}'
           $toolsRef = '${{ inputs.tools_ref }}'
@@ -419,13 +424,17 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($scenarioId)) { $args.ScenarioId = $scenarioId }
           if (-not [string]::IsNullOrWhiteSpace($envJson)) { $args.EnvJson = $envJson }
           if ($pureGreenPlayMode -and $title -eq 'space4x') {
-            # Prefer parity gate when present; otherwise fall back to catalog smoke on older refs.
-            $parityFixture = Join-Path $wt 'Assets\\Scripts\\Space4x\\Tests\\PlayMode\\Space4XRenderedSmokeParityTests.cs'
-            if (Test-Path $parityFixture) {
-              $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderedSmokeParityTests'
+            if (-not [string]::IsNullOrWhiteSpace($playModeTestFilterInput)) {
+              $env:TRI_PLAYMODE_TEST_FILTER = $playModeTestFilterInput
             } else {
-              $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderCatalogSmokeTest'
-              Write-Warning ("Parity fixture missing at {0}; falling back to {1}" -f $parityFixture, $env:TRI_PLAYMODE_TEST_FILTER)
+              # Prefer parity gate when present; otherwise fall back to catalog smoke on older refs.
+              $parityFixture = Join-Path $wt 'Assets\\Scripts\\Space4x\\Tests\\PlayMode\\Space4XRenderedSmokeParityTests.cs'
+              if (Test-Path $parityFixture) {
+                $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderedSmokeParityTests'
+              } else {
+                $env:TRI_PLAYMODE_TEST_FILTER = 'Space4X.Tests.PlayMode.Space4XRenderCatalogSmokeTest'
+                Write-Warning ("Parity fixture missing at {0}; falling back to {1}" -f $parityFixture, $env:TRI_PLAYMODE_TEST_FILTER)
+              }
             }
             Write-Host ("playmode_test_filter={0}" -f $env:TRI_PLAYMODE_TEST_FILTER)
           }
