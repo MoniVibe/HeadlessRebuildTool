@@ -51,6 +51,11 @@ The suite forwards env flags via the queue:
 - `PUREDOTS_SHUTDOWN_AUDIT=1`
 - `PUREDOTS_BUGHUNT_DISABLE=<comma list>`
 
+## Validator lane (single gate)
+- Workflow details: `Docs/validator_workflow.md`
+- PR intent template: `.github/PULL_REQUEST_TEMPLATE.md`
+- Validator dispatch helper: `Polish/Ops/validator_dispatch_buildbox.ps1`
+
 ## Ops bus state dir (shared WSL + Windows)
 - WSL: `TRI_STATE_DIR=/home/<user>/Tri/.tri/state` (ext4).
 - Windows: `TRI_STATE_DIR=\\wsl$\\<Distro>\\home\\<user>\\Tri\\.tri\\state`.
