@@ -6,6 +6,7 @@ nightly_summary.json
 Polish/runner_config.json
 .venv/
 .DS_Store
+.agents/skills/artifacts/
 
 # HeadlessBuildSupervisor build outputs
 HeadlessBuildSupervisor/bin/
