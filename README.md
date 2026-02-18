@@ -65,6 +65,21 @@ Avoid older `min_commit` schemas in new requests.
 - These docs are copied from Tri and may need manual sync if the main repo changes.
 - Space4X Tier 2 behavior loops are currently failing in nightly (missing loops); rebuild tooling is stable but the pipeline is not fully green.
 
+## Codex Operator Skills
+- Canonical skill catalog: `.agents/skills/SKILLS_INDEX.md`.
+- Skill definitions: `.agents/skills/<skill-slug>/SKILL.md`.
+- Shared guardrails/lint/tests: `.agents/skills/_shared/scripts/` and `.agents/skills/_shared/tests/`.
+- CI lint workflow: `.github/workflows/skills-lint.yml`.
+
+Recommended lanes:
+- Preflight: `nightly-preflight-guard`
+- Dispatch: `buildbox-dispatch`
+- Monitor (read-only): `buildbox-run-monitor`
+- Diagnostics: `buildbox-diag-triage`
+- Queue maintenance: `queue-health-cleanup`
+- Full nightly: `nightly-runner-orchestrator`
+- Lock control: `session-lock-ops`
+
 ## Lean Git hygiene
 - One branch per task; delete after merge.
 - Prune remotes regularly (`git fetch --prune`).

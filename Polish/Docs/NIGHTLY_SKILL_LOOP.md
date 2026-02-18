@@ -13,24 +13,32 @@ This is a lightweight, skill-based loop for long-running nightlies. It avoids ri
 - A current nightly directive and targets exist.
 
 ## Core Skill Chain (repeat as needed)
-1. `anviloop-preflight` to verify runner sync, path sanity, telemetry budget, queue health.
-2. `anviloop-nightly` to confirm disk gate, daemons, and chain-of-custody.
-3. `anviloop-deck` only when targets or direction need to change.
-4. `deck-run` to enqueue work.
-5. `queue-health-fast` to confirm jobs are moving.
-6. `anviloop-triage` or `anviloop-intel` when results land.
-7. Fix issues in code/infra, then `deck-run` again.
-8. `anviloop-ledger` when a failure signature repeats.
-9. `handoff-sync` when pausing or handing off.
+1. `nightly-preflight-guard` to verify disk gate, runner/workflow health, locks, and queue status.
+2. `session-lock-ops` to claim/review nightly lock before long loops.
+3. Choose execution lane:
+   - `buildbox-dispatch` for normal remote runs.
+   - `nightly-runner-orchestrator` for full end-to-end nightly loop.
+4. `buildbox-run-monitor` while run is active (read-only status + next-skill hint).
+5. When outputs land:
+   - `buildbox-diag-triage` for run-level diagnostics.
+   - `pipeline-smoke-evidence-extractor` for mechanical signature/invariant extraction.
+6. `queue-health-cleanup` when queue is stale or disk pressure rises.
+7. `pipeline-watch-daemon-ops` when daemon lifecycle/single-instance issues appear.
+8. `recurring-error-ledger-update` when a stable failure signature repeats.
+9. `intel-scoreboard-review` to refresh headline/questions/next actions from result zips.
+10. `local-fallback-deck-run` only if buildbox is unavailable and emergency local override is required.
 
 ## Decision Guide
-- Queue empty or stale: use `anviloop-queue` to requeue stale leases and clear dead jobs, then `deck-run`.
-- Infra/path/runner issues: use `runner-path-sanity` and `workflow-guard`, then re-run `anviloop-preflight`.
-- Missing evidence or telemetry: `anviloop-diag-summarize` or `anviloop-intel`, fix instrumentation, re-run.
-- Compile errors: patch immediately, re-run.
+- Queue empty or stale: use `queue-health-cleanup` first, then rerun `buildbox-dispatch` or `pipeline-enqueue-artifact`.
+- Infra/path/runner issues: run `nightly-preflight-guard` and `pipeline-watch-daemon-ops`, then retry dispatch.
+- Missing evidence or telemetry: use `pipeline-smoke-evidence-extractor` or `buildbox-diag-triage`, then fix instrumentation.
+- Compile errors: patch immediately, then rerun via `buildbox-dispatch`.
+- Completed run with diagnostics artifact: route to `buildbox-diag-triage` (not orchestration).
+- Need status only (no mutations): use `buildbox-run-monitor`.
 
 ## Autonomy Notes
 - No explicit timing rules are enforced here.
 - The agent uses the nightly directive and environment constraints to decide how long to push.
 - The loop should never “wait and do nothing”; it should always pivot to a next action.
+- Canonical skill entry point is `.agents/skills/SKILLS_INDEX.md`.
 

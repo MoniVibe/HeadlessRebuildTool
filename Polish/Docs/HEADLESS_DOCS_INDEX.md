@@ -6,6 +6,19 @@
 - Intel sidecar ingests result zips and emits explain/score artifacts: `Polish/Intel/anviloop_intel.py`.
 - Scoreboard/headline (optional): `Polish/Goals/scoreboard.py`.
 
+## AGENT SKILL SURFACE (Codex)
+- Primary operator skills are in `.agents/skills/` (not `.cursor/skills/`).
+- Start with `.agents/skills/SKILLS_INDEX.md` to route quickly.
+- Critical lanes:
+  - Preflight: `nightly-preflight-guard`
+  - Dispatch: `buildbox-dispatch`
+  - Monitor (read-only): `buildbox-run-monitor`
+  - Triage: `buildbox-diag-triage`
+  - Queue maintenance: `queue-health-cleanup`
+  - Full loop: `nightly-runner-orchestrator`
+  - Lock ops: `session-lock-ops`
+- Each skill run should emit receipts under `.agents/skills/artifacts/<skill-slug>/`.
+
 ## OPTIONAL / SECONDARY
 - `nightly-evals.yml` uses runner label `headless-e2e`. If no runner with that label is online, it will stay queued. This is not a failure.
 - EngineerTick (laptop) is optional for local smoke; buildbox is the main remote iteration path.
@@ -37,6 +50,8 @@
 - WSL runner consumes `/mnt/c/polish/anviloop/<title>/queue`.
 
 ## Links
+- `AGENTS.md`
+- `.agents/skills/SKILLS_INDEX.md`
 - `Polish/Docs/NIGHTLY_PROTOCOL.md`
 - `Polish/Docs/NIGHTLY_SKILL_LOOP.md`
 - `Polish/Docs/MORNING_VIEW.md`
