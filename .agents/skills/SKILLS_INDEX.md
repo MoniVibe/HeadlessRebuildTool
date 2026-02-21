@@ -44,3 +44,4 @@ via:
 - `local-fallback-deck-run`: emergency-only local deck path.
 - `recurring-error-ledger-update`: append recurring error entries with evidence.
 - `intel-scoreboard-review`: ingest results + refresh scoreboard/headline.
+- `repo-parity-sync`: push and fast-forward sync desktop/laptop parity checkouts to one upstream ref.
