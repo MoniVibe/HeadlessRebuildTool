@@ -262,6 +262,21 @@ internal static class Program
         Directory.CreateDirectory(Path.GetDirectoryName(unityLog) ?? artifactRoot);
         File.WriteAllText(unityLog, $"UNITY_LOG_PLACEHOLDER utc={DateTime.UtcNow:O}{Environment.NewLine}", Encoding.ASCII);
 
+        var runtimeUnityLog = ResolveRuntimeUnityLogPath(unityLog, options.BuildId, logger);
+        if (!string.Equals(runtimeUnityLog, unityLog, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(runtimeUnityLog) ?? artifactRoot);
+                File.WriteAllText(runtimeUnityLog, $"UNITY_LOG_RUNTIME_PLACEHOLDER utc={DateTime.UtcNow:O}{Environment.NewLine}", Encoding.ASCII);
+            }
+            catch (Exception ex)
+            {
+                logger.Warn($"unity_runtime_log_init_failed path={runtimeUnityLog} err={ex.Message}");
+                runtimeUnityLog = unityLog;
+            }
+        }
+
         var buildOut = options.BuildOut;
         if (string.IsNullOrWhiteSpace(buildOut))
         {
@@ -284,7 +299,7 @@ internal static class Program
             "-projectPath", options.ProjectPath,
             "-buildTarget", BuildTarget,
             "-executeMethod", options.ExecuteMethod,
-            "-logFile", unityLog,
+            "-logFile", runtimeUnityLog,
             "-buildId", options.BuildId,
             "-commit", options.Commit,
             "-artifactRoot", artifactRoot,
@@ -330,6 +345,7 @@ internal static class Program
 
         logger.Info($"unity_start exe={options.UnityExe}");
         logger.Info($"unity_args {FormatArgsForLog(args)}");
+        logger.Info($"unity_log requested={unityLog} runtime={runtimeUnityLog}");
         logger.Info($"unity_stdout path={stdoutPath}");
         logger.Info($"unity_stderr path={stderrPath}");
         using var job = new JobObject();
@@ -407,10 +423,11 @@ internal static class Program
             job.Terminate(1);
             TryKillProcess(process);
             WaitForProcessExit(process, TimeSpan.FromSeconds(2), logger);
-            KillStrayUnityProcesses(unityLog, artifactRoot, options.ExecuteMethod, logger);
+            KillStrayUnityProcesses(runtimeUnityLog, artifactRoot, options.ExecuteMethod, logger);
             heartbeatStop.Set();
-            WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "timeout", logger);
+            WriteHeartbeatSample(heartbeatPath, progressPath, process, runtimeUnityLog, stdoutPath, stderrPath, "timeout", logger);
             WriteUnityExit(Path.Combine(logsDir, "unity_exit.json"), process, timedOut, logger);
+            TrySyncRuntimeLog(runtimeUnityLog, unityLog, logger);
             ReleaseProjectMutex(projectMutex, logger);
             return new UnityRunResult(process.HasExited ? process.ExitCode : 124, timedOut);
         }
@@ -418,10 +435,56 @@ internal static class Program
         process.WaitForExit();
         logger.Info($"unity_exit pid={process.Id} exit={process.ExitCode}");
         heartbeatStop.Set();
-        WriteHeartbeatSample(heartbeatPath, progressPath, process, unityLog, stdoutPath, stderrPath, "exit", logger);
+        WriteHeartbeatSample(heartbeatPath, progressPath, process, runtimeUnityLog, stdoutPath, stderrPath, "exit", logger);
         WriteUnityExit(Path.Combine(logsDir, "unity_exit.json"), process, timedOut, logger);
+        TrySyncRuntimeLog(runtimeUnityLog, unityLog, logger);
         ReleaseProjectMutex(projectMutex, logger);
         return new UnityRunResult(process.ExitCode, timedOut);
+    }
+
+    private static string ResolveRuntimeUnityLogPath(string requestedUnityLog, string buildId, Logger logger)
+    {
+        try
+        {
+            var requestedDir = Path.GetDirectoryName(requestedUnityLog) ?? ".";
+            var requestedLength = requestedUnityLog.Length;
+
+            // Unity can fail with exit=127 when -logFile path is too long on Windows runners.
+            // Keep short paths when the requested artifact path is deep.
+            if (requestedLength < 220 && Directory.Exists(requestedDir))
+            {
+                return requestedUnityLog;
+            }
+
+            var safeBuildId = Regex.Replace(buildId ?? "build", "[^A-Za-z0-9_.-]", "_");
+            var tempRoot = Path.Combine(Path.GetTempPath(), "TriUnityLogs");
+            Directory.CreateDirectory(tempRoot);
+            var runtimePath = Path.Combine(tempRoot, $"unity_{safeBuildId}.log");
+            logger.Info($"unity_log_shortpath_enabled requested_len={requestedLength} runtime={runtimePath}");
+            return runtimePath;
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_log_shortpath_fallback err={ex.Message}");
+            return requestedUnityLog;
+        }
+    }
+
+    private static void TrySyncRuntimeLog(string runtimeUnityLog, string requestedUnityLog, Logger logger)
+    {
+        try
+        {
+            if (string.Equals(runtimeUnityLog, requestedUnityLog, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            TryCopyFileWithRetries(runtimeUnityLog, requestedUnityLog, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"unity_log_sync_failed runtime={runtimeUnityLog} requested={requestedUnityLog} err={ex.Message}");
+        }
     }
 
     private static void WriteBuildStart(
